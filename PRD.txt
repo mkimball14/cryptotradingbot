@@ -1,0 +1,171 @@
+# Overview  
+The BloFin Isolated Futures Crypto Trading Bot is an automated trading system designed to trade cryptocurrency futures on the BloFin exchange using supply and demand (S/D) zone logic. The system aims to provide a reliable, risk-controlled approach to algorithmic trading with both automated execution and human monitoring capabilities. The bot will use multi-timeframe analysis, real-time price updates, and strict risk management to generate consistent returns while protecting capital.
+
+# Core Features  
+## Supply/Demand Zone Detection
+- Identifies drop-base-rally / rally-base-drop patterns on price charts
+- Tags zones with "freshness" and "confidence" scores to gauge quality
+- Uses multi-timeframe analysis (1H/4H for trend context, 15m for entries)
+- Includes at least one confluence filter (e.g., RSI) to improve signal quality
+
+## Risk Management
+- Limits risk to 1-2% of account balance per trade
+- Implements automated stop-loss and take-profit management
+- Includes circuit breakers to halt trading when necessary
+- Provides dynamic sizing options based on zone confidence
+
+## Trading Execution
+- Connects to BloFin via REST API and WebSocket for real-time data
+- Supports market, limit, stop, and reduce-only orders
+- Implements dry-run and backtest modes for strategy validation
+- Records detailed trade logs for performance analysis
+
+## MCP Server Architecture
+- Exposes functionality as modular tools for both AI and human use
+- Maintains persistent session state to handle restarts gracefully
+- Implements real-time signal processing with near-live candle/price data
+- Provides fail-safe mechanisms including a kill-switch
+
+## Monitoring Interface
+- Offers a lightweight web UI to monitor bot status and performance
+- Displays active trades, PnL, and zone visualizations
+- Allows users to toggle between run, dry-run, pause, or halt states
+- Presents system logs and alerts for quick issue identification
+
+# User Experience  
+## Primary Users
+- Crypto traders who want to automate their trading strategy
+- Technical users comfortable with monitoring and adjusting algorithmic systems
+- Users seeking a balance between automation and manual oversight
+
+## Key User Flows
+- Setting up the bot with appropriate risk parameters
+- Monitoring active trades and overall performance
+- Analyzing historical trades to improve strategy
+- Toggling between different operation modes (live, dry-run, halt)
+
+## UI/UX Considerations
+- Clean, data-focused dashboard with real-time updates
+- Clear visualization of supply/demand zones and price action
+- Intuitive controls for adjusting bot behavior
+- Mobile-responsive design for on-the-go monitoring
+
+# Technical Architecture  
+## System Components
+- Python-based MCP Server (FastAPI) handling core logic
+- BloFin API integration for market data and order execution
+- Web UI (FastAPI + Tailwind CSS/HTMX or Streamlit) for monitoring
+- SQLite database for persistent storage of trades and system state
+
+## Data Models
+- OHLCV (Open, High, Low, Close, Volume) for price analysis
+- Supply/Demand Zones with metadata (strength, freshness, etc.)
+- Trade records with entry, exit, risk parameters, and performance metrics
+- System state including active orders and position information
+
+## APIs and Integrations
+- BloFin REST API for account data and order placement
+- BloFin WebSocket for real-time price and order book data
+- Technical indicators via libraries like TA-Lib
+- Optional notification services (future extension)
+
+## Core Tools
+- get_ohlcv(): Fetch historical candle data
+- detect_zones(): Identify supply/demand zones
+- check_signal(): Apply entry logic with filters
+- place_order(): Execute trades with proper risk sizing
+- get_positions(): Monitor open positions
+- halt_trading(): Emergency kill-switch for trading activity
+
+# Development Roadmap  
+## MVP Requirements
+- Project Scaffold: FastAPI-based skeleton with defined MCP tool endpoints
+- API Connection: BloFin REST + WebSocket integration for data and trading
+- Zone Detection: Basic S/D zone identification with at least one filter (RSI)
+- SL/TP Enforcement: Automated bracket orders and stop management
+- Risk Controls: Implementation of 1-2% risk per trade rule
+- Logging & Stats: Basic trade recording and performance metrics
+- Dry-Run & Backtest: Testing pipeline for historical and paper trading
+
+## Web UI Phase
+- API Endpoints: Exposing bot state, logs, and trade data
+- Dashboard: Status page showing active trades, PnL, and controls
+- Zone Visualization: Charting interface for S/D zones
+- Trade Log: Filterable history of executed trades
+
+## Production Hardening
+- Extended forward testing in demo mode
+- Implementation of circuit breakers and fail-safes
+- Security hardening and proper hosting setup
+- Gradual capital allocation for live trading
+
+## Future Enhancements
+- ML-based zone scoring to improve entry quality
+- Auto-parameter tuning via backtesting
+- Multi-symbol support with correlation risk management
+- Enhanced notification system
+- Automated optimization via AI agents
+
+# Logical Dependency Chain
+## Foundation First
+1. API Connection and data retrieval
+2. Zone detection algorithm
+3. Basic risk management
+4. Order execution framework
+
+## Building the Experience
+5. Dry-run and backtest modes
+6. Logging and performance tracking
+7. Web UI dashboard
+8. Zone visualization
+
+## Enhancing Reliability
+9. Circuit breakers and fail-safes
+10. Session persistence
+11. Extended testing in various market conditions
+12. Security hardening
+
+# Risks and Mitigations  
+## Technical Challenges
+- Risk: API integration issues or rate limiting
+  Mitigation: Implement robust error handling and connection management
+
+- Risk: False signals from zone detection
+  Mitigation: Add multiple confluence filters and forward testing
+
+- Risk: System crashes during active trades
+  Mitigation: Persistent state management and automatic recovery
+
+## MVP Scope Management
+- Risk: Feature creep extending development timeline
+  Mitigation: Strictly prioritize core trading functionality for MVP
+
+- Risk: Overly complex strategy implementation
+  Mitigation: Start with simplified zone detection, add complexity iteratively
+
+## Risk Management
+- Risk: Unexpected market moves causing large losses
+  Mitigation: Strict stop-loss enforcement and circuit breakers
+
+- Risk: Synchronization issues between bot and exchange
+  Mitigation: Regular position reconciliation and failsafe mechanisms
+
+# Appendix  
+## Technical Requirements
+- Python 3.10+
+- FastAPI or Streamlit
+- pandas, numpy, TA-Lib for technical analysis
+- SQLite for data persistence
+
+## Trading Strategy Details
+- Supply/Demand zone parameters and detection logic
+- Entry confirmation signals and filtering approaches
+- Risk sizing calculations and position management
+- Backtesting methodology and performance metrics
+
+## Success Criteria
+- Tools functioning correctly and independently verified
+- Minimum of 10 successful live trades
+- Strict adherence to risk parameters
+- Consistent risk-to-reward ratio ≥1.5:1 in backtests
+- Proven fail-safe mechanisms under stress conditions 

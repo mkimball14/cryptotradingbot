@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "generatedAt": "2025-04-08T23:24:34.355Z",
+    "tasksAnalyzed": 10,
+    "thresholdScore": 5,
+    "projectName": "Your Project Name",
+    "usedResearch": false
+  },
+  "complexityAnalysis": [
+    {
+      "taskId": 1,
+      "taskTitle": "Setup Project Scaffold and BloFin API Integration",
+      "complexityScore": 6,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the BloFin API integration task into detailed subtasks covering project initialization, authentication implementation, REST endpoint creation, WebSocket setup, error handling, and configuration management with specific technical requirements for each.",
+      "reasoning": "This task involves setting up the foundational architecture and API integration which requires knowledge of FastAPI, REST, WebSockets, and the BloFin API. The complexity comes from implementing multiple connection types (REST and WebSocket) and ensuring proper error handling and reconnection logic."
+    },
+    {
+      "taskId": 2,
+      "taskTitle": "Implement OHLCV Data Retrieval and Storage",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Create detailed subtasks for the OHLCV data system covering data fetching, normalization, database schema design, model creation, multi-timeframe implementation, and data maintenance processes with specific technical approaches for each component.",
+      "reasoning": "This task requires implementing data retrieval, processing, normalization, and storage systems across multiple timeframes. The complexity lies in ensuring data consistency, handling API limitations, implementing proper database schema, and creating utility functions for transformation."
+    },
+    {
+      "taskId": 3,
+      "taskTitle": "Develop Supply/Demand Zone Detection Algorithm",
+      "complexityScore": 9,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Break down the supply/demand zone detection algorithm implementation into specific subtasks covering pattern recognition logic, scoring algorithms, metadata management, filter implementation, multi-timeframe analysis, and zone status updating with detailed technical approaches.",
+      "reasoning": "This is one of the most complex tasks as it involves advanced pattern recognition, scoring algorithms, and multi-timeframe analysis. Creating reliable detection for drop-base-rally and rally-base-drop patterns with quality scoring requires significant algorithmic complexity and domain expertise."
+    },
+    {
+      "taskId": 4,
+      "taskTitle": "Implement Risk Management System",
+      "complexityScore": 8,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Develop detailed subtasks for the risk management system covering position sizing calculations, stop-loss logic, take-profit targeting, dynamic sizing based on confidence, circuit breaker implementation, parameter validation, and balance monitoring with specific formulas and approaches.",
+      "reasoning": "Risk management is critical and complex, requiring precise calculations for position sizing, stop-loss placement, and take-profit targeting. The complexity increases with dynamic sizing based on zone confidence and implementing circuit breaker conditions for safety."
+    },
+    {
+      "taskId": 5,
+      "taskTitle": "Build Order Execution Framework",
+      "complexityScore": 8,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Create detailed subtasks for the order execution framework covering various order type implementations, bracket order functionality, signal confirmation logic, order tracking system, position monitoring, and emergency controls with specific technical requirements.",
+      "reasoning": "This task integrates multiple complex components (signal detection, risk management, API interaction) and requires handling various order types, bracket orders, position tracking, and emergency controls. The dependencies on other complex tasks (3, 4) increase its overall complexity."
+    },
+    {
+      "taskId": 6,
+      "taskTitle": "Implement Dry-Run and Backtest Modes",
+      "complexityScore": 9,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Break down the simulation and backtesting system into detailed subtasks covering dry-run mode implementation, backtest engine development, performance metrics calculation, trade simulation under various conditions, reporting functionality, parameter optimization, and comparison tools with specific technical approaches.",
+      "reasoning": "Creating accurate simulation environments is highly complex, requiring market simulation, performance metrics, and parameter optimization. The backtest engine must process historical data efficiently while accurately simulating trading conditions, and the optimization capabilities add significant complexity."
+    },
+    {
+      "taskId": 7,
+      "taskTitle": "Develop Trade Logging and Performance Tracking",
+      "complexityScore": 6,
+      "recommendedSubtasks": 3,
+      "expansionPrompt": "Create detailed subtasks for the trade logging and performance tracking system covering database schema design, comprehensive trade recording, performance metrics calculation, visualization preparation, export functionality, and system logging with specific technical requirements.",
+      "reasoning": "This task involves database design, metrics tracking, and reporting functionality. While not as algorithmically complex as some other tasks, it requires careful data modeling and comprehensive logging to ensure all trade data and performance metrics are properly captured."
+    },
+    {
+      "taskId": 8,
+      "taskTitle": "Implement Session Persistence and Recovery",
+      "complexityScore": 8,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Develop detailed subtasks for session persistence and recovery covering state storage design, serialization/deserialization implementation, recovery procedures, position reconciliation, order synchronization, trade recovery automation, and health monitoring with specific technical approaches.",
+      "reasoning": "Ensuring system reliability through crashes and restarts is complex, requiring careful state management, serialization, and recovery procedures. The position reconciliation and order synchronization with the exchange add significant complexity to maintain system integrity."
+    },
+    {
+      "taskId": 9,
+      "taskTitle": "Build Web UI Dashboard",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the web UI dashboard development into detailed subtasks covering API endpoint creation, frontend implementation with Tailwind/HTMX, real-time updates, data visualization, control panel implementation, responsive design, and logging interface with specific technical requirements.",
+      "reasoning": "Creating a responsive, real-time dashboard involves both backend and frontend work. The complexity comes from implementing WebSocket updates, data visualization, and system controls while ensuring a responsive design that works across devices."
+    },
+    {
+      "taskId": 10,
+      "taskTitle": "Implement Zone Visualization and Advanced Monitoring",
+      "complexityScore": 7,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Create detailed subtasks for zone visualization and monitoring covering charting library integration, zone overlay implementation, price action display, multi-timeframe switching, alert system, indicator visualization, and analytics dashboard with specific technical approaches.",
+      "reasoning": "This task requires integrating with charting libraries and creating complex visualizations of zones, price action, and performance metrics. The multi-timeframe functionality and custom indicator visualization add to the complexity, requiring both technical and UX considerations."
+    }
+  ]
+}
