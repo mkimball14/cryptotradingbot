@@ -1,0 +1,66 @@
+---
+description: Guidelines for managing task status using task-master to ensure accurate progress tracking
+globs: **/*
+alwaysApply: true
+---
+
+- **Task Status Management Requirements**
+  - Always mark current task as "in_progress" when starting work
+    ```bash
+    # When starting a task
+    task-master set-status --id=<task_id> --status=in_progress
+    ```
+  - Update subtask status similarly
+    ```bash
+    # For subtasks, use dot notation
+    task-master set-status --id=<task_id>.<subtask_id> --status=in_progress
+    ```
+  - Mark tasks as "done" only after:
+    - All code changes are committed
+    - Tests are passing
+    - Code review is complete (if applicable)
+    ```bash
+    task-master set-status --id=<task_id> --status=done
+    ```
+
+- **Status Workflow**
+  - Status Transitions:
+    - pending → in_progress → done
+    - pending → deferred (if postponed)
+    - in_progress → blocked (if dependencies or issues arise)
+  
+  - Check current task status:
+    ```bash
+    task-master list --status=in_progress
+    ```
+
+- **Best Practices**
+  - Update status at the start of each coding session
+  - Keep only one task "in_progress" at a time
+  - Update parent task status when all subtasks are complete
+  - Add notes when marking tasks as blocked or deferred
+    ```bash
+    task-master set-status --id=<task_id> --status=blocked --note="Waiting for API access"
+    ```
+
+- **Status Monitoring**
+  - Regularly check task status:
+    ```bash
+    # View all tasks
+    task-master list
+    
+    # Filter by status
+    task-master list --status=in_progress
+    task-master list --status=blocked
+    ```
+  
+  - Track task dependencies:
+    ```bash
+    # Show task with dependencies
+    task-master show <task_id>
+    ```
+
+- **Status Reporting**
+  - Use task-master list for daily standups
+  - Include status in commit messages
+  - Reference task IDs in PR descriptions 

@@ -9,6 +9,7 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel, Field
 from app.core.config import Settings
+from enum import Enum
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -21,17 +22,17 @@ class CoinbaseError(Exception):
         self.response = response
         super().__init__(self.message)
 
-class OrderSide(str):
+class OrderSide(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
 
-class OrderType(str):
+class OrderType(str, Enum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
     STOP = "STOP"
     STOP_LIMIT = "STOP_LIMIT"
 
-class OrderStatus(str):
+class OrderStatus(str, Enum):
     PENDING = "PENDING"
     OPEN = "OPEN"
     FILLED = "FILLED"
