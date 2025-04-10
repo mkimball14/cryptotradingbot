@@ -1,5 +1,5 @@
 # Overview  
-The BloFin Isolated Futures Crypto Trading Bot is an automated trading system designed to trade cryptocurrency futures on the BloFin exchange using supply and demand (S/D) zone logic. The system aims to provide a reliable, risk-controlled approach to algorithmic trading with both automated execution and human monitoring capabilities. The bot will use multi-timeframe analysis, real-time price updates, and strict risk management to generate consistent returns while protecting capital.
+The Crypto Trading Bot is an automated trading system designed to trade cryptocurrency spot markets on Coinbase using supply and demand (S/D) zone logic. The system aims to provide a reliable, risk-controlled approach to algorithmic trading with both automated execution and human monitoring capabilities. The bot will use multi-timeframe analysis, real-time price updates, and strict risk management to generate consistent returns while protecting capital.
 
 # Core Features  
 ## Supply/Demand Zone Detection
@@ -15,8 +15,8 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 - Provides dynamic sizing options based on zone confidence
 
 ## Trading Execution
-- Connects to BloFin via REST API and WebSocket for real-time data
-- Supports market, limit, stop, and reduce-only orders
+- Connects to Coinbase Advanced API via REST and WebSocket for real-time data
+- Supports market and limit orders with time-in-force options
 - Implements dry-run and backtest modes for strategy validation
 - Records detailed trade logs for performance analysis
 
@@ -53,7 +53,7 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 # Technical Architecture  
 ## System Components
 - Python-based MCP Server (FastAPI) handling core logic
-- BloFin API integration for market data and order execution
+- Coinbase Advanced API integration for market data and order execution
 - Web UI (FastAPI + Tailwind CSS/HTMX or Streamlit) for monitoring
 - SQLite database for persistent storage of trades and system state
 
@@ -64,8 +64,8 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 - System state including active orders and position information
 
 ## APIs and Integrations
-- BloFin REST API for account data and order placement
-- BloFin WebSocket for real-time price and order book data
+- Coinbase Advanced REST API for account data and order placement
+- Coinbase WebSocket for real-time price and order book data
 - Technical indicators via libraries like TA-Lib
 - Optional notification services (future extension)
 
@@ -80,9 +80,9 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 # Development Roadmap  
 ## MVP Requirements
 - Project Scaffold: FastAPI-based skeleton with defined MCP tool endpoints
-- API Connection: BloFin REST + WebSocket integration for data and trading
+- API Connection: Coinbase Advanced API integration for data and trading
 - Zone Detection: Basic S/D zone identification with at least one filter (RSI)
-- SL/TP Enforcement: Automated bracket orders and stop management
+- Order Management: Market/limit order placement with proper risk sizing
 - Risk Controls: Implementation of 1-2% risk per trade rule
 - Logging & Stats: Basic trade recording and performance metrics
 - Dry-Run & Backtest: Testing pipeline for historical and paper trading
@@ -105,6 +105,7 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 - Multi-symbol support with correlation risk management
 - Enhanced notification system
 - Automated optimization via AI agents
+- Expansion to futures trading on supported exchanges
 
 # Logical Dependency Chain
 ## Foundation First
@@ -156,6 +157,7 @@ The BloFin Isolated Futures Crypto Trading Bot is an automated trading system de
 - FastAPI or Streamlit
 - pandas, numpy, TA-Lib for technical analysis
 - SQLite for data persistence
+- coinbase-advanced-py (Official Coinbase Advanced API Python client)
 
 ## Trading Strategy Details
 - Supply/Demand zone parameters and detection logic
