@@ -1,14 +1,16 @@
+from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, List, Dict, Any, Union
+from uuid import UUID, uuid4
+from pydantic import BaseModel, Field
 from decimal import Decimal
 
 class TimeInForce(str, Enum):
     """Time in force options for orders."""
-    GTC = "GTC"  # Good Till Cancelled
-    GTT = "GTT"  # Good Till Time
-    IOC = "IOC"  # Immediate Or Cancel
-    FOK = "FOK"  # Fill Or Kill
+    GTC = "gtc"  # Good Till Canceled
+    GTD = "gtd"  # Good Till Date
+    IOC = "ioc"  # Immediate or Cancel
+    FOK = "fok"  # Fill or Kill
 
 class OrderSide(str, Enum):
     """Order side - buy or sell."""
@@ -33,12 +35,27 @@ class OrderStatus(str, Enum):
 
 class OrderBase(BaseModel):
     """Base model for orders."""
-    product_id: str
-    side: OrderSide
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    product_id: str = Field(default="BTC-USD")
     type: OrderType
-    size: Decimal
+    side: OrderSide
+    size: float = Field(default=0.0)
+    price: Optional[float] = None
+    stop_price: Optional[float] = None
+    filled_price: Optional[float] = None
+    quantity: Optional[float] = None
+    status: OrderStatus = OrderStatus.OPEN
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: Optional[datetime] = None
+    done_at: Optional[datetime] = None
+    done_reason: Optional[str] = None
     time_in_force: Optional[TimeInForce] = TimeInForce.GTC
-    client_order_id: Optional[str] = None
+    filled_size: float = 0
+    filled_value: float = 0
+    fees: float = 0
+    realized_pnl: float = 0
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    client_oid: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 class MarketOrder(OrderBase):
@@ -48,5 +65,5 @@ class MarketOrder(OrderBase):
 class LimitOrder(OrderBase):
     """Limit order model."""
     type: OrderType = OrderType.LIMIT
-    price: Decimal
-    post_only: Optional[bool] = False 
+    price: float
+    post_only: bool = False 

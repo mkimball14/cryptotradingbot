@@ -1,11 +1,11 @@
 import pytest
-from src.risk_manager import calculate_position_size, calculate_stop_loss, calculate_take_profit, get_zone_confidence_tier, check_daily_drawdown, check_consecutive_losses, check_max_open_positions
+from app.core.risk_manager import calculate_position_size, calculate_stop_loss, calculate_take_profit, get_zone_confidence_tier, check_daily_drawdown, check_consecutive_losses, check_max_open_positions
 
 # Use pytest.approx for float comparisons
 from pytest import approx
 
-# Need Zone model for confidence test
-from src.database.models import Zone 
+# Need Zone model for confidence test - Updated import path
+from app.core.database.models import Zone 
 
 def test_calculate_position_size_long():
     """Test position sizing for a long trade."""

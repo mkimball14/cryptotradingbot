@@ -1,0 +1,634 @@
+{
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Setup Project Scaffold and Coinbase Advanced API Integration",
+      "description": "Create the FastAPI-based MCP server structure and implement Coinbase Advanced API connection for both REST and WebSocket data streams",
+      "status": "done",
+      "dependencies": [],
+      "priority": "high",
+      "details": "1. Initialize Python project with FastAPI framework\n2. Implement Coinbase Advanced API client with authentication\n3. Create REST endpoints for account data, order placement, and market information\n4. Set up WebSocket connection for real-time price updates\n5. Implement error handling and reconnection logic\n6. Create basic data models for market data\n7. Add configuration management for API keys and settings",
+      "testStrategy": "Verify API connectivity by fetching account balance and market data. Test WebSocket connection stability over 24 hours. Ensure proper error handling with mocked API failures.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Initialize FastAPI Project Structure with Configuration Management",
+          "description": "Set up the basic FastAPI project structure with configuration management for API keys and environment settings",
+          "dependencies": [],
+          "details": "Implementation details:\n1. Create a new Python project with appropriate directory structure (app/, tests/, etc.)\n2. Set up virtual environment and install required packages (fastapi, uvicorn, httpx, websockets, pydantic, coinbase-advanced-py)\n3. Create a main.py file with FastAPI application initialization\n4. Implement configuration management using environment variables and/or config files\n   - Create config.py for managing Coinbase API keys, URLs, and other settings\n   - Implement loading from .env file for local development\n   - Add validation for required configuration values\n5. Create basic project documentation (README.md)\n6. Set up logging configuration\n7. Testing approach: Write unit tests for configuration loading and validation",
+          "status": "done",
+          "parentTaskId": 1
+        },
+        {
+          "id": 2,
+          "title": "Implement Coinbase Advanced API Client with Authentication",
+          "description": "Create a client module for Coinbase Advanced API with authentication handling and basic request functionality",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation details:\n1. Create a dedicated coinbase_client.py module within the app/\n2. Implement API client class with:\n   - Authentication method using Coinbase API keys from configuration\n   - HTTP request methods (get, post, put, delete) with proper headers\n   - Request signing mechanism according to Coinbase Advanced API requirements\n   - Rate limiting and throttling mechanisms based on Coinbase limits\n3. Create data models (using Pydantic) for API responses\n4. Implement session management with connection pooling\n5. Add basic error handling for connection issues\n6. Testing approach:\n   - Mock HTTP responses to test authentication logic\n   - Unit test request formation and signing\n   - Create integration tests with Coinbase sandbox environment",
+          "status": "done",
+          "parentTaskId": 1
+        },
+        {
+          "id": 3,
+          "title": "Create REST API Endpoints for Account and Market Data",
+          "description": "Implement FastAPI endpoints that connect to Coinbase Advanced API for account information, order placement, and market data",
+          "dependencies": [
+            2
+          ],
+          "details": "Implementation details:\n1. Create router modules for different endpoint categories:\n   - app/routers/account.py for account-related endpoints\n   - app/routers/orders.py for order management\n   - app/routers/market.py for market data\n2. Implement specific endpoints in each router:\n   - GET /account/balance - retrieve account balances\n   - GET /account/positions - get current positions\n   - POST /orders - place new orders with validation\n   - GET /orders/{id} - retrieve order details\n   - GET /market/instruments - list available trading instruments\n   - GET /market/ticker/{symbol} - get current ticker information\n3. Create request/response models using Pydantic\n4. Implement proper error handling with meaningful error responses\n5. Add input validation using Pydantic models\n6. Include endpoint documentation using FastAPI's built-in docs\n7. Testing approach:\n   - Unit tests for request validation\n   - Integration tests with Coinbase sandbox\n   - Test error scenarios and edge cases",
+          "status": "done",
+          "parentTaskId": 1
+        },
+        {
+          "id": 4,
+          "title": "Implement WebSocket Connection for Real-time Market Data",
+          "description": "Set up WebSocket client to connect to Coinbase Advanced API's real-time data feeds and expose WebSocket endpoints for clients",
+          "dependencies": [
+            2
+          ],
+          "details": "Implementation details:\n1. Create a dedicated websocket_client.py module\n2. Implement WebSocket connection to Coinbase Advanced API:\n   - Authentication and connection establishment using API keys\n   - Message parsing and handling for Coinbase's message format\n   - Subscription management for different market data channels\n   - Heartbeat mechanism as per Coinbase's requirements\n   - Reconnection logic with exponential backoff\n3. Create data models for WebSocket messages\n4. Implement a WebSocket server endpoint in FastAPI to relay data to clients:\n   - Create /ws/{stream} endpoint for client connections\n   - Implement client subscription management\n   - Add message forwarding from Coinbase to connected clients\n5. Create an in-memory cache for latest market data\n6. Implement proper error handling for WebSocket connections\n7. Testing approach:\n   - Unit tests for message parsing\n   - Mock WebSocket server for testing client reconnection\n   - Load testing for multiple client connections",
+          "status": "done",
+          "parentTaskId": 1
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Implement OHLCV Data Retrieval and Storage",
+      "description": "Build the core functionality to fetch, process, and store historical candle data across multiple timeframes",
+      "status": "done",
+      "dependencies": [
+        1
+      ],
+      "priority": "high",
+      "details": "1. Create get_ohlcv() function to fetch historical data from Coinbase Advanced API\n2. Implement data normalization and cleaning\n3. Set up SQLite database schema for OHLCV storage\n4. Create data models for candle information\n5. Implement multi-timeframe data retrieval (15m, 1H, 4H)\n6. Add functionality to update and maintain recent candle data\n7. Create utility functions for data transformation and analysis",
+      "testStrategy": "Verify data integrity by comparing retrieved data with exchange UI values. Test database persistence and retrieval speed. Validate multi-timeframe synchronization.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement API Connection and Raw OHLCV Data Fetching",
+          "description": "Create the core functionality to connect to Coinbase Advanced API and retrieve raw OHLCV data with proper error handling and rate limiting",
+          "dependencies": [],
+          "details": "1. Set up API client configuration with authentication parameters\n2. Create get_ohlcv() function that accepts symbol, timeframe, and limit parameters\n3. Implement error handling for API connection issues (network errors, authentication failures)\n4. Add rate limiting to prevent API throttling according to Coinbase's limits\n5. Create a retry mechanism for failed requests\n6. Format the raw response into a standardized data structure (pandas DataFrame or similar)\n7. Test with multiple symbols and timeframes to verify correct data retrieval\n8. Document function parameters and return values",
+          "status": "done",
+          "parentTaskId": 2
+        },
+        {
+          "id": 2,
+          "title": "Implement Data Normalization and Cleaning Pipeline",
+          "description": "Create a data processing pipeline to clean, normalize and validate OHLCV data before storage",
+          "dependencies": [
+            1
+          ],
+          "details": "1. Create functions to validate data integrity (check for missing values, out-of-order timestamps)\n2. Implement data normalization to ensure consistent decimal precision and time formats\n3. Add outlier detection and handling for price/volume anomalies\n4. Create functionality to handle timezone conversions to UTC\n5. Implement gap detection for missing candles in the data sequence\n6. Add data enrichment to calculate additional fields (typical price, candle body size, etc.)\n7. Create unit tests for each normalization function\n8. Document the normalization pipeline with input/output specifications",
+          "status": "done",
+          "parentTaskId": 2
+        },
+        {
+          "id": 3,
+          "title": "Design and Implement SQLite Database Schema for OHLCV Storage",
+          "description": "Create the database schema, models, and storage functions for efficient OHLCV data persistence",
+          "dependencies": [
+            2
+          ],
+          "details": "1. Design SQLite database schema with tables for symbols, timeframes, and OHLCV data\n2. Create appropriate indexes for timestamp and symbol-based queries\n3. Implement data models using an ORM (SQLAlchemy or similar) for candle information\n4. Create functions for bulk insertion of normalized data\n5. Implement query functions to retrieve data by symbol, timeframe, and date range\n6. Add functionality to check for existing data to prevent duplicates\n7. Create database migration system for future schema changes\n8. Test database performance with large datasets to ensure query efficiency",
+          "status": "done",
+          "parentTaskId": 2
+        },
+        {
+          "id": 4,
+          "title": "Implement Multi-Timeframe Data Management System",
+          "description": "Create a comprehensive system to manage data across multiple timeframes with automated updates and maintenance",
+          "dependencies": [
+            3
+          ],
+          "details": "1. Implement timeframe-specific data retrieval for 15m, 1H, and 4H intervals\n2. Create a scheduler for regular data updates based on timeframe frequency\n3. Implement data resampling to derive higher timeframes from lower timeframes when possible\n4. Add functionality to detect and fill gaps in historical data\n5. Create a system to handle partial candles for the current period\n6. Implement data retention policies for different timeframes\n7. Add utilities for data export to various formats (CSV, JSON)\n8. Create a monitoring system to track data completeness and freshness\n9. Test the entire system with multiple symbols across all timeframes",
+          "status": "done",
+          "parentTaskId": 2
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Develop Supply/Demand Zone Detection Algorithm",
+      "description": "Implement the core zone detection logic to identify drop-base-rally and rally-base-drop patterns with quality scoring",
+      "status": "done",
+      "dependencies": [
+        2
+      ],
+      "priority": "high",
+      "details": "1. Create detect_zones() function to identify S/D zones\n2. Implement pattern recognition for drop-base-rally and rally-base-drop\n3. Add 'freshness' and 'confidence' scoring algorithms\n4. Implement zone metadata storage\n5. Create RSI confluence filter\n6. Develop multi-timeframe analysis logic\n7. Add functions to update zone status based on price action",
+      "testStrategy": "Backtest zone detection against historical data with known S/D zones. Validate scoring accuracy with manual review. Test performance on different market conditions.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement Base Pattern Recognition Logic",
+          "description": "Create the core functions to detect drop-base-rally (demand) and rally-base-drop (supply) patterns in price data",
+          "dependencies": [],
+          "details": "Implementation steps:\n1. Create a new module `zone_detection.py` with a `detect_zones()` function that takes OHLCV data as input\n2. Implement pattern recognition algorithm for drop-base-rally (demand zones):\n   - Identify significant price drops (using ATR or percentage-based thresholds)\n   - Detect consolidation areas (bases) after drops where price moves sideways\n   - Identify rallies after the base formation\n3. Implement pattern recognition for rally-base-drop (supply zones):\n   - Identify significant price rallies\n   - Detect consolidation areas after rallies\n   - Identify drops after the base formation\n4. Extract key zone information: entry point, exit point, high/low boundaries\n5. Return detected zones as a structured data format (list of dictionaries)\n\nTesting approach:\n- Create unit tests with known price patterns to verify detection accuracy\n- Visualize detected patterns on sample charts to manually verify correctness",
+          "status": "done",
+          "parentTaskId": 3
+        },
+        {
+          "id": 2,
+          "title": "Develop Zone Scoring Algorithms",
+          "description": "Implement algorithms to score detected zones based on 'freshness' (recency) and 'confidence' (pattern quality)",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation steps:\n1. Extend the zone detection module to add scoring functionality\n2. Implement 'freshness' scoring algorithm:\n   - Calculate time elapsed since zone formation\n   - Apply decay function to reduce score as zones age\n   - Normalize scores to 0-100 range\n3. Implement 'confidence' scoring algorithm based on pattern quality:\n   - Score based on clarity of the base formation (tightness of consolidation)\n   - Score based on strength of preceding move (drop or rally magnitude)\n   - Score based on volume characteristics during pattern formation\n   - Score based on candlestick patterns within the base\n4. Create a combined quality score that weights freshness and confidence\n5. Add scoring data to zone metadata\n\nTesting approach:\n- Unit test each scoring component with controlled inputs\n- Create test cases for zones of varying quality to verify scoring accuracy\n- Implement visualization of scored zones to verify intuitive results",
+          "status": "done",
+          "parentTaskId": 3
+        },
+        {
+          "id": 3,
+          "title": "Implement Zone Metadata Management",
+          "description": "Create data structures and functions to store, retrieve, and manage zone metadata",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Implementation steps:\n1. Design a comprehensive zone metadata structure including:\n   - Zone type (supply/demand)\n   - Price boundaries (entry, exit, high, low)\n   - Formation timestamps (start, end)\n   - Scoring information (freshness, confidence, combined score)\n   - Current status (active, tested, broken, untested)\n   - Historical interactions with price\n2. Implement functions to create and store zone metadata\n3. Create serialization/deserialization methods for persistence\n4. Implement query functions to retrieve zones by type, status, score, etc.\n5. Add functionality to track zone interactions across time\n\nTesting approach:\n- Unit test metadata creation with various zone types\n- Test serialization/deserialization for data integrity\n- Verify query functions return expected results\n- Test with large datasets to ensure efficient storage and retrieval",
+          "status": "done",
+          "parentTaskId": 3
+        },
+        {
+          "id": 4,
+          "title": "Develop RSI Confluence and Filtering Logic",
+          "description": "Implement RSI-based filtering to improve zone quality and add confluence detection",
+          "dependencies": [
+            1,
+            3
+          ],
+          "details": "Implementation steps:\n1. Extend zone detection to incorporate RSI (Relative Strength Index) analysis\n2. Implement RSI calculation function or integrate with existing indicators\n3. Create filtering logic to identify zones with RSI confluence:\n   - For demand zones: identify when RSI is in oversold territory\n   - For supply zones: identify when RSI is in overbought territory\n4. Add RSI values to zone metadata\n5. Implement functions to filter zones based on RSI confluence criteria\n6. Create scoring adjustment based on RSI confluence strength\n\nTesting approach:\n- Unit test RSI calculation against known values\n- Test filtering logic with various RSI scenarios\n- Verify that high-confluence zones have appropriate score adjustments\n- Create visualization tests to confirm RSI confluence visually",
+          "status": "done",
+          "parentTaskId": 3
+        },
+        {
+          "id": 5,
+          "title": "Implement Multi-timeframe Analysis and Zone Status Updates",
+          "description": "Develop functionality for multi-timeframe zone analysis and dynamic status updates based on price action",
+          "dependencies": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "details": "Implementation steps:\n1. Implement multi-timeframe zone detection:\n   - Create functions to detect zones across different timeframes\n   - Develop logic to merge/align zones from different timeframes\n   - Implement scoring adjustments for zones confirmed across timeframes\n2. Create zone status update functionality:\n   - Implement logic to detect when price approaches a zone\n   - Create functions to update zone status when price tests a zone\n   - Develop logic to mark zones as broken when price moves through them\n   - Add functions to track repeated tests of the same zone\n3. Implement zone strength reassessment based on price interaction\n4. Create event notification system for zone status changes\n5. Develop functions to clean up/archive old or invalid zones\n\nTesting approach:\n- Test with historical data spanning multiple timeframes\n- Create scenarios with zone tests, breaks, and retests\n- Verify correct status transitions in various price action scenarios\n- Test notification system for expected alerts\n- Verify zone cleanup works correctly for outdated zones",
+          "status": "done",
+          "parentTaskId": 3
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Implement Risk Management System",
+      "description": "Create the risk management module to enforce position sizing, stop-loss, and take-profit rules",
+      "status": "done",
+      "dependencies": [
+        1
+      ],
+      "priority": "high",
+      "details": "1. Implement position sizing based on 1-2% account risk\n2. Create stop-loss calculation logic\n3. Develop take-profit targeting based on zone analysis\n4. Add dynamic sizing based on zone confidence\n5. Implement circuit breaker conditions\n6. Create risk parameter validation\n7. Add account balance monitoring",
+      "testStrategy": "Test position sizing with various account balances. Verify stop-loss enforcement with simulated price movements. Validate circuit breaker triggers under extreme conditions.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement Position Sizing and Risk Calculation Core",
+          "description": "Develop the foundation of the risk management system with position sizing calculations based on account risk percentage and core risk parameter validation",
+          "dependencies": [],
+          "details": "Implementation steps:\n1. Create a `RiskManager` class with methods for calculating position sizes\n2. Implement the core position sizing formula: Position Size = (Account Balance \u00d7 Risk Percentage) \u00f7 (Entry Price - Stop Loss Price)\n3. Add risk parameter validation for acceptable risk percentages (1-2%)\n4. Implement account balance monitoring to fetch current balance\n5. Create unit tests with various account sizes and risk parameters\n6. Test edge cases like very small account balances, maximum allowed risk\n7. Ensure position sizes are rounded to appropriate decimal places based on the instrument\n8. Add logging for risk calculations for later auditing",
+          "status": "done",
+          "parentTaskId": 4
+        },
+        {
+          "id": 2,
+          "title": "Implement Stop-Loss and Take-Profit Logic",
+          "description": "Develop the logic for calculating stop-loss levels and take-profit targets based on market analysis and risk parameters",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation steps:\n1. Extend the `RiskManager` class with stop-loss calculation methods\n2. Implement ATR-based stop-loss calculations: Stop Distance = ATR \u00d7 Multiplier\n3. Add support for fixed pip/point-based stop-loss calculations\n4. Implement take-profit targeting using risk-reward ratios (1:2, 1:3)\n5. Add zone-based take-profit calculations using support/resistance levels\n6. Create methods to validate stop-loss distances (prevent too tight stops)\n7. Implement tests with mock price data and various market volatility scenarios\n8. Add safety checks to ensure stop-loss is never beyond max allowable risk",
+          "status": "done",
+          "parentTaskId": 4
+        },
+        {
+          "id": 3,
+          "title": "Implement Dynamic Position Sizing Based on Zone Confidence",
+          "description": "Create a system that adjusts position size based on trading zone confidence levels and market conditions",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Implementation steps:\n1. Create a `ConfidenceCalculator` component that interfaces with the zone analysis system\n2. Implement confidence scoring algorithm (0-100%) based on multiple indicators\n3. Add position size modifiers based on confidence scores:\n   - High confidence (>80%): Use full calculated position size\n   - Medium confidence (50-80%): Use 75% of calculated size\n   - Low confidence (<50%): Use 50% of calculated size or skip trade\n4. Implement position size caps based on volatility measures\n5. Add methods to document confidence factors for each trade\n6. Create unit tests with various confidence scenarios\n7. Implement integration tests with mock zone analysis data\n8. Add configuration options for confidence thresholds and modifiers",
+          "status": "done",
+          "parentTaskId": 4
+        },
+        {
+          "id": 4,
+          "title": "Implement Circuit Breaker and Advanced Risk Controls",
+          "description": "Develop circuit breaker mechanisms to halt trading under specific conditions and implement advanced risk monitoring features",
+          "dependencies": [
+            1,
+            2,
+            3
+          ],
+          "details": "Implementation steps:\n1. Create a `CircuitBreaker` component that monitors trading conditions\n2. Implement consecutive loss detection (halt after X consecutive losses)\n3. Add daily loss limit monitoring (halt if daily drawdown exceeds Y%)\n4. Implement unusual volatility detection using ATR comparisons\n5. Create time-based circuit breakers (e.g., no trading during high-impact news)\n6. Add methods to gradually reduce position sizes after losses\n7. Implement account balance threshold warnings\n8. Create a dashboard/reporting system for risk metrics\n9. Add unit tests for all circuit breaker conditions\n10. Implement integration tests simulating various market conditions\n11. Create a manual override system for emergency situations",
+          "status": "done",
+          "parentTaskId": 4
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Build Order Execution Framework",
+      "description": "Develop the trading execution system to place and manage orders based on detected signals",
+      "status": "done",
+      "dependencies": [
+        1,
+        3,
+        4
+      ],
+      "priority": "high",
+      "details": "1. Create place_order() function for market, limit, stop orders\n2. Implement bracket order functionality (entry with SL/TP)\n3. Add reduce-only order support\n4. Develop check_signal() function for entry confirmation\n5. Create order tracking and management system\n6. Implement position monitoring via get_positions()\n7. Add halt_trading() emergency kill-switch",
+      "testStrategy": "Test order placement in dry-run mode. Verify order execution accuracy. Test kill-switch functionality. Validate proper handling of various order types.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement Basic Order Placement Functions",
+          "description": "Create core order placement functions for market, limit, and stop orders with proper error handling and validation.",
+          "dependencies": [],
+          "details": "Implementation details:\n1. Create a base `place_order()` function that takes parameters: symbol, side (buy/sell), order_type, quantity, price (optional), stop_price (optional)\n2. Implement specific helper functions: `place_market_order()`, `place_limit_order()`, and `place_stop_order()`\n3. Add parameter validation (check for valid symbol, positive quantity, etc.)\n4. Implement error handling for API connection issues, insufficient balance, etc.\n5. Return standardized order response with order_id, status, and timestamp\n6. Add logging for all order activities\n7. Testing approach: Create unit tests with mock API responses for each order type, test error handling with invalid inputs",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 2,
+          "title": "Develop Bracket Order System",
+          "description": "Implement bracket order functionality to create entry orders with associated stop-loss and take-profit orders.",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation details:\n1. Create `place_bracket_order()` function that takes: symbol, side, entry_price, quantity, stop_loss_price, take_profit_price\n2. Implement logic to place the main entry order using functions from subtask 1\n3. Add functionality to track the entry order's status until filled\n4. Once entry is filled, place the stop-loss order with reduce-only flag\n5. Place the take-profit order with reduce-only flag\n6. Create a data structure to track all components of a bracket order together\n7. Implement cancellation of pending SL/TP if entry is cancelled\n8. Testing approach: Test the full bracket order lifecycle with mock API responses, verify proper linking between entry, SL and TP orders",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 3,
+          "title": "Create Signal Confirmation System",
+          "description": "Develop the check_signal() function to validate trading signals before execution and implement signal filtering logic.",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation details:\n1. Implement `check_signal()` function that takes a signal object with attributes: symbol, direction, strength, timestamp\n2. Add validation checks: timeframe confirmation, volume confirmation, trend alignment\n3. Implement configurable filters (minimum signal strength, cooldown period between trades)\n4. Create a signal scoring system to rank signal quality\n5. Add market condition checks (volatility, spread, etc.) to avoid trading during unfavorable conditions\n6. Integrate with the order placement functions from subtask 1\n7. Return a boolean result indicating whether to execute the trade or not\n8. Testing approach: Create test cases with various signal scenarios, verify that weak/invalid signals are properly filtered out",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 4,
+          "title": "Build Order Tracking and Management System",
+          "description": "Develop a system to track and manage all active and historical orders with status updates and modification capabilities.",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Implementation details:\n1. Create an `OrderTracker` class to store and manage order information\n2. Implement methods: `add_order()`, `update_order_status()`, `get_order_by_id()`, `get_active_orders()`\n3. Create a persistent storage mechanism (database or file-based) to maintain order history\n4. Implement `modify_order()` function to change price/quantity of existing orders\n5. Add `cancel_order()` and `cancel_all_orders()` functions\n6. Create a periodic order status update mechanism that polls the exchange API\n7. Implement event handling for order fills, cancellations, and rejections\n8. Testing approach: Test order lifecycle management with mock orders, verify data persistence across program restarts",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 5,
+          "title": "Implement Position Monitoring and Emergency Controls",
+          "description": "Develop position tracking functionality and emergency kill-switch to monitor risk and halt trading when necessary.",
+          "dependencies": [
+            1,
+            4
+          ],
+          "details": "Implementation details:\n1. Create `get_positions()` function to retrieve current positions from the exchange\n2. Implement position tracking with metrics: entry price, current price, P&L, duration\n3. Create a `PositionMonitor` class that periodically updates position status\n4. Implement risk metrics: drawdown calculation, exposure percentage, risk per position\n5. Create `halt_trading()` function that cancels all open orders and can optionally close positions\n6. Add configurable circuit breakers: max daily loss, max consecutive losses, max drawdown\n7. Implement a dashboard or notification system for position monitoring\n8. Testing approach: Test position tracking with mock position data, verify emergency halt functionality works correctly in various scenarios",
+          "status": "done",
+          "parentTaskId": 5
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Implement Dry-Run and Backtest Modes",
+      "description": "Create simulation capabilities for strategy validation without real money",
+      "status": "pending",
+      "dependencies": [
+        2,
+        3,
+        5
+      ],
+      "priority": "medium",
+      "details": "1. Implement dry-run mode with simulated order execution\n2. Create backtest engine for historical data testing\n3. Add performance metrics calculation (win rate, risk-reward, drawdown)\n4. Implement trade simulation with various market conditions\n5. Create reporting functionality for backtest results\n6. Add parameter optimization capabilities\n7. Develop comparison tools for strategy variations",
+      "testStrategy": "Compare backtest results with manual analysis. Verify dry-run execution against expected outcomes. Test performance metrics accuracy against known outcomes.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement Dry-Run Mode with Simulated Order Execution",
+          "description": "Create a dry-run mode that simulates order execution without actually placing trades, allowing traders to validate strategies with real-time market data but no financial risk.",
+          "dependencies": [],
+          "details": "Implementation steps:\n1. Create a DryRunExecutor class that implements the same interface as the real OrderExecutor\n2. Implement order simulation logic that mimics real exchange behavior (fills, slippage, fees)\n3. Add market state tracking to maintain simulated positions and balances\n4. Create a toggle system to switch between live and dry-run modes\n5. Implement logging for simulated trades with timestamps and execution details\n6. Add configuration options for simulation parameters (fill probability, slippage models)\n\nTesting approach:\n- Unit tests comparing simulated vs. real execution paths\n- Integration tests with mock market data\n- Validate simulated P&L calculations against manual calculations",
+          "status": "pending",
+          "parentTaskId": 6
+        },
+        {
+          "id": 2,
+          "title": "Build Historical Data Backtest Engine",
+          "description": "Develop a backtest engine that can replay historical market data and simulate strategy performance over past time periods.",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation steps:\n1. Create a BacktestEngine class that processes historical data\n2. Implement data loading from various sources (CSV, databases, APIs)\n3. Build a time-series replay mechanism with proper event sequencing\n4. Integrate with the DryRunExecutor from subtask 1 for trade simulation\n5. Add speed controls (fast-forward, step-by-step execution)\n6. Implement proper handling of OHLCV data and order book snapshots\n7. Create time-aware context switching to ensure strategy logic uses only data available at simulation time\n\nTesting approach:\n- Verify correct chronological processing of events\n- Test with known simple strategies to validate expected outcomes\n- Benchmark performance with large datasets",
+          "status": "done",
+          "parentTaskId": 6
+        },
+        {
+          "id": 3,
+          "title": "Implement Performance Metrics Calculation",
+          "description": "Create a comprehensive metrics system that calculates key performance indicators for trading strategies based on backtest or dry-run results.",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Implementation steps:\n1. Implement core performance metrics calculations:\n   - Win rate and loss rate\n   - Profit factor and expectancy\n   - Maximum drawdown and recovery time\n   - Sharpe and Sortino ratios\n   - Risk-reward ratio\n2. Create a MetricsCalculator class that processes trade history\n3. Add time-based analysis (performance by hour, day, month)\n4. Implement trade-sequence analysis for detecting patterns\n5. Create visualization helpers for key metrics\n\nTesting approach:\n- Unit tests with predefined trade sequences and known metric outcomes\n- Validate calculations against external reference implementations\n- Test edge cases (no trades, all winning/losing trades)",
+          "status": "done",
+          "parentTaskId": 6
+        },
+        {
+          "id": 4,
+          "title": "Develop Trade Simulation with Variable Market Conditions",
+          "description": "Enhance the backtest engine to simulate different market conditions and scenarios to test strategy robustness.",
+          "dependencies": [
+            2,
+            3
+          ],
+          "details": "Implementation steps:\n1. Create a MarketScenarioGenerator class to modify historical data\n2. Implement various market condition simulations:\n   - Volatility spikes and crashes\n   - Gap events and flash crashes\n   - Trending and sideways markets\n   - Liquidity changes and spread widening\n3. Add Monte Carlo simulation capabilities to randomize conditions\n4. Implement stress testing for extreme market conditions\n5. Create a scenario comparison system to evaluate strategy performance across conditions\n\nTesting approach:\n- Verify generated scenarios match intended characteristics\n- Test strategy performance consistency across multiple runs\n- Validate that extreme conditions are properly simulated",
+          "status": "pending",
+          "parentTaskId": 6
+        },
+        {
+          "id": 5,
+          "title": "Create Reporting and Optimization Framework",
+          "description": "Build a comprehensive reporting system and parameter optimization capabilities to analyze backtest results and improve strategies.",
+          "dependencies": [
+            3,
+            4
+          ],
+          "details": "Implementation steps:\n1. Implement detailed HTML/PDF report generation with:\n   - Performance metrics tables and charts\n   - Equity curves and drawdown visualization\n   - Trade distribution analysis\n   - Market condition performance breakdown\n2. Create a ParameterOptimizer class for strategy tuning:\n   - Grid search capability across parameter combinations\n   - Genetic algorithm implementation for optimization\n   - Walk-forward testing framework\n3. Implement strategy comparison tools:\n   - Side-by-side metric comparison\n   - Correlation analysis between strategies\n   - Portfolio simulation with multiple strategies\n4. Add export/import functionality for results sharing\n\nTesting approach:\n- Verify report accuracy with known test cases\n- Validate optimizer finds known optimal parameters\n- Test report generation with large datasets\n- Ensure comparison tools correctly identify superior strategies",
+          "status": "pending",
+          "parentTaskId": 6
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Develop Trade Logging and Performance Tracking",
+      "description": "Build comprehensive logging system for trades and performance metrics",
+      "status": "pending",
+      "dependencies": [
+        5
+      ],
+      "priority": "medium",
+      "details": "1. Design database schema for trade records\n2. Implement trade logging for entries, exits, and adjustments\n3. Create performance metrics tracking (daily/weekly/monthly PnL)\n4. Add trade visualization data preparation\n5. Implement export functionality for trade data\n6. Create system state logging\n7. Develop error and warning logging",
+      "testStrategy": "Verify complete trade history capture. Test performance calculation accuracy. Validate data integrity during system restarts.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Design and Implement Trade Database Schema and Logging",
+          "description": "Create the database schema for trade records and implement the core logging functionality for trade entries, exits, and adjustments",
+          "dependencies": [],
+          "details": "Implementation steps:\n1. Design database schema with tables for trades, trade_actions (entries/exits/adjustments), positions, and trade_metadata\n2. Include fields for timestamps, trade type, instrument, quantity, price, fees, tags, notes\n3. Create database migration scripts\n4. Implement TradeLogger class with methods for logEntry(), logExit(), logAdjustment()\n5. Add validation for required fields and data integrity\n6. Implement transaction handling to ensure atomic operations\n7. Create unit tests with mock trade data\n8. Test database schema with various trade scenarios (entries, partial exits, full exits, adjustments)\n9. Add indexes for common query patterns\n\nTesting approach:\n- Unit test the TradeLogger class methods\n- Test database schema with sample trade data\n- Verify data integrity constraints\n- Test error handling for invalid inputs",
+          "status": "pending",
+          "parentTaskId": 7
+        },
+        {
+          "id": 2,
+          "title": "Implement Performance Metrics Calculation and Tracking",
+          "description": "Create the performance metrics calculation system with daily/weekly/monthly PnL tracking and reporting",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation steps:\n1. Create PerformanceTracker class that interfaces with the trade database\n2. Implement methods to calculate realized and unrealized PnL\n3. Add time-based aggregation for daily/weekly/monthly performance metrics\n4. Implement drawdown calculation and tracking\n5. Create methods for win/loss ratios, average win/loss size, and profit factor\n6. Add position sizing metrics and risk analysis\n7. Implement caching mechanism for frequently accessed metrics\n8. Add background job for end-of-day performance calculations\n9. Create unit tests for all calculation methods\n\nTesting approach:\n- Test calculations with known trade sequences and expected outcomes\n- Verify time-based aggregations across day/week/month boundaries\n- Test edge cases (no trades, losing trades only, winning trades only)\n- Benchmark performance for large trade datasets",
+          "status": "pending",
+          "parentTaskId": 7
+        },
+        {
+          "id": 3,
+          "title": "Develop Visualization Data Preparation and Export Functionality",
+          "description": "Create data preparation methods for trade visualization and implement export functionality for trade data and system logs",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "Implementation steps:\n1. Create DataVisualizer class to transform trade and performance data into visualization-ready formats\n2. Implement methods to generate time-series data for equity curves\n3. Add trade clustering and pattern recognition data preparation\n4. Create exporters for CSV, JSON, and Excel formats\n5. Implement system state logging with configurable verbosity levels\n6. Add error and warning logging with severity classification\n7. Create a unified logging interface that captures system events, errors, and warnings\n8. Implement log rotation and archiving\n9. Add data filtering options for exports (by date range, instrument, trade outcome)\n\nTesting approach:\n- Test visualization data output against expected formats\n- Verify export functionality with sample data across all supported formats\n- Test system logging with various event types and severity levels\n- Validate log rotation and archiving with simulated time progression",
+          "status": "pending",
+          "parentTaskId": 7
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Implement Session Persistence and Recovery",
+      "description": "Create mechanisms to maintain system state and recover from crashes or restarts",
+      "status": "pending",
+      "dependencies": [
+        5,
+        7
+      ],
+      "priority": "medium",
+      "details": "1. Design persistent session state storage\n2. Implement state serialization and deserialization\n3. Create recovery procedures for system restarts\n4. Add position reconciliation with exchange\n5. Implement order status synchronization\n6. Develop automatic trade recovery\n7. Create system health monitoring",
+      "testStrategy": "Test system recovery after forced shutdowns. Verify position and order state after restarts. Validate reconciliation with exchange data.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Design and Implement Persistent State Storage",
+          "description": "Create a storage mechanism for system state that persists across system restarts and crashes",
+          "dependencies": [],
+          "details": "Implementation details:\n1. Design a database schema for storing system state (consider using SQLite or a similar embedded database)\n2. Create data models for various system states (open orders, positions, account balances, etc.)\n3. Implement functions to write state to persistent storage at regular intervals\n4. Add transaction support to ensure data integrity during writes\n5. Implement logging for all state changes\n6. Create configuration options for storage location and backup frequency\n\nTesting approach:\n- Unit test storage and retrieval operations\n- Test transaction rollback on failure\n- Simulate power outage during write operations\n- Benchmark performance to ensure minimal impact on system operations",
+          "status": "pending",
+          "parentTaskId": 8
+        },
+        {
+          "id": 2,
+          "title": "Implement State Serialization and Recovery Procedures",
+          "description": "Create mechanisms to serialize/deserialize system state and procedures to recover state after system restart",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation details:\n1. Develop serialization/deserialization methods for all system state objects\n2. Implement versioning for serialized data to handle format changes\n3. Create a recovery manager class that orchestrates the recovery process\n4. Implement startup detection of incomplete shutdown\n5. Add incremental recovery to restore from the most recent valid state\n6. Create recovery sequence ordering to ensure dependent systems are restored in correct order\n\nTesting approach:\n- Test serialization/deserialization with various data scenarios\n- Verify recovery from corrupted state files\n- Test version migration of serialized data\n- Simulate various crash scenarios and verify recovery",
+          "status": "pending",
+          "parentTaskId": 8
+        },
+        {
+          "id": 3,
+          "title": "Implement Exchange Reconciliation for Positions and Orders",
+          "description": "Create mechanisms to reconcile local state with exchange data for positions and orders after recovery",
+          "dependencies": [
+            2
+          ],
+          "details": "Implementation details:\n1. Implement API calls to fetch current positions and open orders from exchanges\n2. Create comparison logic to identify discrepancies between local and exchange state\n3. Develop reconciliation rules for handling mismatches (e.g., missing orders, different position sizes)\n4. Implement automatic correction of local state based on exchange data\n5. Add manual intervention flags for critical discrepancies\n6. Create detailed logging of all reconciliation actions\n\nTesting approach:\n- Test with simulated discrepancies between local and exchange state\n- Verify correct handling of various edge cases (partial fills, rejected orders)\n- Test performance with large numbers of positions and orders\n- Create integration tests with exchange API mocks",
+          "status": "pending",
+          "parentTaskId": 8
+        },
+        {
+          "id": 4,
+          "title": "Implement Trade Recovery and System Health Monitoring",
+          "description": "Create mechanisms for automatic trade recovery and continuous system health monitoring",
+          "dependencies": [
+            3
+          ],
+          "details": "Implementation details:\n1. Develop a trade recovery system that can replay missing trade actions after a crash\n2. Implement prioritization for recovery actions based on market conditions\n3. Create a health monitoring subsystem that tracks system vitals (memory usage, CPU, disk space)\n4. Add alerting mechanisms for critical health issues (email, SMS, dashboard)\n5. Implement periodic health checks for all subsystems\n6. Create a recovery status dashboard showing recovery progress and system health\n7. Develop automatic failover mechanisms for critical components\n\nTesting approach:\n- Test trade recovery with various market scenarios\n- Simulate resource constraints to verify health monitoring\n- Test alert delivery through all channels\n- Verify dashboard accuracy during recovery scenarios\n- Conduct stress tests to ensure recovery works under load",
+          "status": "pending",
+          "parentTaskId": 8
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Build Web UI Dashboard",
+      "description": "Develop the monitoring interface for system status and control",
+      "status": "pending",
+      "dependencies": [
+        7,
+        8
+      ],
+      "priority": "low",
+      "details": "1. Create FastAPI endpoints for UI data\n2. Implement dashboard with Tailwind CSS/HTMX\n3. Add real-time updates via WebSocket\n4. Create trade and PnL visualization\n5. Implement system control panel (run, dry-run, pause, halt)\n6. Add mobile-responsive design\n7. Create log viewer and alert system",
+      "testStrategy": "Test UI functionality across devices. Verify real-time updates. Validate control operations. Test UI performance under high data load.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Implement FastAPI Backend with WebSocket Support",
+          "description": "Set up the FastAPI backend with endpoints for dashboard data and WebSocket connections for real-time updates",
+          "dependencies": [],
+          "details": "1. Create a new FastAPI application structure with proper routing\n2. Implement REST endpoints for system status, trade history, and configuration\n3. Set up WebSocket handler for pushing real-time updates\n4. Create data models for system status, trades, and performance metrics\n5. Implement authentication middleware for secure access\n6. Write unit tests for API endpoints using pytest\n7. Document API using OpenAPI/Swagger\n8. Test WebSocket connection with a simple client",
+          "status": "pending",
+          "parentTaskId": 9
+        },
+        {
+          "id": 2,
+          "title": "Build Dashboard Layout and Core Components with Tailwind/HTMX",
+          "description": "Develop the basic dashboard UI structure and core components using Tailwind CSS and HTMX for interactivity",
+          "dependencies": [
+            1
+          ],
+          "details": "1. Set up project with Tailwind CSS configuration\n2. Create responsive layout with navigation sidebar and main content area\n3. Implement header with system status indicators\n4. Build core HTMX components for data loading and partial updates\n5. Create reusable UI components (cards, tables, alerts)\n6. Implement authentication screens (login/logout)\n7. Set up HTMX to connect with FastAPI endpoints\n8. Test responsive behavior across different screen sizes\n9. Ensure accessibility compliance with WCAG standards",
+          "status": "pending",
+          "parentTaskId": 9
+        },
+        {
+          "id": 3,
+          "title": "Implement Trade Visualization and System Control Panel",
+          "description": "Create data visualization components for trades and PnL, and build the system control panel for operation management",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "1. Integrate a charting library (e.g., Chart.js or D3.js)\n2. Implement trade history visualization with filtering options\n3. Create PnL charts with time-series data\n4. Build system control panel with buttons for run, dry-run, pause, and halt\n5. Add confirmation dialogs for critical actions\n6. Implement real-time status indicators using WebSocket data\n7. Create settings panel for system configuration\n8. Test control panel functionality with backend integration\n9. Ensure all visualizations are responsive and mobile-friendly",
+          "status": "pending",
+          "parentTaskId": 9
+        },
+        {
+          "id": 4,
+          "title": "Develop Log Viewer and Alert System with Real-time Updates",
+          "description": "Build the log viewing interface and alert system with real-time updates via WebSockets",
+          "dependencies": [
+            1,
+            2,
+            3
+          ],
+          "details": "1. Create log viewer component with filtering and search capabilities\n2. Implement log level visualization (INFO, WARNING, ERROR)\n3. Build alert notification system with different severity levels\n4. Set up WebSocket connection for real-time log updates\n5. Add toast notifications for system alerts\n6. Implement alert configuration panel\n7. Create mobile-optimized view for logs and alerts\n8. Add export functionality for logs\n9. Test real-time updates under various system conditions\n10. Implement log retention and pagination for performance",
+          "status": "pending",
+          "parentTaskId": 9
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Implement Zone Visualization and Advanced Monitoring",
+      "description": "Create visual representation of supply/demand zones and advanced monitoring capabilities",
+      "status": "done",
+      "dependencies": [
+        3,
+        9
+      ],
+      "priority": "low",
+      "details": "1. Implement charting library integration\n2. Create zone visualization overlay\n3. Add price action display with entry/exit points\n4. Implement multi-timeframe chart switching\n5. Create alert system for zone touches\n6. Add custom indicator visualization\n7. Implement performance analytics dashboard",
+      "testStrategy": "Verify zone rendering accuracy. Test chart responsiveness and data accuracy. Validate alert system functionality. Test visualization performance with multiple zones.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Integrate Charting Library and Implement Basic Zone Visualization",
+          "description": "Set up a charting library and implement the basic visual representation of supply/demand zones on price charts",
+          "dependencies": [],
+          "details": "1. Research and select an appropriate charting library (TradingView, Highcharts, or D3.js)\n2. Set up the library in the project with necessary dependencies\n3. Create basic chart configuration with price data display (candlesticks/bars)\n4. Implement a data structure to store supply/demand zone information (price levels, timestamps, strength)\n5. Create visual overlay for zones using rectangles with semi-transparent colors (green for demand, red for supply)\n6. Implement zoom and pan functionality for chart navigation\n7. Add hover effects to display zone details\n8. Test with sample data to ensure zones render correctly at different timeframes\n9. Optimize rendering performance for multiple zones\n\nTesting approach: Create unit tests for zone data processing and visual tests for proper rendering of zones with different parameters.",
+          "status": "pending",
+          "parentTaskId": 10
+        },
+        {
+          "id": 2,
+          "title": "Implement Price Action Display and Multi-Timeframe Switching",
+          "description": "Add price action visualization with entry/exit points and implement the ability to switch between different timeframes",
+          "dependencies": [
+            1
+          ],
+          "details": "1. Extend the chart to display trade entry/exit markers (arrows or icons)\n2. Implement data structure for storing trade information (entry/exit price, timestamp, result)\n3. Create a visual layer for displaying price action patterns (pin bars, engulfing patterns, etc.)\n4. Add tooltips to show trade details on hover\n5. Implement timeframe selection dropdown/buttons (1m, 5m, 15m, 1h, 4h, 1d)\n6. Create data aggregation logic to convert between timeframes\n7. Ensure zones and trade markers scale appropriately when switching timeframes\n8. Implement smooth transitions between timeframes\n9. Add keyboard shortcuts for quick timeframe switching\n\nTesting approach: Test timeframe switching with various data sets, verify correct aggregation of data, and ensure proper scaling of zones and markers across timeframes.",
+          "status": "pending",
+          "parentTaskId": 10
+        },
+        {
+          "id": 3,
+          "title": "Implement Alert System and Custom Indicator Visualization",
+          "description": "Create an alert system for zone touches and implement visualization for custom indicators",
+          "dependencies": [
+            1,
+            2
+          ],
+          "details": "1. Design alert configuration interface (price levels, conditions, notification methods)\n2. Implement real-time price monitoring logic to detect zone touches\n3. Create notification system (browser notifications, sound alerts, email/SMS)\n4. Add visual indicators when alerts are triggered on the chart\n5. Implement alert history and management panel\n6. Create framework for custom indicator visualization (moving averages, RSI, MACD, etc.)\n7. Implement indicator drawing on separate chart panels or as overlays\n8. Add indicator parameter configuration options\n9. Create indicator templates for common setups\n10. Ensure indicators update correctly with timeframe changes\n\nTesting approach: Test alert triggering with simulated price movements, verify notification delivery, and check indicator calculations against known values.",
+          "status": "pending",
+          "parentTaskId": 10
+        },
+        {
+          "id": 4,
+          "title": "Develop Performance Analytics Dashboard",
+          "description": "Create a comprehensive analytics dashboard to monitor trading performance and zone effectiveness",
+          "dependencies": [
+            2,
+            3
+          ],
+          "details": "1. Design dashboard layout with key performance metrics (win rate, profit factor, average win/loss)\n2. Implement data collection for trade results and zone performance\n3. Create visual charts for performance metrics (bar charts, line graphs, pie charts)\n4. Add filtering capabilities by date range, instrument, and zone type\n5. Implement zone effectiveness analysis (success rate of zones, average price movement)\n6. Create trade journal functionality to record notes on trades\n7. Add export functionality for reports (CSV, PDF)\n8. Implement performance comparison between different strategies or timeframes\n9. Create visual heatmap of most profitable trading times/days\n10. Add real-time dashboard updates as new trades are completed\n\nTesting approach: Test with historical trading data to verify correct calculation of statistics, check responsive design on different screen sizes, and ensure proper filtering of data.",
+          "status": "pending",
+          "parentTaskId": 10
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Add Multi-Asset Strategy Support",
+      "status": "todo",
+      "description": "Enable per-asset strategy logic. Develop asset ranking function using volume, volatility, and confidence. Assign strategies to best N assets."
+    },
+    {
+      "id": "12",
+      "title": "Build Trade Journal & Meta Logging",
+      "status": "todo",
+      "description": "Extend trade logging to include strategy metadata. Create weekly summaries. Enable tagging for trade reviews."
+    },
+    {
+      "id": "13",
+      "title": "Implement Strategy Voting Engine",
+      "status": "todo",
+      "description": "Build voting mechanism between strategies. Use consensus or weighted votes. Integrate into execution layer and backtest logic."
+    }
+  ],
+  "metadata": {
+    "projectName": "BloFin Isolated Futures Crypto Trading Bot",
+    "totalTasks": 10,
+    "sourceFile": "PRD.txt",
+    "generatedAt": "2023-11-25"
+  }
+}

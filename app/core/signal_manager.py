@@ -7,7 +7,12 @@ import pandas as pd
 
 from app.models.zone import Zone, MarketContext
 from app.core.indicators import calculate_rsi, calculate_macd, VolumeProfile
-from app.core.risk_manager import RiskManager
+# Import risk management functions directly
+from app.core.risk_manager import (
+    calculate_position_size, 
+    get_zone_confidence_tier, 
+    # Add other functions if needed by SignalManager later
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +30,10 @@ class SignalConfirmation(BaseModel):
 class SignalManager:
     """Manages signal confirmation using multiple technical indicators and market context."""
     
-    def __init__(self, risk_manager: RiskManager):
-        """Initialize the SignalManager with required components."""
-        self.risk_manager = risk_manager
+    def __init__(self):
+        """Initialize the SignalManager."""
+        # No risk_manager instance needed if functions are imported directly
+        pass 
         
     def analyze_market_context(
         self,

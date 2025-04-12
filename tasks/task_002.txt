@@ -1,0 +1,72 @@
+# Task ID: 2
+# Title: Implement OHLCV Data Retrieval and Storage
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Build the core functionality to fetch, process, and store historical candle data across multiple timeframes
+# Details:
+1. Create get_ohlcv() function to fetch historical data from Coinbase Advanced API
+2. Implement data normalization and cleaning
+3. Set up SQLite database schema for OHLCV storage
+4. Create data models for candle information
+5. Implement multi-timeframe data retrieval (15m, 1H, 4H)
+6. Add functionality to update and maintain recent candle data
+7. Create utility functions for data transformation and analysis
+
+# Test Strategy:
+Verify data integrity by comparing retrieved data with exchange UI values. Test database persistence and retrieval speed. Validate multi-timeframe synchronization.
+
+# Subtasks:
+## 1. Implement API Connection and Raw OHLCV Data Fetching [done]
+### Dependencies: None
+### Description: Create the core functionality to connect to Coinbase Advanced API and retrieve raw OHLCV data with proper error handling and rate limiting
+### Details:
+1. Set up API client configuration with authentication parameters
+2. Create get_ohlcv() function that accepts symbol, timeframe, and limit parameters
+3. Implement error handling for API connection issues (network errors, authentication failures)
+4. Add rate limiting to prevent API throttling according to Coinbase's limits
+5. Create a retry mechanism for failed requests
+6. Format the raw response into a standardized data structure (pandas DataFrame or similar)
+7. Test with multiple symbols and timeframes to verify correct data retrieval
+8. Document function parameters and return values
+
+## 2. Implement Data Normalization and Cleaning Pipeline [done]
+### Dependencies: 2.1
+### Description: Create a data processing pipeline to clean, normalize and validate OHLCV data before storage
+### Details:
+1. Create functions to validate data integrity (check for missing values, out-of-order timestamps)
+2. Implement data normalization to ensure consistent decimal precision and time formats
+3. Add outlier detection and handling for price/volume anomalies
+4. Create functionality to handle timezone conversions to UTC
+5. Implement gap detection for missing candles in the data sequence
+6. Add data enrichment to calculate additional fields (typical price, candle body size, etc.)
+7. Create unit tests for each normalization function
+8. Document the normalization pipeline with input/output specifications
+
+## 3. Design and Implement SQLite Database Schema for OHLCV Storage [done]
+### Dependencies: 2.2
+### Description: Create the database schema, models, and storage functions for efficient OHLCV data persistence
+### Details:
+1. Design SQLite database schema with tables for symbols, timeframes, and OHLCV data
+2. Create appropriate indexes for timestamp and symbol-based queries
+3. Implement data models using an ORM (SQLAlchemy or similar) for candle information
+4. Create functions for bulk insertion of normalized data
+5. Implement query functions to retrieve data by symbol, timeframe, and date range
+6. Add functionality to check for existing data to prevent duplicates
+7. Create database migration system for future schema changes
+8. Test database performance with large datasets to ensure query efficiency
+
+## 4. Implement Multi-Timeframe Data Management System [done]
+### Dependencies: 2.3
+### Description: Create a comprehensive system to manage data across multiple timeframes with automated updates and maintenance
+### Details:
+1. Implement timeframe-specific data retrieval for 15m, 1H, and 4H intervals
+2. Create a scheduler for regular data updates based on timeframe frequency
+3. Implement data resampling to derive higher timeframes from lower timeframes when possible
+4. Add functionality to detect and fill gaps in historical data
+5. Create a system to handle partial candles for the current period
+6. Implement data retention policies for different timeframes
+7. Add utilities for data export to various formats (CSV, JSON)
+8. Create a monitoring system to track data completeness and freshness
+9. Test the entire system with multiple symbols across all timeframes
+

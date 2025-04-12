@@ -1,0 +1,123 @@
+---
+description: Requirements for Coinbase Advanced Trade API authentication using JWT
+globs: app/core/coinbase.py, test_coinbase_rest.py, **/coinbase_*.py
+alwaysApply: true
+---
+
+# Coinbase Advanced API Authentication Requirements
+
+- **JWT Authentication Requirements**
+  - Use ES256 algorithm (ECDSA with P-256 curve and SHA-256) for signing
+  - The private key must be in EC format (not RSA)
+  - Set issuer to exactly `"cdp"` (not "coinbase-cloud" or other values)
+  - Token expiration must be 2 minutes from creation time
+  - Include proper `uri` claim in the format: `"METHOD host/path"`, e.g., `"GET api.coinbase.com/api/v3/brokerage/products"`
+  - Include complete API path with version in the URI (e.g., `/api/v3/brokerage/products`)
+
+- **JWT Payload Structure Example**
+  ```python
+  # ✅ DO: Format JWT payload according to Coinbase requirements
+  payload = {
+      "sub": key_name,        # API key name/path from settings
+      "iss": "cdp",           # Must be exactly "cdp"
+      "nbf": timestamp,       # Current time in seconds
+      "exp": timestamp + 120, # 2-minute expiration
+      "uri": full_uri         # "METHOD host/path" format
+  }
+  ```
+
+- **JWT Headers Requirements**
+  - Include key ID (`kid`) that matches the `sub` claim
+  - Generate a unique nonce for each request using `secrets.token_hex()`
+  ```python
+  # ✅ DO: Include required headers with secure nonce
+  headers = {
+      "kid": key_name,         # Same as sub claim
+      "nonce": secrets.token_hex()  # Unique for each request
+  }
+  ```
+
+- **Request Headers**
+  - Format Authorization header as `Bearer {jwt_token}`
+  - Include `Content-Type: application/json` and `Accept: application/json` headers
+  ```python
+  # ✅ DO: Include all required headers
+  headers = {
+      "Authorization": f"Bearer {jwt_token}",
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+  }
+  ```
+
+- **URI Construction for JWT**
+  - Extract the host from the API URL
+  - Extract the API path (e.g., `/api/v3/brokerage`)
+  - Combine with endpoint path ensuring no double slashes
+  - Format as `"METHOD host/path"` without `https://`
+  ```python
+  # ✅ DO: Properly format URI
+  host = urllib.parse.urlparse(api_url).netloc
+  api_path = urllib.parse.urlparse(api_url).path
+  
+  # Ensure correct path combining
+  if endpoint.startswith('/') and api_path.endswith('/'):
+      full_path = f"{api_path}{endpoint[1:]}"
+  elif not endpoint.startswith('/') and not api_path.endswith('/'):
+      full_path = f"{api_path}/{endpoint}"
+  else:
+      full_path = f"{api_path}{endpoint}"
+      
+  full_uri = f"{method.upper()} {host}{full_path}"
+  ```
+
+- **Query Parameter Handling**
+  - Include query parameters in the URI for both endpoint path and JWT signature
+  - Sort query parameters alphabetically by key
+  - URL encode both keys and values
+  ```python
+  # ✅ DO: Properly handle query parameters
+  if params:
+      query_parts = []
+      for key in sorted(params.keys()):
+          encoded_key = urllib.parse.quote(str(key))
+          encoded_value = urllib.parse.quote(str(params[key]))
+          query_parts.append(f"{encoded_key}={encoded_value}")
+      
+      query_string = "&".join(query_parts)
+      # Add query params to endpoint for JWT generation
+      processed_endpoint = f"{endpoint}?{query_string}"
+  ```
+
+- **Private Key Loading**
+  - Ensure the private key is loaded as an EC private key
+  - Verify the key type before using for JWT signing
+  ```python
+  # ✅ DO: Load and verify EC private key
+  private_key = serialization.load_pem_private_key(
+      private_key_pem.encode('utf-8'),
+      password=None
+  )
+  if not isinstance(private_key, ec.EllipticCurvePrivateKey):
+      raise TypeError("Loaded key is not an EC private key.")
+  ```
+
+- **Error Handling**
+  - Log detailed error information including status code and response body
+  - Parse error response as JSON when possible
+  - Provide meaningful error messages that include the status code
+  ```python
+  # ✅ DO: Provide comprehensive error handling
+  if response.status_code >= 400:
+      logger.error(f"Error response: {response.text}")
+      logger.error(f"Response headers: {response.headers}")
+      try:
+          error_json = response.json()
+          logger.error(f"Detailed error: {json.dumps(error_json, indent=2)}")
+      except:
+          logger.error(f"Raw error text: {response.text}")
+  ```
+
+## References
+- [Coinbase API Documentation](https://docs.cdp.coinbase.com/advanced-trade/docs/rest-api-auth)
+- [JWT Best Practices](https://auth0.com/blog/a-look-at-the-latest-draft-for-jwt-bcp/)
+- [ES256 vs RS256](https://auth0.com/blog/rs256-vs-hs256-whats-the-difference/) 

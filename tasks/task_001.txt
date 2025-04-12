@@ -1,0 +1,103 @@
+# Task ID: 1
+# Title: Setup Project Scaffold and Coinbase Advanced API Integration
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Create the FastAPI-based MCP server structure and implement Coinbase Advanced API connection for both REST and WebSocket data streams
+# Details:
+1. Initialize Python project with FastAPI framework
+2. Implement Coinbase Advanced API client with authentication
+3. Create REST endpoints for account data, order placement, and market information
+4. Set up WebSocket connection for real-time price updates
+5. Implement error handling and reconnection logic
+6. Create basic data models for market data
+7. Add configuration management for API keys and settings
+
+# Test Strategy:
+Verify API connectivity by fetching account balance and market data. Test WebSocket connection stability over 24 hours. Ensure proper error handling with mocked API failures.
+
+# Subtasks:
+## 1. Initialize FastAPI Project Structure with Configuration Management [done]
+### Dependencies: None
+### Description: Set up the basic FastAPI project structure with configuration management for API keys and environment settings
+### Details:
+Implementation details:
+1. Create a new Python project with appropriate directory structure (app/, tests/, etc.)
+2. Set up virtual environment and install required packages (fastapi, uvicorn, httpx, websockets, pydantic, coinbase-advanced-py)
+3. Create a main.py file with FastAPI application initialization
+4. Implement configuration management using environment variables and/or config files
+   - Create config.py for managing Coinbase API keys, URLs, and other settings
+   - Implement loading from .env file for local development
+   - Add validation for required configuration values
+5. Create basic project documentation (README.md)
+6. Set up logging configuration
+7. Testing approach: Write unit tests for configuration loading and validation
+
+## 2. Implement Coinbase Advanced API Client with Authentication [done]
+### Dependencies: 1.1
+### Description: Create a client module for Coinbase Advanced API with authentication handling and basic request functionality
+### Details:
+Implementation details:
+1. Create a dedicated coinbase_client.py module within the app/
+2. Implement API client class with:
+   - Authentication method using Coinbase API keys from configuration
+   - HTTP request methods (get, post, put, delete) with proper headers
+   - Request signing mechanism according to Coinbase Advanced API requirements
+   - Rate limiting and throttling mechanisms based on Coinbase limits
+3. Create data models (using Pydantic) for API responses
+4. Implement session management with connection pooling
+5. Add basic error handling for connection issues
+6. Testing approach:
+   - Mock HTTP responses to test authentication logic
+   - Unit test request formation and signing
+   - Create integration tests with Coinbase sandbox environment
+
+## 3. Create REST API Endpoints for Account and Market Data [done]
+### Dependencies: 1.2
+### Description: Implement FastAPI endpoints that connect to Coinbase Advanced API for account information, order placement, and market data
+### Details:
+Implementation details:
+1. Create router modules for different endpoint categories:
+   - app/routers/account.py for account-related endpoints
+   - app/routers/orders.py for order management
+   - app/routers/market.py for market data
+2. Implement specific endpoints in each router:
+   - GET /account/balance - retrieve account balances
+   - GET /account/positions - get current positions
+   - POST /orders - place new orders with validation
+   - GET /orders/{id} - retrieve order details
+   - GET /market/instruments - list available trading instruments
+   - GET /market/ticker/{symbol} - get current ticker information
+3. Create request/response models using Pydantic
+4. Implement proper error handling with meaningful error responses
+5. Add input validation using Pydantic models
+6. Include endpoint documentation using FastAPI's built-in docs
+7. Testing approach:
+   - Unit tests for request validation
+   - Integration tests with Coinbase sandbox
+   - Test error scenarios and edge cases
+
+## 4. Implement WebSocket Connection for Real-time Market Data [done]
+### Dependencies: 1.2
+### Description: Set up WebSocket client to connect to Coinbase Advanced API's real-time data feeds and expose WebSocket endpoints for clients
+### Details:
+Implementation details:
+1. Create a dedicated websocket_client.py module
+2. Implement WebSocket connection to Coinbase Advanced API:
+   - Authentication and connection establishment using API keys
+   - Message parsing and handling for Coinbase's message format
+   - Subscription management for different market data channels
+   - Heartbeat mechanism as per Coinbase's requirements
+   - Reconnection logic with exponential backoff
+3. Create data models for WebSocket messages
+4. Implement a WebSocket server endpoint in FastAPI to relay data to clients:
+   - Create /ws/{stream} endpoint for client connections
+   - Implement client subscription management
+   - Add message forwarding from Coinbase to connected clients
+5. Create an in-memory cache for latest market data
+6. Implement proper error handling for WebSocket connections
+7. Testing approach:
+   - Unit tests for message parsing
+   - Mock WebSocket server for testing client reconnection
+   - Load testing for multiple client connections
+

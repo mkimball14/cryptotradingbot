@@ -13,11 +13,14 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Crypto Trading Bot"
     APP_VERSION: str = "1.0.0"
     
-    # Coinbase API settings
-    COINBASE_API_KEY: str
-    COINBASE_API_SECRET: str
-    COINBASE_API_PASSPHRASE: Optional[str] = None
-    COINBASE_API_URL: str = "https://api.coinbase.com"  # Default API URL
+    # Coinbase API settings (Using Advanced Trade API / JWT)
+    COINBASE_JWT_KEY_NAME: str
+    COINBASE_JWT_PRIVATE_KEY: str # Should be the full PEM key string
+    COINBASE_API_URL: str = "https://api.coinbase.com/api/v3/brokerage" 
+    COINBASE_WS_URL: str = "wss://advanced-trade-ws.coinbase.com"
+    # COINBASE_API_KEY: str # Old
+    # COINBASE_API_SECRET: str # Old
+    # COINBASE_API_PASSPHRASE: Optional[str] = None # Old
     
     # Trading settings
     TRADING_ENABLED: bool = False
@@ -41,18 +44,28 @@ class Settings(BaseSettings):
             data['DEBUG'] = data['DEBUG'].lower() in ('true', 't', 'yes', 'y', '1')
             
         # Handle multiline PEM key
-        if 'COINBASE_API_SECRET' in data and isinstance(data['COINBASE_API_SECRET'], str):
-            secret = data['COINBASE_API_SECRET']
+        if 'COINBASE_JWT_PRIVATE_KEY' in data and isinstance(data['COINBASE_JWT_PRIVATE_KEY'], str):
+            private_key = data['COINBASE_JWT_PRIVATE_KEY']
             # Remove surrounding quotes if present
-            if (secret.startswith('"') and secret.endswith('"')) or (secret.startswith("'") and secret.endswith("'")):
-                secret = secret[1:-1]
+            if (private_key.startswith('"') and private_key.endswith('"')) or (private_key.startswith("'") and private_key.endswith("'")):
+                private_key = private_key[1:-1]
             # Replace escaped newlines with actual newlines
-            secret = secret.replace('\\n', '\n')
-            data['COINBASE_API_SECRET'] = secret
+            private_key = private_key.replace('\\n', '\n')
+            data['COINBASE_JWT_PRIVATE_KEY'] = private_key
             
-        # Clean up API key
-        if 'COINBASE_API_KEY' in data and isinstance(data['COINBASE_API_KEY'], str):
-            data['COINBASE_API_KEY'] = data['COINBASE_API_KEY'].strip('"\'')
+        # Clean up JWT key name
+        if 'COINBASE_JWT_KEY_NAME' in data and isinstance(data['COINBASE_JWT_KEY_NAME'], str):
+            data['COINBASE_JWT_KEY_NAME'] = data['COINBASE_JWT_KEY_NAME'].strip('"\'')
+
+        # Remove old parser logic if it conflicts or is not needed
+        # if 'COINBASE_API_SECRET' in data and isinstance(data['COINBASE_API_SECRET'], str):
+        #     secret = data['COINBASE_API_SECRET']
+        #     if (secret.startswith('"') and secret.endswith('"')) or (secret.startswith("'") and secret.endswith("'")):
+        #         secret = secret[1:-1]
+        #     secret = secret.replace('\\n', '\n')
+        #     data['COINBASE_API_SECRET'] = secret
+        # if 'COINBASE_API_KEY' in data and isinstance(data['COINBASE_API_KEY'], str):
+        #     data['COINBASE_API_KEY'] = data['COINBASE_API_KEY'].strip('"\'')
             
         return data
     

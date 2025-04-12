@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import List, Optional, Literal
+from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
+from decimal import Decimal
+import json
 
-from app.core.coinbase import CoinbaseClient, OrderSide, OrderType, CoinbaseError
+from app.core.coinbase import CoinbaseClient, CoinbaseError
 from app.core.deps import get_coinbase_client
+from app.models.order import OrderSide, OrderType, TimeInForce, OrderStatus
 from app.models.responses import OrderDetailResponse, OrdersResponse, ErrorResponse
 
 router = APIRouter(prefix="/orders", tags=["orders"])
@@ -11,26 +14,27 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 class CreateOrderRequest(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
+        use_enum_values=True,
         json_schema_extra={
             "example": {
                 "product_id": "BTC-USD",
-                "side": "BUY",
-                "order_type": "LIMIT",
-                "size": 0.01,
-                "price": 50000.0,
-                "time_in_force": "GTC"
+                "side": OrderSide.BUY.value,
+                "order_type": OrderType.LIMIT.value,
+                "size": "0.01",
+                "price": "50000.0",
+                "time_in_force": TimeInForce.GTC.value
             }
         }
     )
 
     product_id: str = Field(..., description="Trading pair ID (e.g., BTC-USD)")
-    side: Literal["BUY", "SELL"] = Field(..., description="Order side (BUY/SELL)")
-    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = Field(..., description="Order type")
-    size: float = Field(..., gt=0, description="Order size in base currency")
-    price: Optional[float] = Field(None, gt=0, description="Limit price (required for LIMIT orders)")
-    stop_price: Optional[float] = Field(None, gt=0, description="Stop price (required for STOP/STOP_LIMIT orders)")
+    side: OrderSide
+    order_type: OrderType
+    size: Decimal = Field(..., gt=Decimal(0), description="Order size in base currency (use string for precision)")
+    price: Optional[Decimal] = Field(None, gt=Decimal(0), description="Limit price (required for LIMIT orders, use string for precision)")
+    stop_price: Optional[Decimal] = Field(None, gt=Decimal(0), description="Stop price (required for STOP/STOP_LIMIT orders, use string for precision)")
     client_order_id: Optional[str] = Field(None, description="Client-specified order ID")
-    time_in_force: str = Field("GTC", description="Time in force policy (GTC/GTT/IOC/FOK)")
+    time_in_force: TimeInForce = Field(TimeInForce.GTC, description="Time in force policy")
 
 @router.post(
     "/",
@@ -56,30 +60,33 @@ async def create_order(
     For STOP/STOP_LIMIT orders, stop_price is required.
     """
     try:
-        # Validate order parameters
-        if order.order_type == "LIMIT" and order.price is None:
+        if order.order_type == OrderType.LIMIT and order.price is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": "Price is required for LIMIT orders"}
             )
             
-        if order.order_type in ["STOP", "STOP_LIMIT"] and order.stop_price is None:
+        if order.order_type in [OrderType.STOP, OrderType.STOP_LIMIT] and order.stop_price is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"error": "Stop price is required for STOP/STOP_LIMIT orders"}
             )
             
+        price_float = float(order.price) if order.price is not None else None
+        stop_price_float = float(order.stop_price) if order.stop_price is not None else None
+        size_float = float(order.size)
+        
         result = await client.create_order(
             product_id=order.product_id,
             side=order.side,
             order_type=order.order_type,
-            size=order.size,
-            price=order.price,
-            stop_price=order.stop_price,
+            size=size_float,
+            price=price_float,
+            stop_price=stop_price_float,
             client_order_id=order.client_order_id,
             time_in_force=order.time_in_force
         )
-        return {"order": result}
+        return OrderDetailResponse(order=result)
     except CoinbaseError as e:
         raise HTTPException(
             status_code=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -106,7 +113,7 @@ async def create_order(
 )
 async def list_orders(
     product_id: Optional[str] = Query(None, description="Filter orders by product ID"),
-    status_filter: Optional[List[str]] = Query(None, description="Filter orders by status (comma-separated)"),
+    status_filter: Optional[List[OrderStatus]] = Query(None, description="Filter orders by status"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of orders to return"),
     client: CoinbaseClient = Depends(get_coinbase_client)
 ) -> OrdersResponse:
@@ -117,7 +124,7 @@ async def list_orders(
     """
     try:
         orders = await client.get_orders(product_id=product_id, status=status_filter, limit=limit)
-        return {"orders": orders}
+        return OrdersResponse(orders=orders)
     except CoinbaseError as e:
         raise HTTPException(
             status_code=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -151,8 +158,8 @@ async def get_order(
     Returns detailed information about a specific order by its ID.
     """
     try:
-        order = await client.get_order(order_id)
-        return {"order": order}
+        order_data = await client.get_order(order_id)
+        return OrderDetailResponse(order=order_data)
     except CoinbaseError as e:
         status_code = e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
         if status_code == 404:

@@ -4,10 +4,14 @@ from pydantic import BaseModel, ConfigDict
 import asyncio
 import logging
 import numpy as np
+import uuid
+import time
+import random
+from decimal import Decimal, ROUND_DOWN
 
-from .models import Order, OrderSide, OrderStatus, OrderType, Position, TimeInForce
-from .order_executor import OrderExecutionResult, BracketOrderResult, OrderState
-from .exceptions import OrderExecutionError
+from app.models.order import OrderSide, OrderStatus, OrderType, TimeInForce, OrderBase
+from app.models.position import Position
+from .order_executor import OrderExecutionResult, BracketOrderResult, OrderState, OrderExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -550,42 +554,17 @@ class DryRunExecutor:
                 metadata={"error_type": "simulation_error", "simulated": True}
             )
             
-    async def get_order_status(self, order_id: str) -> Optional[Order]:
-        """Get simulated order status"""
-        await self._simulate_api_latency()
-        
-        # Check active orders
-        if order_id in self._order_states:
-            state = self._order_states[order_id]
-            return Order(
-                order_id=state.order_id,
-                product_id=state.product_id,
-                side=state.side,
-                order_type=state.type,
-                status=state.status.value,
-                size=str(state.size),
-                filled_size=str(state.filled_size),
-                price=str(state.price),
-                average_filled_price=str(state.average_fill_price) if state.average_fill_price else None
-            )
-            
-        # Check historical orders
-        for orders in self._historical_orders.values():
-            for state in orders:
-                if state.order_id == order_id:
-                    return Order(
-                        order_id=state.order_id,
-                        product_id=state.product_id,
-                        side=state.side,
-                        order_type=state.type,
-                        status=state.status.value,
-                        size=str(state.size),
-                        filled_size=str(state.filled_size),
-                        price=str(state.price),
-                        average_filled_price=str(state.average_fill_price) if state.average_fill_price else None
-                    )
-                    
-        return None
+    async def get_order_status(self, order_id: str) -> Optional[Dict]:
+        """Get the status and details of a specific simulated order."""
+        logger.debug(f"DryRun: Getting status for order ID: {order_id}")
+        with self._lock:
+            order_state = self._order_states.get(order_id)
+            if not order_state:
+                logger.warning(f"DryRun: Order {order_id} not found.")
+                return None
+            # Return a copy of the state as a dictionary
+            # Ensure datetime objects are handled if needed (e.g., isoformat)
+            return order_state.model_dump()
         
     def set_simulated_price(self, product_id: str, price: float):
         """Set the simulated price for a product"""
@@ -629,24 +608,29 @@ class DryRunExecutor:
                 f"({(price_change/current_price)*100:.2f}%)"
             )
 
-    def _log_trade(self, order: Order, execution_result: OrderExecutionResult):
-        """Log trade details for analysis"""
-        trade_entry = {
-            'timestamp': datetime.utcnow(),
-            'order_id': order.order_id,
-            'product_id': order.product_id,
-            'side': order.side,
-            'type': order.order_type,
-            'size': float(order.size),
-            'price': float(order.price) if order.price else None,
-            'filled_size': float(order.filled_size) if order.filled_size else 0.0,
-            'status': order.status,
-            'success': execution_result.success,
-            'error': execution_result.error,
-            'latency': execution_result.metadata.get('execution_latency', 0),
-            'simulated': True
+    def _log_trade(self, order: OrderBase, execution_result: OrderExecutionResult):
+        """Log executed trade details."""
+        # Ensure order has necessary attributes before logging
+        order_id = getattr(order, 'order_id', 'N/A')
+        product_id = getattr(order, 'product_id', 'N/A')
+        side = getattr(order, 'side', 'N/A')
+        order_type = getattr(order, 'type', 'N/A') # Assuming type attribute exists
+        size = getattr(order, 'size', 'N/A')
+        price = getattr(order, 'price', 'N/A') # Assuming price attribute exists
+        
+        trade_log = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "order_id": order_id,
+            "product_id": product_id,
+            "side": side.value if hasattr(side, 'value') else side, # Handle enum or string
+            "type": order_type.value if hasattr(order_type, 'value') else order_type,
+            "size": str(size), # Convert Decimal/float to string
+            "price": str(price),
+            "success": execution_result.success,
+            "error": execution_result.error,
+            "simulated": True
         }
-        self._trade_log.append(trade_entry)
+        self._trade_log.append(trade_log)
         
         # Update simulation statistics
         self._simulation_stats['total_trades'] += 1

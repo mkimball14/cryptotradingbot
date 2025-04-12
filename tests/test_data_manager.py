@@ -7,15 +7,25 @@ import time
 from datetime import datetime, timedelta, timezone
 # Correct import for pandas-ta
 import pandas_ta as ta
+import unittest
+import os
+import json
 
-# Adjust imports based on your project structure
-from src.database.models import Base, Candle, Zone
-from src.data_manager import DataManager, TIMEFRAME_TO_GRANULARITY # Import helper dict
+# Updated import path
+from app.core.database.models import Base, Candle, Zone
+
+# Adjust path to find DataManager in the correct location (now in app/core)
+from app.core.data_manager import DataManager, TIMEFRAME_TO_GRANULARITY # Import helper dict from correct location
 # Remove Granularity import, import OHLCVProcessor
 from app.core.data_processor import OHLCVProcessor
-from src.zone_detector import detect_base_patterns # Need this for direct use in test setup
-# Helper from test_zone_detector
-from tests.test_zone_detector import create_candle 
+# Import zone detector function from correct location
+from app.core.zone_detector import detect_base_patterns # Need this for direct use in test setup
+
+# Define helper function directly in the test file
+def create_candle(timestamp, o, h, l, c):
+    """Helper to create a candle Series."""
+    ts = pd.Timestamp(timestamp, tz=timezone.utc)
+    return pd.Series({'timestamp': ts, 'open': float(o), 'high': float(h), 'low': float(l), 'close': float(c)})
 
 # In-memory SQLite database for testing
 DATABASE_URL = "sqlite:///:memory:"
@@ -41,7 +51,8 @@ def db_session():
 def mock_processor(): # Rename fixture
     """Provides a mock OHLCVProcessor instance."""
     # Patch the correct class where it's instantiated in DataManager
-    with patch('src.data_manager.OHLCVProcessor') as mock:
+    # Use the path relative to where DataManager imports it
+    with patch('app.core.data_manager.OHLCVProcessor') as mock:
         instance = mock.return_value
         # Mock the get_ohlcv method
         instance.get_ohlcv = MagicMock()

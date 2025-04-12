@@ -1,0 +1,131 @@
+# Task ID: 3
+# Title: Develop Supply/Demand Zone Detection Algorithm
+# Status: done
+# Dependencies: 2
+# Priority: high
+# Description: Implement the core zone detection logic to identify drop-base-rally and rally-base-drop patterns with quality scoring
+# Details:
+1. Create detect_zones() function to identify S/D zones
+2. Implement pattern recognition for drop-base-rally and rally-base-drop
+3. Add 'freshness' and 'confidence' scoring algorithms
+4. Implement zone metadata storage
+5. Create RSI confluence filter
+6. Develop multi-timeframe analysis logic
+7. Add functions to update zone status based on price action
+
+# Test Strategy:
+Backtest zone detection against historical data with known S/D zones. Validate scoring accuracy with manual review. Test performance on different market conditions.
+
+# Subtasks:
+## 1. Implement Base Pattern Recognition Logic [done]
+### Dependencies: None
+### Description: Create the core functions to detect drop-base-rally (demand) and rally-base-drop (supply) patterns in price data
+### Details:
+Implementation steps:
+1. Create a new module `zone_detection.py` with a `detect_zones()` function that takes OHLCV data as input
+2. Implement pattern recognition algorithm for drop-base-rally (demand zones):
+   - Identify significant price drops (using ATR or percentage-based thresholds)
+   - Detect consolidation areas (bases) after drops where price moves sideways
+   - Identify rallies after the base formation
+3. Implement pattern recognition for rally-base-drop (supply zones):
+   - Identify significant price rallies
+   - Detect consolidation areas after rallies
+   - Identify drops after the base formation
+4. Extract key zone information: entry point, exit point, high/low boundaries
+5. Return detected zones as a structured data format (list of dictionaries)
+
+Testing approach:
+- Create unit tests with known price patterns to verify detection accuracy
+- Visualize detected patterns on sample charts to manually verify correctness
+
+## 2. Develop Zone Scoring Algorithms [done]
+### Dependencies: 3.1
+### Description: Implement algorithms to score detected zones based on 'freshness' (recency) and 'confidence' (pattern quality)
+### Details:
+Implementation steps:
+1. Extend the zone detection module to add scoring functionality
+2. Implement 'freshness' scoring algorithm:
+   - Calculate time elapsed since zone formation
+   - Apply decay function to reduce score as zones age
+   - Normalize scores to 0-100 range
+3. Implement 'confidence' scoring algorithm based on pattern quality:
+   - Score based on clarity of the base formation (tightness of consolidation)
+   - Score based on strength of preceding move (drop or rally magnitude)
+   - Score based on volume characteristics during pattern formation
+   - Score based on candlestick patterns within the base
+4. Create a combined quality score that weights freshness and confidence
+5. Add scoring data to zone metadata
+
+Testing approach:
+- Unit test each scoring component with controlled inputs
+- Create test cases for zones of varying quality to verify scoring accuracy
+- Implement visualization of scored zones to verify intuitive results
+
+## 3. Implement Zone Metadata Management [done]
+### Dependencies: 3.1, 3.2
+### Description: Create data structures and functions to store, retrieve, and manage zone metadata
+### Details:
+Implementation steps:
+1. Design a comprehensive zone metadata structure including:
+   - Zone type (supply/demand)
+   - Price boundaries (entry, exit, high, low)
+   - Formation timestamps (start, end)
+   - Scoring information (freshness, confidence, combined score)
+   - Current status (active, tested, broken, untested)
+   - Historical interactions with price
+2. Implement functions to create and store zone metadata
+3. Create serialization/deserialization methods for persistence
+4. Implement query functions to retrieve zones by type, status, score, etc.
+5. Add functionality to track zone interactions across time
+
+Testing approach:
+- Unit test metadata creation with various zone types
+- Test serialization/deserialization for data integrity
+- Verify query functions return expected results
+- Test with large datasets to ensure efficient storage and retrieval
+
+## 4. Develop RSI Confluence and Filtering Logic [done]
+### Dependencies: 3.1, 3.3
+### Description: Implement RSI-based filtering to improve zone quality and add confluence detection
+### Details:
+Implementation steps:
+1. Extend zone detection to incorporate RSI (Relative Strength Index) analysis
+2. Implement RSI calculation function or integrate with existing indicators
+3. Create filtering logic to identify zones with RSI confluence:
+   - For demand zones: identify when RSI is in oversold territory
+   - For supply zones: identify when RSI is in overbought territory
+4. Add RSI values to zone metadata
+5. Implement functions to filter zones based on RSI confluence criteria
+6. Create scoring adjustment based on RSI confluence strength
+
+Testing approach:
+- Unit test RSI calculation against known values
+- Test filtering logic with various RSI scenarios
+- Verify that high-confluence zones have appropriate score adjustments
+- Create visualization tests to confirm RSI confluence visually
+
+## 5. Implement Multi-timeframe Analysis and Zone Status Updates [done]
+### Dependencies: 3.1, 3.2, 3.3, 3.4
+### Description: Develop functionality for multi-timeframe zone analysis and dynamic status updates based on price action
+### Details:
+Implementation steps:
+1. Implement multi-timeframe zone detection:
+   - Create functions to detect zones across different timeframes
+   - Develop logic to merge/align zones from different timeframes
+   - Implement scoring adjustments for zones confirmed across timeframes
+2. Create zone status update functionality:
+   - Implement logic to detect when price approaches a zone
+   - Create functions to update zone status when price tests a zone
+   - Develop logic to mark zones as broken when price moves through them
+   - Add functions to track repeated tests of the same zone
+3. Implement zone strength reassessment based on price interaction
+4. Create event notification system for zone status changes
+5. Develop functions to clean up/archive old or invalid zones
+
+Testing approach:
+- Test with historical data spanning multiple timeframes
+- Create scenarios with zone tests, breaks, and retests
+- Verify correct status transitions in various price action scenarios
+- Test notification system for expected alerts
+- Verify zone cleanup works correctly for outdated zones
+

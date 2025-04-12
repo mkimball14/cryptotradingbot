@@ -5,11 +5,18 @@ import base64
 import json
 import logging
 from typing import Dict, Optional, List, Union, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import httpx
-from pydantic import BaseModel, Field
 from app.core.config import Settings
-from enum import Enum
+import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+import urllib.parse  # Import for URL encoding
+import secrets  # Import for generating nonce
+
+# Import consolidated models and enums
+from app.models.order import OrderSide, OrderType, OrderStatus, TimeInForce, OrderBase, MarketOrder, LimitOrder # Assuming these cover needed Order details
+from app.models.position import Position
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -22,48 +29,6 @@ class CoinbaseError(Exception):
         self.response = response
         super().__init__(self.message)
 
-class OrderSide(str, Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-
-class OrderType(str, Enum):
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
-    STOP = "STOP"
-    STOP_LIMIT = "STOP_LIMIT"
-
-class OrderStatus(str, Enum):
-    PENDING = "PENDING"
-    OPEN = "OPEN"
-    FILLED = "FILLED"
-    CANCELLED = "CANCELLED"
-    EXPIRED = "EXPIRED"
-    FAILED = "FAILED"
-
-class Order(BaseModel):
-    order_id: str = Field(..., description="Unique order identifier")
-    client_order_id: Optional[str] = Field(None, description="Client-specified order ID")
-    product_id: str = Field(..., description="Trading pair identifier")
-    side: str = Field(..., description="Order side (BUY/SELL)")
-    order_type: str = Field(..., description="Order type")
-    status: str = Field(..., description="Current order status")
-    time_in_force: str = Field(..., description="Time in force policy")
-    created_time: datetime = Field(..., description="Order creation timestamp")
-    price: Optional[float] = Field(None, description="Limit price for the order")
-    size: float = Field(..., description="Order size in base currency")
-    filled_size: float = Field(0.0, description="Amount of order that has been filled")
-    average_filled_price: Optional[float] = Field(None, description="Average price of filled size")
-
-class Position(BaseModel):
-    product_id: str = Field(..., description="Trading pair identifier")
-    position_size: float = Field(..., description="Current position size")
-    entry_price: float = Field(..., description="Average entry price")
-    mark_price: float = Field(..., description="Current market price")
-    unrealized_pl: float = Field(..., description="Unrealized profit/loss")
-    realized_pl: float = Field(..., description="Realized profit/loss")
-    initial_margin: float = Field(..., description="Initial margin requirement")
-    maintenance_margin: float = Field(..., description="Maintenance margin requirement")
-
 class CoinbaseClient:
     def __init__(self, settings: Settings):
         """
@@ -73,32 +38,96 @@ class CoinbaseClient:
             settings (Settings): Application settings containing API credentials
         """
         self.settings = settings
-        self.api_key = settings.COINBASE_API_KEY
-        self.api_secret = settings.COINBASE_API_SECRET
-        self.passphrase = settings.COINBASE_API_PASSPHRASE
+        self.key_name = settings.COINBASE_JWT_KEY_NAME
+        self.private_key_pem = settings.COINBASE_JWT_PRIVATE_KEY
         self.api_url = settings.COINBASE_API_URL
+
+        # Load the private key
+        try:
+            self.private_key = serialization.load_pem_private_key(
+                self.private_key_pem.encode('utf-8'),
+                password=None
+            )
+            if not isinstance(self.private_key, ec.EllipticCurvePrivateKey):
+                 raise TypeError("Loaded key is not an EC private key.")
+        except Exception as e:
+            logger.error(f"Failed to load private key: {e}")
+            raise CoinbaseError(f"Invalid private key format or content: {e}")
         
-    def _generate_signature(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
+    def _generate_jwt(self, method: str, uri: str, body: str = "") -> str:
         """
-        Generate signature for API request
+        Generate a JWT for API request authentication according to Coinbase Advanced Trade API specs.
         
         Args:
-            timestamp (str): Request timestamp
-            method (str): HTTP method
-            request_path (str): API endpoint path
-            body (str): Request body
+            method (str): HTTP method (e.g., "GET", "POST").
+            uri (str): Request URI (e.g., "/api/v3/brokerage/orders").
+            body (str): Request body (empty string for GET requests).
             
         Returns:
-            str: Base64 encoded signature
+            str: The generated JWT.
         """
-        message = f"{timestamp}{method.upper()}{request_path}{body}"
-        signature = hmac.new(
-            base64.b64decode(self.api_secret),
-            message.encode('utf-8'),
-            hashlib.sha256
-        )
-        return base64.b64encode(signature.digest()).decode('utf-8')
+        timestamp = int(time.time())
         
+        # Build the URI in the format required by Coinbase
+        # Extract host from API URL
+        host = urllib.parse.urlparse(self.api_url).netloc
+        
+        # Get the API path from the URL (like "/api/v3/brokerage")
+        api_path = urllib.parse.urlparse(self.api_url).path
+        
+        # Make sure we have the full path for the URI by combining the API path and the endpoint
+        full_path = api_path
+        if uri:
+            # Ensure no double slashes
+            if uri.startswith('/') and api_path.endswith('/'):
+                full_path = f"{api_path}{uri[1:]}"
+            elif not uri.startswith('/') and not api_path.endswith('/'):
+                full_path = f"{api_path}/{uri}"
+            else:
+                full_path = f"{api_path}{uri}"
+        
+        # Format the URI as "METHOD host/path" according to Coinbase docs
+        full_uri = f"{method.upper()} {host}{full_path}"
+        logger.debug(f"JWT URI: {full_uri}")
+        
+        # JWT payload - must match Coinbase requirements exactly
+        payload = {
+            "sub": self.key_name,        # API key name
+            "iss": "cdp",                # Must be exactly "cdp" per docs
+            "nbf": timestamp,            # Not before - current time
+            "exp": timestamp + 120,      # 2-minute expiration
+            "uri": full_uri              # "METHOD host/path" format
+        }
+        
+        # JWT headers - must include key ID and a unique nonce
+        headers = {
+            "kid": self.key_name,             # Same as sub claim
+            "nonce": secrets.token_hex()      # Random hex string for nonce
+        }
+        
+        # ---> ADDED DETAILED LOGGING <---
+        logger.info(f"[REST JWT PRE-ENCODE] Payload: {json.dumps(payload)}")
+        logger.info(f"[REST JWT PRE-ENCODE] Headers: {json.dumps(headers)}")
+        logger.info(f"[REST JWT PRE-ENCODE] Private Key Type: {type(self.private_key)}")
+        # ---> END ADDED LOGGING <---
+
+        logger.debug(f"JWT Payload: {json.dumps(payload, indent=2)}")
+        logger.debug(f"JWT Headers: {json.dumps(headers, indent=2)}")
+        
+        try:
+            jwt_token = jwt.encode(
+                payload=payload,
+                key=self.private_key,
+                algorithm="ES256",  # Must be ES256 for Coinbase
+                headers=headers
+            )
+            logger.debug(f"Generated JWT token (first 50 chars): {jwt_token[:50]}...")
+            return jwt_token
+        except Exception as e:
+            logger.error(f"Private key type during JWT generation: {type(self.private_key)}")
+            logger.error(f"Error generating JWT: {e}", exc_info=True)
+            raise CoinbaseError(f"Failed to generate JWT: {e}")
+
     async def _request(
         self,
         method: str,
@@ -107,11 +136,11 @@ class CoinbaseClient:
         data: Optional[Dict] = None
     ) -> Dict:
         """
-        Make authenticated request to Coinbase API
+        Make authenticated request to Coinbase API using JWT.
         
         Args:
             method (str): HTTP method
-            endpoint (str): API endpoint
+            endpoint (str): API endpoint (e.g., /orders)
             params (Optional[Dict]): Query parameters
             data (Optional[Dict]): Request body data
             
@@ -121,42 +150,46 @@ class CoinbaseClient:
         Raises:
             CoinbaseError: If the API request fails
         """
-        timestamp = str(int(time.time()))
         url = f"{self.api_url}{endpoint}"
-        
-        # Convert data to JSON string for signature
         body = json.dumps(data) if data else ""
         
-        # Debug 
+        # For JWT generation, we need the path part of the URL
+        # First, strip leading slash to avoid double slashes
+        clean_endpoint = endpoint.lstrip('/')
+        
+        # Handle query parameters for both the URL and JWT URI construction
+        processed_endpoint = clean_endpoint
+        if params:
+            # Build the query string for the URL
+            query_parts = []
+            for key in sorted(params.keys()):
+                encoded_key = urllib.parse.quote(str(key))
+                encoded_value = urllib.parse.quote(str(params[key]))
+                query_parts.append(f"{encoded_key}={encoded_value}")
+            
+            query_string = "&".join(query_parts)
+            # Add query params to endpoint for JWT generation
+            processed_endpoint = f"{clean_endpoint}?{query_string}"
+        
         logger.debug(f"API URL: {url}")
         logger.debug(f"Method: {method}")
-        logger.debug(f"API Key: {self.api_key[:10]}...")
-        logger.debug(f"API Secret length: {len(self.api_secret)}")
+        logger.debug(f"Processed endpoint for JWT: {processed_endpoint}")
         
         try:
-            # Test base64 decoding here to catch issues early
-            try:
-                base64.b64decode(self.api_secret)
-                logger.debug("Base64 decoding successful")
-            except Exception as e:
-                logger.error(f"Base64 decoding failed: {str(e)}")
-                raise CoinbaseError(f"Invalid API secret format: {str(e)}")
-                
+            # Generate JWT token with the properly formatted URI
+            jwt_token = self._generate_jwt(method, processed_endpoint, body)
+            
+            # Set up request headers
             headers = {
-                "CB-ACCESS-KEY": self.api_key,
-                "CB-ACCESS-SIGN": self._generate_signature(timestamp, method, endpoint, body),
-                "CB-ACCESS-TIMESTAMP": timestamp,
+                "Authorization": f"Bearer {jwt_token}",
                 "Content-Type": "application/json",
+                "Accept": "application/json"
             }
             
-            if self.passphrase:
-                headers["CB-ACCESS-PASSPHRASE"] = self.passphrase
+            logger.debug(f"Request headers: {', '.join(headers.keys())}")
             
-            # Debug headers (safely - not showing full values)
-            logger.debug(f"Headers: {', '.join(headers.keys())}")
-                
             async with httpx.AsyncClient() as client:
-                logger.debug(f"Sending request to {url}")
+                logger.debug(f"Sending {method} request to {url}")
                 response = await client.request(
                     method=method,
                     url=url,
@@ -166,19 +199,34 @@ class CoinbaseClient:
                     timeout=30.0
                 )
                 
-                logger.debug(f"Response status: {response.status_code}")
+                logger.info(f"HTTP Request: {method} {url} {response!r}")
                 
                 # For 4xx and 5xx responses, print the response body for debugging
                 if response.status_code >= 400:
                     logger.error(f"Error response: {response.text}")
+                    logger.error(f"Response headers: {response.headers}")
+                    try:
+                        error_json = response.json()
+                        logger.error(f"Detailed error: {json.dumps(error_json, indent=2)}")
+                    except:
+                        logger.error(f"Raw error text: {response.text}")
                     
                 response.raise_for_status()
-                return await response.json()
+                
+                # Handle the response
+                try:
+                    return response.json()
+                except Exception as e:
+                    # If the response isn't JSON, return the text content
+                    if response.text:
+                        return {"text": response.text}
+                    else:
+                        return {"status": "success", "message": "No content"}
                 
         except httpx.HTTPStatusError as e:
             error_data = {}
             try:
-                error_data = await e.response.json()
+                error_data = e.response.json()
                 logger.error(f"HTTP error data: {error_data}")
             except:
                 logger.error(f"Failed to parse error response: {e.response.text}")
@@ -209,7 +257,17 @@ class CoinbaseClient:
     async def get_products(self) -> List[Dict]:
         """Get list of available products"""
         response = await self._request("GET", "/products")
-        return response.get("products", [])
+        
+        # Handle different response formats
+        if isinstance(response, list):
+            # Exchange API returns products as a list directly
+            return response
+        elif isinstance(response, dict) and "products" in response:
+            # Advanced Trade API returns products in a dict with 'products' key
+            return response.get("products", [])
+        else:
+            logger.warning(f"Unexpected products response format: {type(response)}")
+            return []
         
     async def get_product(self, product_id: str) -> Dict:
         """Get product details by ID"""
@@ -254,52 +312,56 @@ class CoinbaseClient:
     async def create_order(
         self,
         product_id: str,
-        side: str,
-        order_type: str,
+        side: OrderSide,
+        order_type: OrderType,
         size: float,
         price: Optional[float] = None,
         stop_price: Optional[float] = None,
         client_order_id: Optional[str] = None,
-        time_in_force: str = "GTC"
-    ) -> Order:
+        time_in_force: TimeInForce = TimeInForce.GTC
+    ) -> Dict:
         """
         Create a new order
         
         Args:
             product_id (str): Trading pair ID
-            side (str): Order side (BUY/SELL)
-            order_type (str): Order type (MARKET/LIMIT/STOP/STOP_LIMIT)
+            side (OrderSide): Order side (BUY/SELL)
+            order_type (OrderType): Order type (MARKET/LIMIT/STOP/STOP_LIMIT)
             size (float): Order size in base currency
             price (Optional[float]): Limit price (required for LIMIT orders)
             stop_price (Optional[float]): Stop price (required for STOP/STOP_LIMIT orders)
             client_order_id (Optional[str]): Client-specified order ID
-            time_in_force (str): Time in force policy (GTC/GTT/IOC/FOK)
+            time_in_force (TimeInForce): Time in force policy (GTC/GTT/IOC/FOK)
             
         Returns:
-            Order: Created order details
+            Dict: Raw response from order creation
         """
+        # Convert enums to string values for the API request
+        order_type_str = order_type.value.lower()
+        
         data = {
             "product_id": product_id,
-            "side": side,
+            "side": side.value.upper(),
             "order_configuration": {
-                order_type.lower(): {
+                order_type_str: {
                     "size": str(size),
-                    "time_in_force": time_in_force
+                    "time_in_force": time_in_force.value
                 }
             }
         }
         
-        if price is not None:
-            data["order_configuration"][order_type.lower()]["limit_price"] = str(price)
+        if price is not None and order_type in [OrderType.LIMIT, OrderType.STOP_LIMIT]:
+             data["order_configuration"][order_type_str]["limit_price"] = str(price)
             
-        if stop_price is not None:
-            data["order_configuration"][order_type.lower()]["stop_price"] = str(stop_price)
+        if stop_price is not None and order_type in [OrderType.STOP, OrderType.STOP_LIMIT]:
+            data["order_configuration"][order_type_str]["stop_price"] = str(stop_price)
             
         if client_order_id:
             data["client_order_id"] = client_order_id
             
         response = await self._request("POST", "/orders", data=data)
-        return Order(**response["order"])
+        # Return the raw response dict for now, Pydantic parsing can be added later if needed
+        return response
         
     async def cancel_order(self, order_id: str) -> Dict:
         """Cancel an order by ID"""
@@ -308,33 +370,34 @@ class CoinbaseClient:
     async def get_orders(
         self,
         product_id: Optional[str] = None,
-        status: Optional[List[str]] = None,
+        status: Optional[List[OrderStatus]] = None,
         limit: int = 100
-    ) -> List[Order]:
+    ) -> List[Dict]:
         """
         Get list of orders
         
         Args:
             product_id (Optional[str]): Filter by product ID
-            status (Optional[List[str]]): Filter by order status
+            status (Optional[List[OrderStatus]]): Filter by order status
             limit (int): Maximum number of orders to return
             
         Returns:
-            List[Order]: List of orders
+            List[Dict]: Raw list of orders from API
         """
         params = {"limit": limit}
         if product_id:
             params["product_id"] = product_id
         if status:
-            params["status"] = ",".join(status)
+            # Convert list of enums to comma-separated string of values
+            params["status"] = ",".join([s.value for s in status])
             
         response = await self._request("GET", "/orders", params=params)
-        return [Order(**order) for order in response.get("orders", [])]
+        return response.get("orders", [])
         
-    async def get_order(self, order_id: str) -> Order:
+    async def get_order(self, order_id: str) -> Dict:
         """Get order details by ID"""
         response = await self._request("GET", f"/orders/{order_id}")
-        return Order(**response["order"])
+        return response
         
     # Market data endpoints
     async def get_market_trades(
@@ -373,9 +436,12 @@ class CoinbaseClient:
             params["product_id"] = product_id
             
         response = await self._request("GET", "/positions", params=params)
-        return [Position(**pos) for pos in response.get("positions", [])]
+        # Parse raw response into list of Position models
+        positions_data = response.get("positions", [])
+        return [Position(**pos) for pos in positions_data]
         
     async def get_position(self, product_id: str) -> Position:
         """Get position for specific product"""
         response = await self._request("GET", f"/positions/{product_id}")
+        # Parse raw response into Position model
         return Position(**response["position"]) 

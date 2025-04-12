@@ -1,0 +1,16 @@
+# Task ID: 13
+# Title: Implement Strategy Voting Engine
+# Status: todo
+# Dependencies: 6, 11
+# Priority: medium
+# Description: Build voting mechanism between strategies. Use consensus or weighted votes. Integrate into execution layer and backtest logic.
+# Details:
+1. Design voting protocol between strategies
+2. Implement consensus mechanism
+3. Add vote weighting based on performance
+4. Create voting history tracking
+5. Integrate with execution system
+6. Add backtest support for voting
+
+# Test Strategy:
+Test voting logic with multiple strategies. Verify consensus mechanism. Validate integration with execution.

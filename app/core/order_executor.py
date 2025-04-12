@@ -5,18 +5,20 @@ from pydantic import BaseModel, ConfigDict
 import asyncio
 import pandas as pd
 import statistics
+import uuid
+import time
+from enum import Enum
 
 from app.core.coinbase import (
     CoinbaseClient,
-    Order,
     OrderSide,
     OrderStatus,
     CoinbaseError
 )
-from app.models.order import TimeInForce, OrderType
-from app.core.signal_manager import SignalManager
+from app.models.order import TimeInForce, OrderType, OrderBase
+from app.core.signal_manager import SignalManager, SignalConfirmation
 from app.models.zone import Zone
-from app.models.signal_confirmation import SignalConfirmation
+from app.models.position import Position
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +30,9 @@ class BracketOrderResult(BaseModel):
     """Model for bracket order execution results"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    entry_order: Optional[Order] = None
-    stop_loss_order: Optional[Order] = None
-    take_profit_order: Optional[Order] = None
+    entry_order: Optional[OrderBase] = None
+    stop_loss_order: Optional[OrderBase] = None
+    take_profit_order: Optional[OrderBase] = None
     success: bool
     error: Optional[str] = None
     execution_time: datetime
@@ -41,7 +43,7 @@ class OrderExecutionResult(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     success: bool
-    order: Optional[Order] = None
+    order: Optional[OrderBase] = None
     error: Optional[str] = None
     execution_time: datetime
     metadata: Optional[Dict] = None
@@ -690,43 +692,58 @@ class OrderExecutor:
                 metadata={"error_type": "execution_error"}
             )
             
-    async def get_order_status(self, order_id: str) -> Optional[Order]:
-        """
-        Get the current status of an order.
-        
-        Args:
-            order_id: ID of the order to check
+    async def get_order_status(self, order_id: str) -> Optional[Dict]:
+        """Get the status and details of a specific order."""
+        logger.debug(f"Getting status for order ID: {order_id}")
+        # Check internal cache first
+        if order_id in self._order_states:
+            logger.debug(f"Order {order_id} found in internal state cache.")
+            # Return a representation compatible with expected output, might need adjustment
+            # For now, just return the state model dict. Might need Pydantic model.
+            return self._order_states[order_id].model_dump() # Return dict from Pydantic model
             
-        Returns:
-            Order object if found, None if not found
-        """
+        # If not in cache, fetch from API
         try:
-            return await self.client.get_order(order_id)
+            order_data = await self.client.get_order(order_id)
+            # TODO: Update internal cache self._order_states here if needed
+            # TODO: Potentially parse order_data dict into a consistent Pydantic model before returning
+            return order_data # Return raw dict from client
         except CoinbaseError as e:
-            logger.error(f"Error getting order status: {str(e)}")
-            return None
-            
+            logger.error(f"Failed to get status for order {order_id} from API: {e}")
+            if e.status_code == 404:
+                return None # Order not found
+            raise OrderExecutionError(f"API error fetching order {order_id}: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching order status for {order_id}: {e}", exc_info=True)
+            raise OrderExecutionError(f"Unexpected error fetching order status: {e}") from e
+
     async def get_open_orders(
         self,
         product_id: Optional[str] = None
-    ) -> List[Order]:
+    ) -> List[Dict]:
         """
-        Get list of open orders.
+        Get a list of all open orders, optionally filtered by product ID.
         
-        Args:
-            product_id: Optional product ID to filter by
-            
         Returns:
-            List of open orders
+            List of open order details (raw dictionaries from API).
         """
+        logger.debug(f"Getting open orders for product: {product_id or 'all'}")
         try:
-            return await self.client.get_orders(
-                product_id=product_id,
-                status=[OrderStatus.PENDING, OrderStatus.OPEN]
-            )
+            # Filter for non-final statuses
+            open_statuses = [
+                OrderStatus.PENDING,
+                OrderStatus.OPEN,
+                # Add other potentially relevant non-final statuses if applicable
+            ]
+            orders = await self.client.get_orders(product_id=product_id, status=open_statuses)
+            # TODO: Potentially parse list of dicts into consistent Pydantic models
+            return orders # Return raw list of dicts
         except CoinbaseError as e:
-            logger.error(f"Error getting open orders: {str(e)}")
-            return []
+            logger.error(f"Failed to get open orders from API: {e}")
+            raise OrderExecutionError(f"API error fetching open orders: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error fetching open orders: {e}", exc_info=True)
+            raise OrderExecutionError(f"Unexpected error fetching open orders: {e}") from e
 
     async def validate_signal(
         self,

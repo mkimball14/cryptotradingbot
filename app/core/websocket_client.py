@@ -2,7 +2,7 @@ import json
 import asyncio
 import time
 import logging
-from typing import Dict, Optional, List, Callable, Any
+from typing import Dict, Optional, List, Callable, Any, Union, Set
 import websockets
 from websockets.exceptions import ConnectionClosed
 from pydantic import BaseModel
@@ -17,6 +17,8 @@ import os
 import uuid
 from urllib.parse import urlparse
 from app.core.config import Settings, get_settings
+import random
+import secrets
 
 # Configure logging for WebSocket client
 logger = logging.getLogger(__name__)
@@ -50,259 +52,223 @@ class WebSocketMessage(BaseModel):
 class CoinbaseWebSocketClient:
     """
     WebSocket client for Coinbase Advanced Trade API
+    
+    This client supports connection to the Coinbase Advanced Trade WebSocket API,
+    which provides real-time market data and user account updates.
+    
+    Available channels:
+    - ticker: Real-time price updates
+    - level2: Order book updates
+    - user: User account updates
+    - status: Platform status updates
+    - market_trades: Real-time trade execution data
+    - candles: Candlestick updates (1m, 5m, 15m, 1h, etc.)
     """
-    def __init__(self, settings=None, retry=True):
+    def __init__(
+        self, 
+        settings: Optional[Settings] = None,
+        on_message: Optional[Callable[[Dict], Any]] = None,
+        on_error: Optional[Callable[[Exception], Any]] = None,
+        on_connect: Optional[Callable[[], Any]] = None,
+        on_disconnect: Optional[Callable[[], Any]] = None,
+        auto_reconnect: bool = True,
+        max_reconnect_attempts: int = 5,
+        reconnect_delay: int = 5  # seconds
+    ):
         """
         Initialize WebSocket client.
         
         Args:
             settings: Application settings
-            retry: Whether to retry connection on failure
+            on_message: Callback function for received messages
+            on_error: Callback function for errors
+            on_connect: Callback function for successful connections
+            on_disconnect: Callback function for disconnections
+            auto_reconnect: Whether to automatically reconnect on disconnection
+            max_reconnect_attempts: Maximum number of reconnection attempts
+            reconnect_delay: Delay between reconnection attempts in seconds
         """
         self.settings = settings or get_settings()
+        self.on_message = on_message or self._default_message_handler
+        self.on_error = on_error or self._default_error_handler
+        self.on_connect = on_connect or self._default_connect_handler
+        self.on_disconnect = on_disconnect or self._default_disconnect_handler
+        
+        # Connection settings
         self.websocket = None
         self.is_connected = False
-        self.base_url = "wss://advanced-trade-ws.coinbase.com"
-        self.max_retries = 5 if retry else 0
-        self.retry_delay = 3  # seconds
-        self.retry = retry  # Store retry flag
-        self._exception = None
-        self.subscribed_channels = {}
+        self.is_authenticating = False
+        self.base_url = self.settings.COINBASE_WS_URL
+        self.auto_reconnect = auto_reconnect
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self.reconnect_delay = reconnect_delay
+        self.reconnect_attempts = 0
+        
+        # Subscription tracking
+        self.active_subscriptions: Dict[str, Set[str]] = {}  # channel -> set of product_ids
         self.message_queue = asyncio.Queue()
         self.message_processor_task = None
-        self.receive_lock = asyncio.Lock()
+        self.heartbeat_task = None
         
-        # Set up logging
-        logger.debug(f"Initializing WebSocket client with API key: {self.settings.COINBASE_API_KEY[:5]}...")
-
-    async def _load_api_key(self):
-        """
-        Load API key and secret from settings.
-        """
-        try:
-            api_key = self.settings.COINBASE_API_KEY
-            api_secret = self.settings.COINBASE_API_SECRET
-            
-            if not api_key or not api_secret:
-                raise ValueError("API key or secret not found in settings")
-                
-            logger.debug(f"Successfully loaded API credentials from settings")
-            return api_key, api_secret
-            
-        except Exception as e:
-            logger.error(f"Failed to load API credentials: {str(e)}")
-            raise
-
-    async def _generate_jwt(self) -> str:
-        """
-        Generate a JWT token using the EC private key from Coinbase API.
-        """
-        try:
-            # Load API key and secret
-            api_key, api_secret = await self._load_api_key()
-            
-            logger.debug(f"API key: {api_key}")
-            logger.debug(f"API secret format: {'PEM format' if api_secret.startswith('-----BEGIN') else 'Raw format'}")
-            
-            # Ensure API secret is properly formatted with PEM headers
-            if not api_secret.startswith("-----BEGIN EC PRIVATE KEY-----"):
-                logger.debug("API secret is missing PEM headers, adding them")
-                api_secret = f"-----BEGIN EC PRIVATE KEY-----\n{api_secret}\n-----END EC PRIVATE KEY-----"
-            
-            logger.debug("Loading private key from PEM format")
-            
-            # Extract private key bytes in correct format
+        # Configure JWT key if available
+        self.private_key = None
+        if self.settings.COINBASE_JWT_PRIVATE_KEY:
             try:
-                private_key = serialization.load_pem_private_key(
-                    api_secret.encode(),
+                self.private_key = serialization.load_pem_private_key(
+                    self.settings.COINBASE_JWT_PRIVATE_KEY.encode(),
                     password=None,
                     backend=default_backend()
                 )
-                
-                # Get private key in correct format for JWT signing
-                private_bytes = private_key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=serialization.NoEncryption()
-                )
-                
-                # Log key details for debugging
-                if isinstance(private_key, ec.EllipticCurvePrivateKey):
-                    curve_name = private_key.curve.name
-                    key_size = private_key.curve.key_size
-                    logger.debug(f"Private key loaded successfully - curve: {curve_name}, size: {key_size} bits")
+                logger.info("Loaded JWT private key for authentication")
             except Exception as e:
-                logger.error(f"Failed to load private key: {str(e)}")
-                raise ValueError(f"Invalid private key format: {str(e)}")
-            
-            # Current time in seconds
-            timestamp = int(time.time())
-            
-            # Create JWT payload (claims)
-            payload = {
-                "sub": api_key,  # Subject (API key)
-                "iss": "coinbase-cloud",  # Issuer
-                "nbf": timestamp,  # Not Before
-                "exp": timestamp + 60,  # Expiration (1 minute)
-                "iat": timestamp,  # Issued At
-                "aud": ["retail_websocket"]  # Audience
-            }
-            
-            # Create simplified JWT header
-            header = {
-                "alg": "ES256",  # Algorithm (ECDSA with SHA-256)
-                "kid": api_key,  # Key ID
-                "typ": "JWT"     # Type
-            }
-            
-            logger.debug(f"JWT header: {json.dumps(header)}")
-            logger.debug(f"JWT payload: {json.dumps(payload)}")
-            
-            # Generate the JWT token using PEM string
-            token = jwt.encode(
-                payload=payload,
-                key=private_bytes.decode('utf-8'),  # Use PEM string directly
-                algorithm="ES256",
-                headers=header
-            )
-            
-            logger.debug(f"JWT token generated successfully, length: {len(token)}")
-            return token
-            
-        except Exception as e:
-            logger.error(f"Failed to generate JWT token: {str(e)}")
-            raise
+                logger.error(f"Failed to load JWT private key: {str(e)}")
+                self.private_key = None
+        
+        logger.debug(f"Initialized WebSocket client with Coinbase Advanced Trade API")
 
-    async def _message_receiver(self):
-        """Background task to receive messages and put them in the queue."""
+    async def connect(self) -> bool:
+        """
+        Connect to the WebSocket server.
+        
+        Returns:
+            bool: True if connection was successful, False otherwise
+        """
+        if self.is_connected:
+            logger.debug("Already connected to WebSocket server")
+            return True
+
         try:
-            logger.debug("Message receiver task started")
-            while self.is_connected and self.websocket:
-                try:
-                    message = await self.websocket.recv()
-                    message_data = json.loads(message)
-                    await self.message_queue.put(message_data)
-                    
-                    # Log message type for debugging
-                    message_type = message_data.get("type", "unknown")
-                    if message_type == "error":
-                        logger.error(f"Received error: {message_data.get('message', 'Unknown error')}")
-                    elif message_type == "subscriptions":
-                        logger.info(f"Subscription update: {message_data}")
-                    else:
-                        logger.debug(f"Received message type: {message_type}")
-                    
-                except (websockets.ConnectionClosed, asyncio.CancelledError):
-                    logger.debug("WebSocket connection closed in receiver")
-                    self.is_connected = False
-                    break
-                except Exception as e:
-                    logger.error(f"Error receiving message: {str(e)}")
-                    continue
-        except asyncio.CancelledError:
-            logger.debug("Message receiver task cancelled")
-        except Exception as e:
-            logger.error(f"Unexpected error in message receiver: {str(e)}")
-        finally:
-            logger.debug("Message receiver task ended")
-
-    async def connect(self) -> None:
-        """Connect to the WebSocket server."""
-        try:
-            # Clean up existing connection
-            await self.disconnect()
-
-            logger.info("Attempting to connect to WebSocket server...")
-            self.websocket = await websockets.connect(self.base_url)
+            logger.info("Connecting to Coinbase WebSocket server...")
+            self.websocket = await websockets.connect(self.base_url, ping_interval=20)
+            logger.info("WebSocket TCP connection established.")
+            
             self.is_connected = True
-            logger.info("Successfully connected to WebSocket server")
-
+            self.reconnect_attempts = 0
+            
             # Start message receiver task
-            self.message_processor_task = asyncio.create_task(self._message_receiver())
+            self.message_processor_task = asyncio.create_task(self._message_processor())
             
-            # Authenticate immediately after connection
-            await self._authenticate()
-
+            # Start heartbeat task
+            self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            
+            # Call connection callback
+            logger.debug("Attempting to call on_connect callback...")
+            await self._on_connect(self.websocket)
+            logger.debug("Finished calling on_connect callback.")
+            
+            logger.info("Successfully connected to Coinbase WebSocket server (post-callback)")
+            return True
+            
         except Exception as e:
-            logger.error(f"Failed to connect to WebSocket server: {str(e)}")
+            logger.error(f"Failed during connect sequence: {str(e)}", exc_info=True)
             self.is_connected = False
-            if self.retry:
-                logger.info("Retrying connection in 5 seconds...")
-                await asyncio.sleep(5)
-                await self.connect() # Retry connection
-            else:
-                raise
-
-    async def _authenticate(self) -> None:
-        """Authenticate with the WebSocket server using JWT."""
-        try:
-            # Generate JWT token
-            token = await self._generate_jwt()
-            logger.debug("Generated JWT token for authentication")
             
-            # Send authentication message
-            auth_message = {
-                "type": "subscribe",
-                "product_ids": ["BTC-USD"],
-                "channel": "ticker",
-                "jwt": token
-            }
+            await self._safe_callback(self.on_error, e)
             
-            logger.debug(f"Sending authentication message: {json.dumps(auth_message)}")
-            await self.websocket.send(json.dumps(auth_message))
-            
-            # Wait for response from the queue
-            try:
-                response_data = await asyncio.wait_for(self.message_queue.get(), timeout=5.0)
-                logger.debug(f"Received authentication response: {json.dumps(response_data, indent=2)}")
+            if self.auto_reconnect and self.reconnect_attempts < self.max_reconnect_attempts:
+                self.reconnect_attempts += 1
+                delay = self.reconnect_delay * self.reconnect_attempts  # Exponential backoff
+                logger.info(f"Reconnecting in {delay} seconds... (Attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
+                await asyncio.sleep(delay)
+                return await self.connect()  # Retry connection
                 
-                if "error" in response_data:
-                    raise ValueError(f"Authentication failed: {response_data['message']}")
-                    
-                logger.info("Successfully authenticated with WebSocket server")
-                
-            except asyncio.TimeoutError:
-                raise ValueError("Authentication timed out waiting for response")
-                
-        except Exception as e:
-            logger.error(f"Authentication failed: {str(e)}")
-            raise
+            return False
 
     async def disconnect(self) -> None:
         """
-        Disconnect from the WebSocket server.
+        Disconnect from the WebSocket server and clean up resources.
         """
+        logger.info("Disconnecting from WebSocket server...")
+        
+        # Cancel tasks
         if self.message_processor_task and not self.message_processor_task.done():
             self.message_processor_task.cancel()
+            
+        if self.heartbeat_task and not self.heartbeat_task.done():
+            self.heartbeat_task.cancel()
+            
+        # Close WebSocket connection
+        if self.websocket:
             try:
-                await self.message_processor_task
-            except asyncio.CancelledError:
-                logger.debug("Message processor task cancelled")
+                await self.websocket.close()
+            except Exception as e:
+                logger.error(f"Error while closing WebSocket connection: {str(e)}")
+                
+        # Reset state
+        self.is_connected = False
+        self.websocket = None
         
-        if self.websocket and not self.websocket.closed:
-            await self.websocket.close()
-            self.is_connected = False
-            logger.info("Disconnected from WebSocket server")
+        # Call disconnect callback
+        await self._safe_callback(self.on_disconnect)
+        logger.info("Disconnected from WebSocket server")
 
-    async def subscribe(self, product_ids: List[str], channels: List[str] = ["ticker"]):
+    async def subscribe(self, product_ids: Union[str, List[str]], channels: Union[str, List[str]]) -> bool:
         """
-        Subscribe to specified product IDs on specified channels.
+        Subscribe to specific channels for the given product IDs.
         
         Args:
-            product_ids: List of product IDs to subscribe to
-            channels: List of channels to subscribe to, defaults to ["ticker"]
-        """
-        if not self.websocket or self.websocket.closed:
-            error_msg = "WebSocket is not connected. Call connect() first."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        try:
-            # Generate JWT token for authentication
-            jwt_token = await self._generate_jwt()
+            product_ids: Single product ID or list of product IDs (e.g., "BTC-USD")
+            channels: Single channel name or list of channel names (e.g., "ticker", "level2")
             
-            # Subscribe to each channel separately as per Coinbase example
+        Returns:
+            bool: True if subscription request was sent successfully, False otherwise
+        """
+        logger.info(f"Subscribe method called for channels: {channels}, products: {product_ids}")
+        
+        # Add a delay since Coinbase recommends waiting after connection is established
+        await asyncio.sleep(1)
+        
+        if not self.is_connected:
+            logger.warning("WebSocket not connected. Attempting connection before subscribe...")
+            if not await self.connect():
+                 logger.error("Failed to connect, cannot subscribe.")
+                 return False
+            # Add a small delay after connecting before subscribing
+            await asyncio.sleep(2)
+            if not self.is_connected:
+                logger.error("Still not connected after explicit connect attempt in subscribe.")
+                return False
+        
+        # Normalize inputs to lists
+        if isinstance(product_ids, str):
+            product_ids = [product_ids]
+            
+        if isinstance(channels, str):
+            channels = [channels]
+            
+        # Generate JWT token for authentication
+        try:
+            jwt_token = self._generate_jwt()
+            logger.debug(f"Generated JWT for subscription (first 50 chars): {jwt_token[:50]}...")
+        except Exception as e:
+            logger.error(f"Failed to generate JWT for subscription: {str(e)}")
+            await self._safe_callback(self.on_error, e)
+            return False
+        
+        # Verify channels are valid
+        valid_channels = ["ticker", "level2", "market_trades", "status", "user", "candles"]
+        invalid_channels = [c for c in channels if c not in valid_channels]
+        if invalid_channels:
+            logger.warning(f"Invalid channels requested: {invalid_channels}. Will be ignored.")
+            channels = [c for c in channels if c in valid_channels]
+            
+            if not channels:
+                logger.error("No valid channels to subscribe to.")
+                return False
+                
+        # Verify product IDs are formatted correctly (e.g., "BTC-USD")
+        product_ids = [pid.upper() if "-" in pid else f"{pid.upper()}-USD" for pid in product_ids]
+            
+        # Send subscription requests (one per channel as recommended by Coinbase)
+        try:
             for channel in channels:
+                # Update subscription tracking
+                if channel not in self.active_subscriptions:
+                    self.active_subscriptions[channel] = set()
+                
+                self.active_subscriptions[channel].update(product_ids)
+                
+                # Create subscription message
                 subscription_message = {
                     "type": "subscribe",
                     "channel": channel,
@@ -310,133 +276,426 @@ class CoinbaseWebSocketClient:
                     "jwt": jwt_token
                 }
                 
-                logger.debug(f"Sending subscription message for channel {channel}:\n{json.dumps(subscription_message, indent=2)}")
-                await self.websocket.send(json.dumps(subscription_message))
+                # Add channel-specific parameters if needed
+                if channel == "candles":
+                    # For candles, specify the granularity if not provided
+                    subscription_message["granularity"] = "ONE_HOUR"  # Options: ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, etc.
                 
-                # Wait for subscription confirmation from queue
-                try:
-                    start_time = time.time()
-                    subscription_confirmed = False
+                # Log full message for better debugging
+                logger.debug(f"Sending subscription message: {json.dumps(subscription_message)}")
+                
+                # Log the full payload for detailed debugging
+                logger.info(f"FULL SUBSCRIPTION PAYLOAD: {json.dumps(subscription_message)}")
+                
+                if self.websocket:
+                    await self.websocket.send(json.dumps(subscription_message))
+                    logger.info(f"Successfully sent subscription request for channel '{channel}'")
+                    # Add a small delay between subscription requests to avoid rate limiting
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.error(f"Cannot send subscription for {channel}: WebSocket is None.")
+                    return False
                     
-                    # Try for up to 5 seconds to get subscription confirmation
-                    while not subscription_confirmed and time.time() - start_time < 5:
-                        # Use a timeout that's shorter than our overall wait time
-                        try:
-                            response_data = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
-                            
-                            # Check for subscription confirmation
-                            if response_data.get("type") == "subscriptions" or "subscriptions" in response_data:
-                                subscription_confirmed = True
-                                logger.info(f"Successfully subscribed to {channel} for products: {product_ids}")
-                                
-                                # Store subscribed products with their channel
-                                for product_id in product_ids:
-                                    sub_key = f"{channel}:{product_id}"
-                                    if sub_key not in self.subscribed_channels:
-                                        self.subscribed_channels[sub_key] = product_id
-                                        
-                            # If it's some other message, put it back in the queue for the next reader
-                            elif "error" not in response_data:
-                                # Don't put error messages back in queue
-                                await self.message_queue.put(response_data)
-                                
-                            # Check for error
-                            if "error" in response_data:
-                                error_msg = f"Subscription failed: {response_data.get('message', 'Unknown error')}"
-                                logger.error(error_msg)
-                                raise ValueError(error_msg)
-                        
-                        except asyncio.TimeoutError:
-                            # Just continue the loop
-                            continue
-                    
-                    if not subscription_confirmed:
-                        logger.warning(f"Timed out waiting for subscription confirmation for channel {channel}")
-                        # Continue anyway - the subscription might have succeeded
-                
-                except Exception as e:
-                    logger.error(f"Error processing subscription response: {str(e)}")
-                    # Continue with other channels
-        
-        except Exception as e:
-            logger.error(f"Error subscribing to products {product_ids} on channels {channels}: {str(e)}")
-            raise
-
-    async def unsubscribe(self, product_ids: List[str], channels: List[str] = ["ticker"]) -> None:
-        """
-        Unsubscribe from specified product IDs and channels
-        """
-        if not self.websocket or self.websocket.closed:
-            raise ValueError("WebSocket is not connected")
-
-        try:
-            jwt_token = await self._generate_jwt()
-            
-            unsubscribe_message = {
-                "type": "unsubscribe",
-                "product_ids": product_ids,
-                "channels": channels,
-                "jwt": jwt_token
-            }
-            
-            logger.debug(f"Sending unsubscription message: {json.dumps(unsubscribe_message, indent=2)}")
-            await self.websocket.send(json.dumps(unsubscribe_message))
-            
-            # Wait for unsubscription confirmation
-            try:
-                start_time = time.time()
-                unsubscription_confirmed = False
-                
-                while not unsubscription_confirmed and time.time() - start_time < 5:
-                    try:
-                        response_data = await asyncio.wait_for(self.message_queue.get(), timeout=1.0)
-                        
-                        # Check for unsubscription confirmation
-                        if response_data.get("type") == "subscriptions":
-                            unsubscription_confirmed = True
-                            logger.info(f"Successfully unsubscribed from channels: {channels} for products: {product_ids}")
-                            
-                            # Remove from subscribed channels
-                            for channel in channels:
-                                for product_id in product_ids:
-                                    sub_key = f"{channel}:{product_id}"
-                                    if sub_key in self.subscribed_channels:
-                                        del self.subscribed_channels[sub_key]
-                        
-                        # If it's some other message, put it back in the queue
-                        elif "error" not in response_data:
-                            await self.message_queue.put(response_data)
-                            
-                        # Check for error
-                        if "error" in response_data:
-                            error_msg = f"Unsubscription failed: {response_data.get('message', 'Unknown error')}"
-                            logger.error(error_msg)
-                            raise ValueError(error_msg)
-                    
-                    except asyncio.TimeoutError:
-                        continue
-                
-                if not unsubscription_confirmed:
-                    logger.warning(f"Timed out waiting for unsubscription confirmation")
-            
-            except Exception as e:
-                logger.error(f"Error processing unsubscription response: {str(e)}")
+            return True
             
         except Exception as e:
-            logger.error(f"Failed to unsubscribe: {str(e)}")
-            raise
+            logger.error(f"Failed to send subscription request: {str(e)}", exc_info=True)
+            await self._safe_callback(self.on_error, e)
+            return False
 
-    async def get_next_message(self, timeout=1.0):
+    async def unsubscribe(self, product_ids: Union[str, List[str]], channels: Union[str, List[str]]) -> bool:
         """
-        Get the next message from the queue.
+        Unsubscribe from specific channels for the given product IDs.
         
         Args:
-            timeout: Timeout in seconds to wait for a message
+            product_ids: Single product ID or list of product IDs (e.g., "BTC-USD")
+            channels: Single channel name or list of channel names (e.g., "ticker", "level2")
+            
+        Returns:
+            bool: True if unsubscription request was sent successfully, False otherwise
+        """
+        if not self.is_connected:
+            logger.error("Cannot unsubscribe: not connected to WebSocket server")
+            return False
+            
+        # Normalize inputs to lists
+        if isinstance(product_ids, str):
+            product_ids = [product_ids]
+            
+        if isinstance(channels, str):
+            channels = [channels]
+        
+        # Send unsubscription requests (one per channel as recommended by Coinbase)
+        try:
+            for channel in channels:
+                # Update subscription tracking
+                if channel in self.active_subscriptions:
+                    for product_id in product_ids:
+                        self.active_subscriptions[channel].discard(product_id)
+                        
+                    # Remove channel if no products left
+                    if not self.active_subscriptions[channel]:
+                        del self.active_subscriptions[channel]
+                
+                # Create unsubscription message
+                unsubscription_message = {
+                    "type": "unsubscribe",
+                    "channel": channel,
+                    "product_ids": product_ids
+                }
+                
+                logger.debug(f"Sending unsubscription for channel '{channel}' with products: {product_ids}")
+                await self.websocket.send(json.dumps(unsubscription_message))
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send unsubscription request: {str(e)}")
+            await self._safe_callback(self.on_error, e)
+            return False
+
+    async def resubscribe_all(self) -> bool:
+        """
+        Resubscribe to all active subscriptions.
+        Useful after reconnection.
         
         Returns:
-            Message data or None if timeout
+            bool: True if all resubscription requests were sent successfully, False otherwise
+        """
+        if not self.active_subscriptions:
+            logger.debug("No active subscriptions to resubscribe to")
+            return True
+            
+        success = True
+        for channel, product_ids in self.active_subscriptions.items():
+            channel_success = await self.subscribe(list(product_ids), channel)
+            success = success and channel_success
+            
+        return success
+
+    def _generate_jwt(self) -> str:
+        """
+        Generate a JWT token for WebSocket authentication.
+        
+        Returns:
+            str: JWT token string
+        """
+        timestamp = int(time.time())
+        
+        # Per Advanced Trade API Docs, service should be "cdp"
+        # uri claim is NOT needed for websocket auth
+        
+        payload = {
+            "sub": self.settings.COINBASE_JWT_KEY_NAME,
+            "iss": "cdp", # Corrected: Use "cdp" as per REST API rules
+            "nbf": timestamp,
+            "exp": timestamp + 120, # Corrected: Use 120 seconds expiry like REST
+            "aud": ["websocket"] # Audience might still be needed for WS context
+        }
+        
+        headers = {
+            "kid": self.settings.COINBASE_JWT_KEY_NAME,
+            "nonce": secrets.token_hex() # Corrected: Use unique hex nonce like REST
+        }
+        
+        # Log the payload for debugging
+        logger.debug(f"JWT payload for WebSocket: {json.dumps(payload)}")
+        logger.debug(f"JWT headers for WebSocket: {json.dumps(headers)}")
+        
+        # Generate the token
+        try:
+            jwt_token = jwt.encode(
+                payload=payload,
+                key=self.private_key, # Use the loaded private key object
+                algorithm="ES256",
+                headers=headers
+            )
+            logger.debug(f"Generated JWT for WebSocket (first 50): {jwt_token[:50]}...")
+            return jwt_token
+        except Exception as e:
+            logger.error(f"Error generating WebSocket JWT: {e}", exc_info=True)
+            raise
+
+    async def _message_processor(self) -> None:
+        """
+        Process incoming messages from the WebSocket connection.
+        """
+        if not self.websocket:
+            logger.error("Cannot process messages: WebSocket not connected")
+            return
+            
+        try:
+            async for message in self.websocket:
+                try:
+                    # Parse message
+                    msg_data = json.loads(message)
+                    
+                    # Determine message type/channel
+                    msg_type = msg_data.get("type")
+                    channel = msg_data.get("channel")
+                    log_identifier = msg_type if msg_type else channel  # Use channel if type is missing
+
+                    logger.debug(f"Received raw message (type/channel: {log_identifier})")
+                    
+                    # Handle based on type or channel
+                    if msg_type == "error":
+                        logger.error(f"WebSocket error message: {msg_data.get('message', 'Unknown error')}")
+                        error = Exception(f"WebSocket error: {msg_data.get('message', 'Unknown error')}")
+                        await self._safe_callback(self.on_error, error)
+                        
+                    elif msg_type == "heartbeat" or channel == "heartbeat":
+                        logger.debug(f"Received heartbeat message: {msg_data}")
+
+                    elif channel == "subscriptions":
+                        # This confirms successful subscriptions
+                        logger.info(f"Subscription confirmation received: {msg_data.get('events', [])}")
+                        # Optionally update internal state based on confirmation
+                        confirmed_subs = msg_data.get('events', [{}])[0].get('subscriptions', {})
+                        logger.debug(f"Confirmed subscriptions: {confirmed_subs}")
+
+                    elif channel == "ticker":
+                        product_id = msg_data.get("events", [{}])[0].get("tickers", [{}])[0].get("product_id", "unknown")
+                        logger.debug(f"Received ticker data for {product_id}")
+                        
+                    elif channel == "candles":
+                        product_id = msg_data.get("events", [{}])[0].get("candles", [{}])[0].get("product_id", "unknown")
+                        logger.debug(f"Received candle data for {product_id}")
+                        
+                    elif channel == "market_trades":
+                        product_id = msg_data.get("events", [{}])[0].get("trades", [{}])[0].get("product_id", "unknown")
+                        logger.debug(f"Received market trades for {product_id}")
+                        
+                    elif channel == "level2":
+                        # Level2 data often comes as snapshots and updates
+                        event_type = msg_data.get("events", [{}])[0].get("type", "unknown_level2_event")
+                        product_ids = msg_data.get("events", [{}])[0].get("product_id", "unknown") # Coinbase might use product_id directly here
+                        logger.debug(f"Received level2 data ({event_type}) for {product_ids}")
+                        
+                    elif channel == "user":
+                        logger.debug(f"Received user account update: {msg_data}")
+                        
+                    elif channel == "status":
+                        logger.debug(f"Received status update: {msg_data}")
+                        
+                    else:
+                        # Log unknown message with more details for debugging
+                        logger.warning(f"Received unhandled message (type: {msg_type}, channel: {channel}): {json.dumps(msg_data)[:200]}...")
+                    
+                    # Always process message with the main callback
+                    await self._safe_callback(self.on_message, msg_data)
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse WebSocket message: {e}")
+                    logger.debug(f"Raw message causing decode error: {message[:100]}...")
+                except Exception as e:
+                    logger.error(f"Error processing WebSocket message: {e}", exc_info=True) # Add exc_info for more detail
+                    
+        except asyncio.CancelledError:
+            logger.debug("Message processor task was cancelled")
+        except ConnectionClosed as e:
+             logger.warning(f"WebSocket connection closed: {e.code} {e.reason}")
+             # Handle disconnection and potential reconnect
+             self.is_connected = False
+             await self._safe_callback(self.on_disconnect)
+             if self.auto_reconnect:
+                 asyncio.create_task(self._reconnect())
+        except Exception as e:
+            logger.error(f"WebSocket message processor encountered critical error: {str(e)}", exc_info=True)
+            # Handle disconnection and potential reconnect
+            self.is_connected = False
+            await self._safe_callback(self.on_disconnect)
+            if self.auto_reconnect:
+                asyncio.create_task(self._reconnect())
+
+    async def _heartbeat_loop(self) -> None:
+        """
+        Send periodic heartbeats to keep the connection alive.
         """
         try:
-            return await asyncio.wait_for(self.message_queue.get(), timeout=timeout)
-        except asyncio.TimeoutError:
-            return None 
+            while self.is_connected and self.websocket:
+                await asyncio.sleep(30)  # Send heartbeat every 30 seconds
+                
+                if not self.is_connected or not self.websocket:
+                    break
+                    
+                try:
+                    heartbeat = {"type": "heartbeat"}
+                    await self.websocket.send(json.dumps(heartbeat))
+                    logger.debug("Sent heartbeat to WebSocket server")
+                except Exception as e:
+                    logger.error(f"Failed to send heartbeat: {str(e)}")
+                    
+                    # Connection might be dead, attempt reconnection
+                    if self.auto_reconnect:
+                        self.is_connected = False
+                        await self._safe_callback(self.on_disconnect)
+                        
+                        # Schedule reconnection
+                        asyncio.create_task(self._reconnect())
+                        break
+                        
+        except asyncio.CancelledError:
+            logger.debug("Heartbeat task was cancelled")
+        except Exception as e:
+            logger.error(f"Heartbeat loop failed: {str(e)}")
+
+    async def _reconnect(self) -> None:
+        """
+        Attempt to reconnect to the WebSocket server with exponential backoff.
+        """
+        if self.reconnect_attempts >= self.max_reconnect_attempts:
+            logger.error(f"Maximum reconnection attempts ({self.max_reconnect_attempts}) reached")
+            return
+            
+        self.reconnect_attempts += 1
+        delay = self.reconnect_delay * self.reconnect_attempts
+        
+        logger.info(f"Attempting to reconnect in {delay} seconds... (Attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
+        await asyncio.sleep(delay)
+        
+        # Clean up old connection
+        if self.websocket:
+            try:
+                await self.websocket.close()
+            except:
+                pass
+            self.websocket = None
+            
+        # Connect and resubscribe
+        if await self.connect():
+            if self.active_subscriptions:
+                await self.resubscribe_all()
+
+    async def _safe_callback(self, callback: Optional[Callable], *args, **kwargs) -> None:
+        """
+        Safely execute a callback function.
+        
+        Args:
+            callback: Callback function to execute
+            *args: Positional arguments for the callback
+            **kwargs: Keyword arguments for the callback
+        """
+        if callback:
+            callback_name = getattr(callback, '__name__', 'unknown_callback')
+            logger.debug(f"Executing safe callback: {callback_name}")
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(*args, **kwargs)
+                else:
+                    callback(*args, **kwargs)
+                logger.debug(f"Finished safe callback: {callback_name}")
+            except Exception as e:
+                logger.error(f"Error in callback {callback_name}: {str(e)}", exc_info=True)
+        else:
+             logger.debug("Skipping safe callback: callback is None")
+
+    # Default handlers
+    def _default_message_handler(self, message: Dict) -> None:
+        """Default handler for received messages."""
+        channel = message.get("channel", "")
+        product_id = message.get("product_id", "")
+        logger.debug(f"Received {channel} message for {product_id}")
+
+    def _default_error_handler(self, error: Exception) -> None:
+        """Default handler for errors."""
+        logger.error(f"WebSocket error: {str(error)}")
+
+    def _default_connect_handler(self) -> None:
+        """Default handler for successful connections."""
+        logger.info("Connected to WebSocket server")
+
+    def _default_disconnect_handler(self) -> None:
+        """Default handler for disconnections."""
+        logger.info("Disconnected from WebSocket server")
+
+    async def _on_connect(self, websocket):
+        """Handler for connection established events."""
+        self.is_connected = True
+        logger.info("WebSocket connection established")
+        
+        # If we have pending subscriptions, restore them with a delay
+        if self.active_subscriptions:
+            logger.info(f"Connection established. Restoring {len(self.active_subscriptions)} active subscriptions after delay...")
+            
+            # Wait for connection to fully stabilize before sending subscriptions
+            await asyncio.sleep(2)
+            
+            try:
+                # Generate a new JWT token for authentication
+                jwt_token = self._generate_jwt()
+                
+                for channel, products in self.active_subscriptions.items():
+                    product_list = list(products)
+                    
+                    subscription_message = {
+                        "type": "subscribe",
+                        "channel": channel,
+                        "product_ids": product_list,
+                        "jwt": jwt_token
+                    }
+                    
+                    logger.debug(f"Restoring subscription for channel '{channel}': {json.dumps(subscription_message)}")
+                    await websocket.send(json.dumps(subscription_message))
+                    logger.info(f"Restored subscription for channel '{channel}' with {len(product_list)} products")
+                    
+                    # Small delay between subscription messages
+                    await asyncio.sleep(0.5)
+                    
+            except Exception as e:
+                logger.error(f"Failed to restore subscriptions: {str(e)}", exc_info=True)
+                await self._safe_callback(self.on_error, e)
+                
+        # Notify any listeners only after attempting to restore subscriptions
+        logger.info("Calling on_connect callback")
+        await self._safe_callback(self.on_connect)
+        logger.debug("on_connect callback completed")
+
+    async def _on_error(self, websocket, error):
+        """Handler for WebSocket errors.
+        
+        Args:
+            websocket: The WebSocket connection where the error occurred
+            error: The error that occurred
+        """
+        logger.error(f"WebSocket error: {str(error)}", exc_info=True)
+        
+        # Check if error is related to connection - if so, attempt to reconnect
+        if isinstance(error, (websockets.exceptions.ConnectionClosedError, 
+                             websockets.exceptions.ConnectionClosedOK,
+                             websockets.exceptions.InvalidStatusCode)):
+            logger.warning(f"Connection error detected: {error.__class__.__name__}: {str(error)}")
+            self.is_connected = False
+            
+            # Schedule reconnection attempt with exponential backoff
+            if self.reconnect_attempts < self.max_reconnect_attempts:
+                backoff_seconds = (2 ** self.reconnect_attempts) + (random.random() * 0.5)
+                self.reconnect_attempts += 1
+                logger.info(f"Scheduling reconnection attempt {self.reconnect_attempts}/{self.max_reconnect_attempts} in {backoff_seconds:.2f} seconds")
+                
+                # Schedule reconnection
+                asyncio.create_task(self._delayed_reconnect(backoff_seconds))
+            else:
+                logger.error(f"Maximum reconnection attempts ({self.max_reconnect_attempts}) reached. Giving up.")
+                # Reset reconnect counter for future connection attempts
+                self.reconnect_attempts = 0
+        
+        # Notify any error handlers
+        await self._safe_callback(self.on_error, error)
+    
+    async def _delayed_reconnect(self, delay_seconds):
+        """Attempt to reconnect after a delay.
+        
+        Args:
+            delay_seconds: Number of seconds to wait before reconnecting
+        """
+        logger.info(f"Waiting {delay_seconds:.2f} seconds before reconnection attempt...")
+        await asyncio.sleep(delay_seconds)
+        logger.info("Attempting to reconnect now...")
+        
+        try:
+            await self.connect()
+            logger.info("Reconnection successful")
+            self.reconnect_attempts = 0  # Reset retry counter on successful connection
+        except Exception as e:
+            logger.error(f"Reconnection attempt failed: {str(e)}", exc_info=True)
+            # The next error will trigger another reconnection attempt if needed 

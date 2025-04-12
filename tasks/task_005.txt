@@ -1,0 +1,88 @@
+# Task ID: 5
+# Title: Build Order Execution Framework
+# Status: done
+# Dependencies: 1, 3, 4
+# Priority: high
+# Description: Develop the trading execution system to place and manage orders based on detected signals
+# Details:
+1. Create place_order() function for market, limit, stop orders
+2. Implement bracket order functionality (entry with SL/TP)
+3. Add reduce-only order support
+4. Develop check_signal() function for entry confirmation
+5. Create order tracking and management system
+6. Implement position monitoring via get_positions()
+7. Add halt_trading() emergency kill-switch
+
+# Test Strategy:
+Test order placement in dry-run mode. Verify order execution accuracy. Test kill-switch functionality. Validate proper handling of various order types.
+
+# Subtasks:
+## 1. Implement Basic Order Placement Functions [done]
+### Dependencies: None
+### Description: Create core order placement functions for market, limit, and stop orders with proper error handling and validation.
+### Details:
+Implementation details:
+1. Create a base `place_order()` function that takes parameters: symbol, side (buy/sell), order_type, quantity, price (optional), stop_price (optional)
+2. Implement specific helper functions: `place_market_order()`, `place_limit_order()`, and `place_stop_order()`
+3. Add parameter validation (check for valid symbol, positive quantity, etc.)
+4. Implement error handling for API connection issues, insufficient balance, etc.
+5. Return standardized order response with order_id, status, and timestamp
+6. Add logging for all order activities
+7. Testing approach: Create unit tests with mock API responses for each order type, test error handling with invalid inputs
+
+## 2. Develop Bracket Order System [done]
+### Dependencies: 5.1
+### Description: Implement bracket order functionality to create entry orders with associated stop-loss and take-profit orders.
+### Details:
+Implementation details:
+1. Create `place_bracket_order()` function that takes: symbol, side, entry_price, quantity, stop_loss_price, take_profit_price
+2. Implement logic to place the main entry order using functions from subtask 1
+3. Add functionality to track the entry order's status until filled
+4. Once entry is filled, place the stop-loss order with reduce-only flag
+5. Place the take-profit order with reduce-only flag
+6. Create a data structure to track all components of a bracket order together
+7. Implement cancellation of pending SL/TP if entry is cancelled
+8. Testing approach: Test the full bracket order lifecycle with mock API responses, verify proper linking between entry, SL and TP orders
+
+## 3. Create Signal Confirmation System [done]
+### Dependencies: 5.1
+### Description: Develop the check_signal() function to validate trading signals before execution and implement signal filtering logic.
+### Details:
+Implementation details:
+1. Implement `check_signal()` function that takes a signal object with attributes: symbol, direction, strength, timestamp
+2. Add validation checks: timeframe confirmation, volume confirmation, trend alignment
+3. Implement configurable filters (minimum signal strength, cooldown period between trades)
+4. Create a signal scoring system to rank signal quality
+5. Add market condition checks (volatility, spread, etc.) to avoid trading during unfavorable conditions
+6. Integrate with the order placement functions from subtask 1
+7. Return a boolean result indicating whether to execute the trade or not
+8. Testing approach: Create test cases with various signal scenarios, verify that weak/invalid signals are properly filtered out
+
+## 4. Build Order Tracking and Management System [done]
+### Dependencies: 5.1, 5.2
+### Description: Develop a system to track and manage all active and historical orders with status updates and modification capabilities.
+### Details:
+Implementation details:
+1. Create an `OrderTracker` class to store and manage order information
+2. Implement methods: `add_order()`, `update_order_status()`, `get_order_by_id()`, `get_active_orders()`
+3. Create a persistent storage mechanism (database or file-based) to maintain order history
+4. Implement `modify_order()` function to change price/quantity of existing orders
+5. Add `cancel_order()` and `cancel_all_orders()` functions
+6. Create a periodic order status update mechanism that polls the exchange API
+7. Implement event handling for order fills, cancellations, and rejections
+8. Testing approach: Test order lifecycle management with mock orders, verify data persistence across program restarts
+
+## 5. Implement Position Monitoring and Emergency Controls [done]
+### Dependencies: 5.1, 5.4
+### Description: Develop position tracking functionality and emergency kill-switch to monitor risk and halt trading when necessary.
+### Details:
+Implementation details:
+1. Create `get_positions()` function to retrieve current positions from the exchange
+2. Implement position tracking with metrics: entry price, current price, P&L, duration
+3. Create a `PositionMonitor` class that periodically updates position status
+4. Implement risk metrics: drawdown calculation, exposure percentage, risk per position
+5. Create `halt_trading()` function that cancels all open orders and can optionally close positions
+6. Add configurable circuit breakers: max daily loss, max consecutive losses, max drawdown
+7. Implement a dashboard or notification system for position monitoring
+8. Testing approach: Test position tracking with mock position data, verify emergency halt functionality works correctly in various scenarios
+

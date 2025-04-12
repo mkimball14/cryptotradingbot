@@ -1,0 +1,16 @@
+# Task ID: 12
+# Title: Build Trade Journal & Meta Logging
+# Status: todo
+# Dependencies: 7
+# Priority: medium
+# Description: Extend trade logging to include strategy metadata. Create weekly summaries. Enable tagging for trade reviews.
+# Details:
+1. Extend trade logging schema for metadata
+2. Implement trade tagging system
+3. Create weekly performance summaries
+4. Add trade review workflow
+5. Implement export/import of journal entries
+6. Add trade categorization
+
+# Test Strategy:
+Verify metadata logging accuracy. Test summary generation. Validate tagging system.

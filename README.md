@@ -1,137 +1,138 @@
-# Trading Signal Confirmation System
+# Crypto Trading Bot Framework
 
-A robust system for confirming trading signals based on supply and demand zones, technical indicators, and volume analysis.
+A comprehensive framework for developing, backtesting, and deploying cryptocurrency trading bots, with a focus on the Coinbase Advanced Trade API.
 
 ## Overview
 
-The Signal Confirmation System is designed to validate potential trading opportunities by analyzing multiple factors:
+This project provides a structured environment for building automated trading strategies. It includes components for:
 
-1. Supply and Demand Zones
-2. Technical Indicators (RSI, MACD)
-3. Volume Profile Analysis
-4. Zone Freshness and Historical Performance
+*   **Exchange Integration:** Connecting to Coinbase via REST API (JWT Auth) and WebSocket for market data and order execution.
+*   **Data Management:** Fetching, processing, storing (SQLAlchemy), and retrieving historical and real-time OHLCV data.
+*   **Trading Strategies:** Implementing custom trading logic (examples: RSI Momentum, BB Reversion).
+*   **Signal Generation & Confirmation:** Detecting supply/demand zones and using technical indicators (RSI, MACD, Volume Profile) to validate signals.
+*   **Order Execution:** Placing market, limit, and potentially bracket orders with simulated (dry-run) and live execution capabilities.
+*   **Risk Management:** Calculating position sizes, stop-losses, and implementing risk controls (e.g., drawdown limits).
+*   **Backtesting:** Evaluating strategy performance against historical data.
+*   **API Interface:** Exposing core functionalities through a FastAPI web server.
 
-## Components
+## Project Structure
 
-### 1. Signal Manager (`app/core/signal_manager.py`)
+*   **`app/`**: Main application source code.
+    *   `main.py`: FastAPI application entry point.
+    *   `core/`: Core logic (API clients, data handling, execution, strategies interface, backtesting, risk).
+    *   `models/`: Pydantic and dataclass definitions (Order, Position, Zone, etc.).
+    *   `routers/`: FastAPI endpoints (orders, market, account, websocket).
+    *   `strategies/`: Specific trading strategy implementations.
+    *   `database/`: SQLAlchemy models and database interaction setup (within `app/core/`).
+*   **`tests/`**: Unit and integration tests (using `pytest`).
+*   **`scripts/`**: Utility scripts (e.g., log analysis).
+*   **`logs/`**: Runtime application logs (add to `.gitignore`).
+*   **`reports/`**: Generated reports and images (e.g., backtest results) (add to `.gitignore`).
+*   **`docs/`**: Project documentation (PRDs, notes).
+*   **`.env`**: Environment variables (API keys, JWT secrets, DB connection strings - **DO NOT COMMIT**).
+*   **`requirements.txt`**: Python dependencies.
+*   **`setup.py`**: Project installation configuration.
 
-The main component that orchestrates signal confirmation. It:
-- Evaluates multiple confirmation factors
-- Calculates confidence scores
-- Provides a final confirmation decision
+## Key Components
 
-Key features:
-- RSI divergence detection with overbought/oversold conditions
-- Volume profile analysis with POC and value area
-- MACD trend confirmation
-- Zone freshness evaluation
-
-### 2. Zone Model (`app/models/zone.py`)
-
-Represents supply and demand zones in the market. Features:
-- Price boundaries (high/low)
-- Zone type (supply/demand)
-- Formation data (volume, candles)
-- Strength tracking
-- Age-based validation
-- Zone merging capabilities
-
-### 3. Technical Indicators (`app/core/indicators.py`)
-
-Collection of technical analysis tools:
-- RSI calculation with divergence detection
-- MACD with signal line crossovers
-- Volume Profile with POC and value area calculation
+*   **Coinbase Clients (`app/core/coinbase.py`, `app/core/websocket_client.py`):** Handles authenticated REST and WebSocket communication.
+*   **DataManager (`app/core/data_manager.py`)**: Manages OHLCV data fetching and storage.
+*   **DataProcessor (`app/core/data_processor.py`)**: Normalizes and cleans OHLCV data.
+*   **ZoneDetector (`app/core/zone_detector.py`)**: Identifies supply and demand zones.
+*   **SignalManager (`app/core/signal_manager.py`)**: Confirms trading signals based on zones and indicators.
+*   **OrderExecutor / DryRunExecutor (`app/core/order_executor.py`, `app/core/dry_run_executor.py`)**: Executes real or simulated trades.
+*   **RiskManager (`app/core/risk_manager.py`)**: Provides risk calculation functions.
+*   **Backtester (`app/core/backtester.py`)**: Runs strategies against historical data.
+*   **LiveTrader (`app/core/live_trader.py`)**: Orchestrates live trading logic.
 
 ## Installation
 
-1. Clone the repository
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository_url>
+    cd <repository_directory>
+    ```
+2.  **Create a virtual environment:**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    ```
+3.  **Install TA-Lib:** This library is required for some technical indicators. Installation varies by OS:
+    *   **macOS:** `brew install ta-lib`
+    *   **Linux (Debian/Ubuntu):** `sudo apt-get update && sudo apt-get install -y ta-lib`
+    *   **Windows:** Download binaries from [Unofficial Windows Binaries](https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib) and install the appropriate `.whl` file using pip.
+4.  **Install Python dependencies:**
+    ```bash
+    pip install --upgrade pip
+    pip install -r requirements.txt --pre # --pre needed for pandas-ta beta
+    ```
+5.  **Install in Editable Mode:** This makes the `app` package importable for tests and scripts.
+    ```bash
+    pip install -e .
+    ```
 
-Note: TA-Lib is required. Installation instructions:
-- macOS: `brew install ta-lib`
-- Linux: `apt-get install ta-lib`
-- Windows: Download and install from [TA-Lib](https://ta-lib.org)
+## Configuration
+
+1.  Copy the example environment file:
+    ```bash
+    cp .env.example .env
+    ```
+2.  **Edit `.env`** and add your specific credentials and settings:
+    *   **Coinbase API Keys:** Generate JWT-based API keys from Coinbase Advanced Trade.
+        *   `COINBASE_JWT_KEY_NAME`: Your full API key name (e.g., `organizations/.../apiKeys/...`).
+        *   `COINBASE_JWT_PRIVATE_KEY`: Your API private key (PEM format, including `-----BEGIN EC PRIVATE KEY-----` and `-----END EC PRIVATE KEY-----` lines, often needs newline characters represented as `\n` within the `.env` file if stored on a single line).
+    *   `COINBASE_API_URL`: Should typically be `https://api.coinbase.com/api/v3/brokerage`.
+    *   `COINBASE_WS_URL`: Should be `wss://advanced-trade-ws.coinbase.com`.
+    *   (Optional) Database connection string if using database features.
+    *   Other settings like trading parameters.
+
+**IMPORTANT:** Ensure `.env` is listed in your `.gitignore` file and never commit it to version control.
 
 ## Usage
 
-### Basic Signal Confirmation
+*(This section might need expansion based on how the application/scripts are intended to be run)*
 
-```python
-from app.core.signal_manager import SignalManager
-from app.models.zone import Zone
-import pandas as pd
-
-# Initialize components
-signal_manager = SignalManager(risk_manager)
-
-# Create a zone
-supply_zone = Zone(
-    id="zone_1",
-    zone_type="supply",
-    price_high=120.0,
-    price_low=118.0
-)
-
-# Get OHLCV data
-ohlcv_data = pd.DataFrame(...)  # Your OHLCV data
-
-# Confirm signal
-confirmation = await signal_manager.confirm_zone_signal(
-    zone=supply_zone,
-    ohlcv_data=ohlcv_data
-)
-
-if confirmation.is_confirmed:
-    print(f"Signal confirmed with {confirmation.confidence_score:.2%} confidence")
-    print("Confirmation factors:", confirmation.confirmation_factors)
+**Running the FastAPI Server (Example):**
+```bash
+# Make sure your .env file is configured
+uvicorn app.main:app --reload
 ```
 
-### Zone Management
+**Running a Backtest (Example - Actual script may vary):**
+```bash
+# Assuming a backtest script exists
+python scripts/run_backtest.py --strategy rsi_momentum --symbol BTC-USD --timeframe 1h --start 2023-01-01 --end 2023-12-31
+```
 
-```python
-# Create zones
-zone1 = Zone(id="zone1", zone_type="supply", price_high=100, price_low=98)
-zone2 = Zone(id="zone2", zone_type="supply", price_high=99, price_low=97)
-
-# Check for overlap
-if zone1.overlaps_with(zone2):
-    # Merge overlapping zones
-    merged_zone = zone1.merge_with(zone2)
-
-# Update zone strength after test
-zone1.update_strength(test_result=True)  # Zone held
-print(f"New strength: {zone1.strength}")
-
-# Check if zone is still active
-if zone1.is_active():
-    print("Zone is active")
-else:
-    print("Zone is inactive")
+**Running the Live Trader (Example - Actual script/entry point may vary):**
+```bash
+# Assuming a live trading script or main entry point
+python app/main.py --live --strategy bb_reversion --symbol ETH-USD
 ```
 
 ## Testing
 
-Run the test suite:
+Run the test suite using pytest from the root directory:
 ```bash
-pytest app/tests/
+pytest
 ```
 
 Run with coverage:
 ```bash
-pytest --cov=app app/tests/
+pytest --cov=app
 ```
+
+*(Note: Some tests might be skipped if they require live API keys or specific environment setup.)*
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
+1.  Fork the repository
+2.  Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3.  Make your changes
+4.  Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+5.  Push to the branch (`git push origin feature/AmazingFeature`)
+6.  Run tests (`pytest`)
+7.  Open a Pull Request
 
 ## License
 

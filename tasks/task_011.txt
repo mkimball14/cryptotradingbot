@@ -1,0 +1,16 @@
+# Task ID: 11
+# Title: Add Multi-Asset Strategy Support
+# Status: todo
+# Dependencies: 5, 6
+# Priority: medium
+# Description: Enable per-asset strategy logic. Develop asset ranking function using volume, volatility, and confidence. Assign strategies to best N assets.
+# Details:
+1. Implement asset ranking algorithm based on volume and volatility
+2. Create strategy-to-asset assignment logic
+3. Add configuration for maximum assets per strategy
+4. Implement performance tracking per asset
+5. Create dynamic rebalancing system
+6. Add asset correlation analysis
+
+# Test Strategy:
+Test asset ranking with historical data. Verify strategy assignment logic. Validate rebalancing system.

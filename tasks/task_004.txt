@@ -1,0 +1,81 @@
+# Task ID: 4
+# Title: Implement Risk Management System
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Create the risk management module to enforce position sizing, stop-loss, and take-profit rules
+# Details:
+1. Implement position sizing based on 1-2% account risk
+2. Create stop-loss calculation logic
+3. Develop take-profit targeting based on zone analysis
+4. Add dynamic sizing based on zone confidence
+5. Implement circuit breaker conditions
+6. Create risk parameter validation
+7. Add account balance monitoring
+
+# Test Strategy:
+Test position sizing with various account balances. Verify stop-loss enforcement with simulated price movements. Validate circuit breaker triggers under extreme conditions.
+
+# Subtasks:
+## 1. Implement Position Sizing and Risk Calculation Core [done]
+### Dependencies: None
+### Description: Develop the foundation of the risk management system with position sizing calculations based on account risk percentage and core risk parameter validation
+### Details:
+Implementation steps:
+1. Create a `RiskManager` class with methods for calculating position sizes
+2. Implement the core position sizing formula: Position Size = (Account Balance × Risk Percentage) ÷ (Entry Price - Stop Loss Price)
+3. Add risk parameter validation for acceptable risk percentages (1-2%)
+4. Implement account balance monitoring to fetch current balance
+5. Create unit tests with various account sizes and risk parameters
+6. Test edge cases like very small account balances, maximum allowed risk
+7. Ensure position sizes are rounded to appropriate decimal places based on the instrument
+8. Add logging for risk calculations for later auditing
+
+## 2. Implement Stop-Loss and Take-Profit Logic [done]
+### Dependencies: 4.1
+### Description: Develop the logic for calculating stop-loss levels and take-profit targets based on market analysis and risk parameters
+### Details:
+Implementation steps:
+1. Extend the `RiskManager` class with stop-loss calculation methods
+2. Implement ATR-based stop-loss calculations: Stop Distance = ATR × Multiplier
+3. Add support for fixed pip/point-based stop-loss calculations
+4. Implement take-profit targeting using risk-reward ratios (1:2, 1:3)
+5. Add zone-based take-profit calculations using support/resistance levels
+6. Create methods to validate stop-loss distances (prevent too tight stops)
+7. Implement tests with mock price data and various market volatility scenarios
+8. Add safety checks to ensure stop-loss is never beyond max allowable risk
+
+## 3. Implement Dynamic Position Sizing Based on Zone Confidence [done]
+### Dependencies: 4.1, 4.2
+### Description: Create a system that adjusts position size based on trading zone confidence levels and market conditions
+### Details:
+Implementation steps:
+1. Create a `ConfidenceCalculator` component that interfaces with the zone analysis system
+2. Implement confidence scoring algorithm (0-100%) based on multiple indicators
+3. Add position size modifiers based on confidence scores:
+   - High confidence (>80%): Use full calculated position size
+   - Medium confidence (50-80%): Use 75% of calculated size
+   - Low confidence (<50%): Use 50% of calculated size or skip trade
+4. Implement position size caps based on volatility measures
+5. Add methods to document confidence factors for each trade
+6. Create unit tests with various confidence scenarios
+7. Implement integration tests with mock zone analysis data
+8. Add configuration options for confidence thresholds and modifiers
+
+## 4. Implement Circuit Breaker and Advanced Risk Controls [done]
+### Dependencies: 4.1, 4.2, 4.3
+### Description: Develop circuit breaker mechanisms to halt trading under specific conditions and implement advanced risk monitoring features
+### Details:
+Implementation steps:
+1. Create a `CircuitBreaker` component that monitors trading conditions
+2. Implement consecutive loss detection (halt after X consecutive losses)
+3. Add daily loss limit monitoring (halt if daily drawdown exceeds Y%)
+4. Implement unusual volatility detection using ATR comparisons
+5. Create time-based circuit breakers (e.g., no trading during high-impact news)
+6. Add methods to gradually reduce position sizes after losses
+7. Implement account balance threshold warnings
+8. Create a dashboard/reporting system for risk metrics
+9. Add unit tests for all circuit breaker conditions
+10. Implement integration tests simulating various market conditions
+11. Create a manual override system for emergency situations
+
