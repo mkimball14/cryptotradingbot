@@ -226,7 +226,7 @@ def detect_base_patterns(ohlcv_df: pd.DataFrame) -> list:
 
         pattern_found = False
         # Check for Demand (Drop-Base-Rally)
-        if direction1 == 'down' and direction3 == 'up' and candle3['close'] > zone_high:
+        if direction1 == 'down' and direction3 == 'up' and candle3['high'] > zone_high:
             zone_info['type'] = 'demand'
             pattern_found = True
             # zones.append(zone_info) # Append after scoring
@@ -234,7 +234,7 @@ def detect_base_patterns(ohlcv_df: pd.DataFrame) -> list:
             # continue
 
         # Check for Supply (Rally-Base-Drop)
-        if direction1 == 'up' and direction3 == 'down' and candle3['close'] < zone_low:
+        if direction1 == 'up' and direction3 == 'down' and candle3['low'] < zone_low:
             zone_info['type'] = 'supply'
             pattern_found = True
             # zones.append(zone_info) # Append after scoring
@@ -257,6 +257,7 @@ def detect_base_patterns(ohlcv_df: pd.DataFrame) -> list:
         i = j
 
     # Optional: Drop the RSI column if it shouldn't persist outside this function
-    # ohlcv_df.drop(columns=['rsi_14'], inplace=True, errors='ignore') 
+    # Ensure the RSI column is dropped to prevent side effects
+    ohlcv_df.drop(columns=['rsi_14'], inplace=True, errors='ignore') 
 
     return zones 
