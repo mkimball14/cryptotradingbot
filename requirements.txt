@@ -19,6 +19,8 @@ asyncio>=3.4.3,<4.0.0
 # Data handling and analysis
 ta-lib>=0.4.24  # Technical analysis library
 scikit-learn>=1.0.0,<2.0.0  # For machine learning features
+backtesting>=0.3.3  # Backtesting library
+vectorbt>=0.25.4  # High-performance backtesting library
 
 # Database
 sqlalchemy>=2.0.0,<3.0.0
