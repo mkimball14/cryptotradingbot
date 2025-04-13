@@ -265,7 +265,19 @@ def run_backtest(
 
             continue # Skip strategy signal check for this candle as we were stopped out
 
-        # --- II. Process Strategy Signal --- 
+        # --- II. Update Trailing Stop Loss (if still in position) ---
+        if in_position:
+            current_high_price = row['high'] # Get high price for trailing calculation
+            if pd.isna(current_atr) or current_atr == 0:
+                 logger.warning(f"{timestamp}: ATR is zero or NaN ({current_atr}) during trailing stop calculation. Stop loss will not be updated for this candle.")
+            else:
+                new_potential_sl = current_high_price - current_atr * stop_loss_atr_multiplier
+                # Only move the stop up, never down
+                if new_potential_sl > stop_loss_price:
+                     # logger.debug(f"{timestamp}: Trailing stop updated from {stop_loss_price:.2f} to {new_potential_sl:.2f} (High: {current_high_price:.2f}, ATR: {current_atr:.2f})")
+                     stop_loss_price = new_potential_sl
+
+        # --- III. Process Strategy Signal --- 
         # Simulate receiving the close price for the current candle
         ticker_data = {
             'type': 'ticker',
@@ -276,7 +288,7 @@ def run_backtest(
         
         signal = strategy.process_market_data(ticker_data)
 
-        # --- III. Simulate Order Execution (Based on Signal) --- 
+        # --- IV. Simulate Order Execution (Based on Signal) --- 
         # Assume orders execute at the OPEN price of the *next* candle
         # Get next candle's open price (if available)
         next_timestamp = timestamp + pd.Timedelta(minutes=1) # Rough estimate, depends on granularity

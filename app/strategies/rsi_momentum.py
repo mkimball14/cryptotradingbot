@@ -83,7 +83,6 @@ class RSIMomentumStrategy(Strategy):
         """Generate entry and exit signals based on RSI and regime."""
         df = self.calculate_indicators(data)
         df['signal'] = 0  # Default to hold
-        df['stop_loss'] = np.nan # Store initial stop calculated at entry signal
         
         # --- Entry Signal Logic ---
         entry_condition = (
@@ -94,18 +93,32 @@ class RSIMomentumStrategy(Strategy):
         df.loc[entry_condition, 'signal'] = 1
         
         # --- Exit Signal Logic ---
-        exit_condition = (
-            (df['rsi'] < self.rsi_exit_threshold) | 
-            (df['regime'] == "downtrend")
+        # Condition 1: RSI crosses BELOW the exit threshold
+        rsi_cross_below_exit = (
+            (df['rsi'] < self.rsi_exit_threshold) &
+            (df['rsi'].shift(1) >= self.rsi_exit_threshold) 
         )
+        # Condition 2: Regime changes to downtrend
+        regime_downtrend = (df['regime'] == "downtrend")
+
+        exit_condition = ( rsi_cross_below_exit | regime_downtrend )
+        
         # Generate exit signal (-1) only on the first bar the condition is met after being in a trade
-        df.loc[exit_condition & (df['signal'].shift(1) == 1), 'signal'] = -1 
-        
-        # --- Calculate Initial Stop Loss for Potential Entries ---
-        df.loc[entry_condition, 'stop_loss'] = (
-            df['low'] - df['atr'] * self.atr_stop_multiplier
-        )
-        
+        # NOTE: This exit logic doesn't account for the trailing stop; that's checked in should_exit_trade during simulation.
+        # We might simplify signal generation further later if needed.
+        # Find bars where we *were* in a trade (signal was 1 previously) and the exit condition is now met
+        # Need to handle the state properly - how do we know if we were in a trade based *only* on the dataframe?
+        # The original logic used df['signal'].shift(1) == 1, which isn't quite right as signal represents *entry* signal.
+        # Backtesting loop manages actual position state. Here, we just flag *potential* exit points.
+        # Let's flag any bar where the exit condition is met. The backtest loop will decide based on actual position status.
+        df.loc[exit_condition, 'signal'] = -1 # Mark potential exit points
+
+        # --- Reconcile signals ---
+        # If an entry and exit signal occur on the same bar (e.g., RSI crosses > 60 then < 40 immediately), prioritize exit? Or hold?
+        # For now, let's assume entry takes precedence if both conditions met simultaneously (unlikely with crossover logic).
+        # Overwrite exit signal if entry condition is also met on the same bar
+        df.loc[entry_condition, 'signal'] = 1 
+                
         return df
 
     # Override update_state to handle trailing stop state
