@@ -46,3 +46,15 @@ pandas-ta>=0.3.0,<1.0.0 # Technical Analysis library
 # Coinbase JWT Auth
 PyJWT>=2.0.0
 cryptography>=3.0.0
+
+# New dependencies
+appdirs==1.4.4
+beautifulsoup4==4.12.3
+certifi==2024.2.2
+charset-normalizer==3.3.2
+click==8.1.7
+coinbase==2.1.0
+coinbase-advanced-py
+colorama==0.4.6
+dotenv-cli==3.1.0
+httpx==0.27.0

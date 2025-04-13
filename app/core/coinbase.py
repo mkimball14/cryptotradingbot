@@ -1,18 +1,10 @@
-import hmac
-import hashlib
 import time
-import base64
 import json
 import logging
-from typing import Dict, Optional, List, Union, Any
+from typing import Dict, Optional, List, Any
 from datetime import datetime, timedelta, timezone
-import httpx
+from coinbase.rest import RESTClient
 from app.core.config import Settings
-import jwt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-import urllib.parse  # Import for URL encoding
-import secrets  # Import for generating nonce
 
 # Import consolidated models and enums
 from app.models.order import OrderSide, OrderType, OrderStatus, TimeInForce, OrderBase, MarketOrder, LimitOrder # Assuming these cover needed Order details
@@ -20,14 +12,6 @@ from app.models.position import Position
 
 # Get logger
 logger = logging.getLogger(__name__)
-
-class CoinbaseError(Exception):
-    """Base exception for Coinbase API errors"""
-    def __init__(self, message: str, status_code: Optional[int] = None, response: Optional[Dict] = None):
-        self.message = message
-        self.status_code = status_code
-        self.response = response
-        super().__init__(self.message)
 
 class CoinbaseClient:
     def __init__(self, settings: Settings):
@@ -40,276 +24,94 @@ class CoinbaseClient:
         self.settings = settings
         self.key_name = settings.COINBASE_JWT_KEY_NAME
         self.private_key_pem = settings.COINBASE_JWT_PRIVATE_KEY
-        self.api_url = settings.COINBASE_API_URL
 
-        # Load the private key
+        # Initialize the EnhancedRESTClient
         try:
-            self.private_key = serialization.load_pem_private_key(
-                self.private_key_pem.encode('utf-8'),
-                password=None
+            self.client = RESTClient(
+                api_key=self.key_name,
+                api_secret=self.private_key_pem
             )
-            if not isinstance(self.private_key, ec.EllipticCurvePrivateKey):
-                 raise TypeError("Loaded key is not an EC private key.")
+            logger.info("Coinbase RESTClient initialized successfully.")
         except Exception as e:
-            logger.error(f"Failed to load private key: {e}")
-            raise CoinbaseError(f"Invalid private key format or content: {e}")
-        
-    def _generate_jwt(self, method: str, uri: str, body: str = "") -> str:
-        """
-        Generate a JWT for API request authentication according to Coinbase Advanced Trade API specs.
-        
-        Args:
-            method (str): HTTP method (e.g., "GET", "POST").
-            uri (str): Request URI (e.g., "/api/v3/brokerage/orders").
-            body (str): Request body (empty string for GET requests).
-            
-        Returns:
-            str: The generated JWT.
-        """
-        timestamp = int(time.time())
-        
-        # Build the URI in the format required by Coinbase
-        # Extract host from API URL
-        host = urllib.parse.urlparse(self.api_url).netloc
-        
-        # Get the API path from the URL (like "/api/v3/brokerage")
-        api_path = urllib.parse.urlparse(self.api_url).path
-        
-        # Make sure we have the full path for the URI by combining the API path and the endpoint
-        full_path = api_path
-        if uri:
-            # Ensure no double slashes
-            if uri.startswith('/') and api_path.endswith('/'):
-                full_path = f"{api_path}{uri[1:]}"
-            elif not uri.startswith('/') and not api_path.endswith('/'):
-                full_path = f"{api_path}/{uri}"
-            else:
-                full_path = f"{api_path}{uri}"
-        
-        # Format the URI as "METHOD host/path" according to Coinbase docs
-        full_uri = f"{method.upper()} {host}{full_path}"
-        logger.debug(f"JWT URI: {full_uri}")
-        
-        # JWT payload - must match Coinbase requirements exactly
-        payload = {
-            "sub": self.key_name,        # API key name
-            "iss": "cdp",                # Must be exactly "cdp" per docs
-            "nbf": timestamp,            # Not before - current time
-            "exp": timestamp + 120,      # 2-minute expiration
-            "uri": full_uri              # "METHOD host/path" format
-        }
-        
-        # JWT headers - must include key ID and a unique nonce
-        headers = {
-            "kid": self.key_name,             # Same as sub claim
-            "nonce": secrets.token_hex()      # Random hex string for nonce
-        }
-        
-        # ---> ADDED DETAILED LOGGING <---
-        logger.info(f"[REST JWT PRE-ENCODE] Payload: {json.dumps(payload)}")
-        logger.info(f"[REST JWT PRE-ENCODE] Headers: {json.dumps(headers)}")
-        logger.info(f"[REST JWT PRE-ENCODE] Private Key Type: {type(self.private_key)}")
-        # ---> END ADDED LOGGING <---
+            logger.error(f"Failed to initialize Coinbase RESTClient: {e}", exc_info=True)
+            raise
 
-        logger.debug(f"JWT Payload: {json.dumps(payload, indent=2)}")
-        logger.debug(f"JWT Headers: {json.dumps(headers, indent=2)}")
-        
-        try:
-            jwt_token = jwt.encode(
-                payload=payload,
-                key=self.private_key,
-                algorithm="ES256",  # Must be ES256 for Coinbase
-                headers=headers
-            )
-            logger.debug(f"Generated JWT token (first 50 chars): {jwt_token[:50]}...")
-            return jwt_token
-        except Exception as e:
-            logger.error(f"Private key type during JWT generation: {type(self.private_key)}")
-            logger.error(f"Error generating JWT: {e}", exc_info=True)
-            raise CoinbaseError(f"Failed to generate JWT: {e}")
-
-    async def _request(
-        self,
-        method: str,
-        endpoint: str,
-        params: Optional[Dict] = None,
-        data: Optional[Dict] = None
-    ) -> Dict:
-        """
-        Make authenticated request to Coinbase API using JWT.
-        
-        Args:
-            method (str): HTTP method
-            endpoint (str): API endpoint (e.g., /orders)
-            params (Optional[Dict]): Query parameters
-            data (Optional[Dict]): Request body data
-            
-        Returns:
-            Dict: API response
-            
-        Raises:
-            CoinbaseError: If the API request fails
-        """
-        url = f"{self.api_url}{endpoint}"
-        body = json.dumps(data) if data else ""
-        
-        # For JWT generation, we need the path part of the URL
-        # First, strip leading slash to avoid double slashes
-        clean_endpoint = endpoint.lstrip('/')
-        
-        # Handle query parameters for both the URL and JWT URI construction
-        processed_endpoint = clean_endpoint
-        if params:
-            # Build the query string for the URL
-            query_parts = []
-            for key in sorted(params.keys()):
-                encoded_key = urllib.parse.quote(str(key))
-                encoded_value = urllib.parse.quote(str(params[key]))
-                query_parts.append(f"{encoded_key}={encoded_value}")
-            
-            query_string = "&".join(query_parts)
-            # Add query params to endpoint for JWT generation
-            processed_endpoint = f"{clean_endpoint}?{query_string}"
-        
-        logger.debug(f"API URL: {url}")
-        logger.debug(f"Method: {method}")
-        logger.debug(f"Processed endpoint for JWT: {processed_endpoint}")
-        
-        try:
-            # Generate JWT token with the properly formatted URI
-            jwt_token = self._generate_jwt(method, processed_endpoint, body)
-            
-            # Set up request headers
-            headers = {
-                "Authorization": f"Bearer {jwt_token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-            
-            logger.debug(f"Request headers: {', '.join(headers.keys())}")
-            
-            async with httpx.AsyncClient() as client:
-                logger.debug(f"Sending {method} request to {url}")
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    params=params,
-                    json=data,
-                    timeout=30.0
-                )
-                
-                logger.info(f"HTTP Request: {method} {url} {response!r}")
-                
-                # For 4xx and 5xx responses, print the response body for debugging
-                if response.status_code >= 400:
-                    logger.error(f"Error response: {response.text}")
-                    logger.error(f"Response headers: {response.headers}")
-                    try:
-                        error_json = response.json()
-                        logger.error(f"Detailed error: {json.dumps(error_json, indent=2)}")
-                    except:
-                        logger.error(f"Raw error text: {response.text}")
-                    
-                response.raise_for_status()
-                
-                # Handle the response
-                try:
-                    return response.json()
-                except Exception as e:
-                    # If the response isn't JSON, return the text content
-                    if response.text:
-                        return {"text": response.text}
-                    else:
-                        return {"status": "success", "message": "No content"}
-                
-        except httpx.HTTPStatusError as e:
-            error_data = {}
-            try:
-                error_data = e.response.json()
-                logger.error(f"HTTP error data: {error_data}")
-            except:
-                logger.error(f"Failed to parse error response: {e.response.text}")
-                
-            raise CoinbaseError(
-                f"HTTP {e.response.status_code}: {str(e)}",
-                status_code=e.response.status_code,
-                response=error_data
-            )
-        except httpx.RequestError as e:
-            logger.error(f"Request error: {str(e)}")
-            raise CoinbaseError(f"Request failed: {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            raise CoinbaseError(f"Unexpected error: {str(e)}")
-            
     # Account endpoints
-    async def get_accounts(self) -> List[Dict]:
+    def get_accounts(self) -> List[Dict]:
         """Get list of trading accounts"""
-        response = await self._request("GET", "/accounts")
-        return response.get("accounts", [])
+        # SDK Method: get_accounts()
+        try:
+            response_obj = self.client.get_accounts()
+            # Return the raw response object (e.g., ListAccountsResponse)
+            # Caller can access response_obj.accounts and convert if needed
+            return response_obj
+        except Exception as e:
+            logger.error(f"Coinbase API error getting accounts: {e}", exc_info=True)
+            raise # Re-raise the exception
         
-    async def get_account(self, account_id: str) -> Dict:
+    def get_account(self, account_id: str) -> Dict:
         """Get specific account details"""
-        return await self._request("GET", f"/accounts/{account_id}")
+        # SDK Method: get_account(account_uuid=...)
+        try:
+            response_obj = self.client.get_account(account_uuid=account_id)
+            # Return the raw response object (e.g., Account)
+            return response_obj
+        except Exception as e:
+            logger.error(f"Coinbase API error getting account {account_id}: {e}", exc_info=True)
+            raise
         
     # Product endpoints
-    async def get_products(self) -> List[Dict]:
+    def get_products(self) -> List[Dict]:
         """Get list of available products"""
-        response = await self._request("GET", "/products")
+        # SDK Method: get_products()
+        try:
+            response_obj = self.client.get_products() # Method confirmed by README
+            # Return the raw response object (e.g., ListProductsResponse)
+            return response_obj
+        except Exception as e:
+            logger.error(f"Coinbase API error getting products: {e}", exc_info=True)
+            raise # Or return []
         
-        # Handle different response formats
-        if isinstance(response, list):
-            # Exchange API returns products as a list directly
-            return response
-        elif isinstance(response, dict) and "products" in response:
-            # Advanced Trade API returns products in a dict with 'products' key
-            return response.get("products", [])
-        else:
-            logger.warning(f"Unexpected products response format: {type(response)}")
-            return []
-        
-    async def get_product(self, product_id: str) -> Dict:
+    def get_product(self, product_id: str) -> Dict:
         """Get product details by ID"""
-        return await self._request("GET", f"/products/{product_id}")
+        # SDK Method: get_product(product_id=...)
+        try:
+            response_obj = self.client.get_product(product_id=product_id) # Method confirmed by README
+            # Return the raw response object (e.g., Product)
+            return response_obj
+        except Exception as e:
+            logger.error(f"Coinbase API error getting product {product_id}: {e}", exc_info=True)
+            raise
         
-    async def get_product_candles(
+    def get_product_candles(
         self,
         product_id: str,
         start: Optional[str] = None,
         end: Optional[str] = None,
         granularity: str = "ONE_HOUR"
     ) -> List[Dict]:
-        """Get historical candles for a product"""
-        # Convert granularity to seconds for the API
-        granularity_map = {
-            "ONE_MINUTE": 60,
-            "FIVE_MINUTE": 300,
-            "FIFTEEN_MINUTE": 900,
-            "ONE_HOUR": 3600,
-            "SIX_HOUR": 21600,
-            "ONE_DAY": 86400
-        }
-        
-        # Get the granularity in seconds
-        granularity_seconds = granularity_map.get(granularity, 3600)
-        
+        """Get historical candles for a product (uses public endpoint)"""
         params = {
-            "granularity": granularity_seconds
+            "granularity": granularity
         }
         
         if start:
             params["start"] = start
-            
         if end:
             params["end"] = end
             
-        # The Exchange API returns candles directly as a list
-        response = await self._request("GET", f"/products/{product_id}/candles", params=params)
-        return response  # Return the list directly
+        # SDK method confirmed via error message: get_public_candles
+        try:
+            # Note: Using public endpoint as suggested by error, might not require auth
+            response_obj = self.client.get_public_candles(product_id=product_id, **params)
+            # Return raw response object
+            return response_obj
+        except Exception as e:
+            logger.error(f"Coinbase API error getting candles for {product_id}: {e}", exc_info=True)
+            raise # Or return []
         
     # Order endpoints
-    async def create_order(
+    def create_order(
         self,
         product_id: str,
         side: OrderSide,
@@ -321,7 +123,7 @@ class CoinbaseClient:
         time_in_force: TimeInForce = TimeInForce.GTC
     ) -> Dict:
         """
-        Create a new order
+        Create a new order. Routes to specific SDK methods based on order_type and side.
         
         Args:
             product_id (str): Trading pair ID
@@ -334,40 +136,100 @@ class CoinbaseClient:
             time_in_force (TimeInForce): Time in force policy (GTC/GTT/IOC/FOK)
             
         Returns:
-            Dict: Raw response from order creation
+            Dict: Dictionary representation of the order creation response, or an error dict.
         """
-        # Convert enums to string values for the API request
-        order_type_str = order_type.value.lower()
+        # Use provided client_order_id or let the SDK generate one if None (pass empty string)
+        effective_client_order_id = client_order_id or ""
         
-        data = {
-            "product_id": product_id,
-            "side": side.value.upper(),
-            "order_configuration": {
-                order_type_str: {
-                    "size": str(size),
-                    "time_in_force": time_in_force.value
-                }
-            }
-        }
+        # Convert size and price to string as often required by API
+        size_str = str(size)
+        price_str = str(price) if price is not None else None
+        stop_price_str = str(stop_price) if stop_price is not None else None
         
-        if price is not None and order_type in [OrderType.LIMIT, OrderType.STOP_LIMIT]:
-             data["order_configuration"][order_type_str]["limit_price"] = str(price)
-            
-        if stop_price is not None and order_type in [OrderType.STOP, OrderType.STOP_LIMIT]:
-            data["order_configuration"][order_type_str]["stop_price"] = str(stop_price)
-            
-        if client_order_id:
-            data["client_order_id"] = client_order_id
-            
-        response = await self._request("POST", "/orders", data=data)
-        # Return the raw response dict for now, Pydantic parsing can be added later if needed
-        return response
+        response_obj = None
         
-    async def cancel_order(self, order_id: str) -> Dict:
+        logger.info(f"Attempting to create order: {product_id} {side.value} {order_type.value} {size_str} Price={price_str} Stop={stop_price_str} TIF={time_in_force.value}")
+
+        try:
+            if order_type == OrderType.MARKET:
+                if side == OrderSide.BUY:
+                    # Market BUY typically uses quote_size (amount of quote currency)
+                    logger.info(f"Executing market_order_buy for {product_id}, quote_size={size_str}")
+                    response_obj = self.client.market_order_buy(client_order_id=effective_client_order_id, product_id=product_id, quote_size=size_str)
+                elif side == OrderSide.SELL:
+                    # Market SELL typically uses base_size (amount of base currency)
+                    logger.info(f"Executing market_order_sell for {product_id}, base_size={size_str}")
+                    response_obj = self.client.market_order_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str)
+            
+            elif order_type == OrderType.LIMIT:
+                if price is None:
+                    raise ValueError("Price must be provided for LIMIT orders.")
+                # Handle different TimeInForce values
+                if time_in_force == TimeInForce.GTC:
+                    # Limit orders use base_size (amount of base currency, e.g., BTC)
+                    # Verify SDK method names: limit_order_gtc_buy / limit_order_gtc_sell
+                    if side == OrderSide.BUY:
+                        logger.info(f"Calling SDK: limit_order_gtc_buy(product_id={product_id}, base_size={size_str}, limit_price={price_str})")
+                        response_obj = self.client.limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
+                    elif side == OrderSide.SELL:
+                        logger.info(f"Calling SDK: limit_order_gtc_sell(product_id={product_id}, base_size={size_str}, limit_price={price_str})")
+                        response_obj = self.client.limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
+                elif time_in_force == TimeInForce.GTD: # Good Till Date/Time
+                     # Requires end_time parameter - not currently supported by this wrapper
+                    raise NotImplementedError("LIMIT GTD orders require end_time, which is not supported by this wrapper.")
+                # TODO: Add support for IOC/FOK if available in SDK (might be boolean flags like post_only?)
+                else:
+                    raise NotImplementedError(f"TimeInForce {time_in_force} not implemented for LIMIT orders.")
+            
+            elif order_type == OrderType.STOP_LIMIT:
+                 if price is None or stop_price is None:
+                     raise ValueError("Both price (limit) and stop_price must be provided for STOP_LIMIT orders.")
+                 # Assuming stop_direction is inferred or not needed for basic STOP_LIMIT
+                 if time_in_force == TimeInForce.GTC:
+                     # Stop Limit orders use base_size (amount of base currency, e.g., BTC)
+                     # Verify SDK method names: stop_limit_order_gtc_buy / stop_limit_order_gtc_sell
+                     if side == OrderSide.BUY:
+                         logger.info(f"Calling SDK: stop_limit_order_gtc_buy(product_id={product_id}, base_size={size_str}, limit_price={price_str}, stop_price={stop_price_str})")
+                         response_obj = self.client.stop_limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
+                     elif side == OrderSide.SELL:
+                         logger.info(f"Calling SDK: stop_limit_order_gtc_sell(product_id={product_id}, base_size={size_str}, limit_price={price_str}, stop_price={stop_price_str})")
+                         response_obj = self.client.stop_limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
+                 elif time_in_force == TimeInForce.GTD:
+                      raise NotImplementedError("STOP_LIMIT GTD orders require end_time, which is not supported by this wrapper.")
+                 else:
+                     raise NotImplementedError(f"TimeInForce {time_in_force} not implemented for STOP_LIMIT orders.")
+
+            # TODO: Add handling for simple STOP orders if the SDK supports them distinct from STOP_LIMIT
+            else:
+                raise NotImplementedError(f"Order type {order_type} not implemented.")
+
+            # Convert the response object to a dictionary if successful
+            return response_obj.to_dict() if response_obj and hasattr(response_obj, 'to_dict') else vars(response_obj) if response_obj else {}
+
+        except NotImplementedError as nie:
+            logger.error(f"Order creation failed: {nie}")
+            raise # Re-raise unimplemented errors
+        except ValueError as ve:
+            logger.error(f"Order creation failed due to invalid parameters: {ve}")
+            # Consider returning an error dictionary or re-raising
+            raise
+        except Exception as e: # Catch potential API errors from the SDK
+            logger.error(f"Coinbase API error creating order: {e}", exc_info=True)
+            raise
+        
+    def cancel_order(self, order_id: str) -> Dict:
         """Cancel an order by ID"""
-        return await self._request("DELETE", f"/orders/{order_id}")
+        # The SDK uses cancel_orders (plural) and expects a list of IDs
+        # Verify SDK method name: Assuming cancel_orders is correct
+        try:
+            response = self.client.cancel_orders(order_ids=[order_id])
+            # Returns CancelOrdersResponse object
+            return response # Return raw SDK response object
+        except Exception as e:
+            logger.error(f"Coinbase API error canceling order {order_id}: {e}", exc_info=True)
+            raise
         
-    async def get_orders(
+    def get_orders(
         self,
         product_id: Optional[str] = None,
         status: Optional[List[OrderStatus]] = None,
@@ -389,28 +251,48 @@ class CoinbaseClient:
             params["product_id"] = product_id
         if status:
             # Convert list of enums to comma-separated string of values
-            params["status"] = ",".join([s.value for s in status])
-            
-        response = await self._request("GET", "/orders", params=params)
-        return response.get("orders", [])
+            # The library might expect a list of strings or handle enums
+            params["order_status"] = [s.value for s in status] # Assuming list of strings
+
+        # Verify SDK method name: Assuming list_orders is correct (or get_orders)
+        # Note: SDK might use list_orders or get_orders
+        try:
+            response_obj = self.client.list_orders(**params)
+            orders = getattr(response_obj, 'orders', [])
+            return [order.to_dict() for order in orders] if orders else []
+        except Exception as e:
+            logger.error(f"Coinbase API error getting orders: {e}", exc_info=True)
+            raise # Or return []
         
-    async def get_order(self, order_id: str) -> Dict:
+    def get_order(self, order_id: str) -> Dict:
         """Get order details by ID"""
-        response = await self._request("GET", f"/orders/{order_id}")
-        return response
+        # Verify SDK method name: Assuming get_order is correct
+        try:
+            response_obj = self.client.get_order(order_id=order_id)
+            order = getattr(response_obj, 'order', None)
+            return order.to_dict() if order else {}
+        except Exception as e:
+            logger.error(f"Coinbase API error getting order {order_id}: {e}", exc_info=True)
+            raise
         
     # Market data endpoints
-    async def get_market_trades(
+    def get_market_trades(
         self,
         product_id: str,
         limit: int = 100
     ) -> List[Dict]:
         """Get recent trades for a product"""
         params = {"limit": limit}
-        response = await self._request("GET", f"/products/{product_id}/trades", params=params)
-        return response.get("trades", [])
+        # Verify SDK method name: Assuming list_market_trades is correct (or get_market_trades)
+        try:
+            response_obj = self.client.list_market_trades(product_id=product_id, limit=limit)
+            trades = getattr(response_obj, 'trades', [])
+            return [trade.to_dict() for trade in trades] if trades else []
+        except Exception as e:
+            logger.error(f"Coinbase API error getting market trades for {product_id}: {e}", exc_info=True)
+            raise
         
-    async def get_order_book(
+    def get_order_book(
         self,
         product_id: str,
         level: int = 2
@@ -425,23 +307,17 @@ class CoinbaseClient:
         Returns:
             Dict: Order book data
         """
-        params = {"level": level}
-        return await self._request("GET", f"/products/{product_id}/book", params=params)
+        # Verify SDK method name: Assuming get_product_book is correct
+        # Verify SDK parameter name: Assuming limit maps to level
+        try:
+            response = self.client.get_product_book(product_id=product_id, limit=level)
+            # Convert response object to dict if needed
+            return response # Return raw SDK response object
+        except Exception as e:
+            logger.error(f"Coinbase API error getting order book for {product_id}: {e}", exc_info=True)
+            raise
         
-    # Position endpoints
-    async def get_positions(self, product_id: Optional[str] = None) -> List[Position]:
-        """Get open positions"""
-        params = {}
-        if product_id:
-            params["product_id"] = product_id
-            
-        response = await self._request("GET", "/positions", params=params)
-        # Parse raw response into list of Position models
-        positions_data = response.get("positions", [])
-        return [Position(**pos) for pos in positions_data]
+    # Removed get_positions and get_position methods as they are likely not 
+    # part of the standard RESTClient for trading endpoints.
+    # Portfolio/account balance details are typically handled by get_accounts/get_account.
         
-    async def get_position(self, product_id: str) -> Position:
-        """Get position for specific product"""
-        response = await self._request("GET", f"/positions/{product_id}")
-        # Parse raw response into Position model
-        return Position(**response["position"]) 

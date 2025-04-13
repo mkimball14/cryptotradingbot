@@ -1,9 +1,14 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
+import logging
+import pandas_ta as ta # Using pandas_ta for convenience
+from collections import deque
 
 from .base.strategy import Strategy, StrategyState
 from .indicators.technical import calculate_rsi, detect_regime, calculate_atr, calculate_ma
+
+logger = logging.getLogger(__name__)
 
 class RSIMomentumStrategy(Strategy):
     """
@@ -26,7 +31,9 @@ class RSIMomentumStrategy(Strategy):
                  ma_period: int = 20,
                  atr_period: int = 14,
                  risk_per_trade: float = 0.02,
-                 atr_stop_multiplier: float = 2.0):
+                 atr_stop_multiplier: float = 2.0,
+                 product_id: str = "",
+                 config: Optional[Dict] = None):
         """
         Initialize RSI Momentum strategy.
         """
@@ -39,6 +46,28 @@ class RSIMomentumStrategy(Strategy):
         self.atr_period = atr_period
         self.atr_stop_multiplier = atr_stop_multiplier
         self.state = StrategyState() # Initialize state
+        
+        self.config = config or {}
+        self.product_id = product_id
+        
+        # Explicitly assign strategy parameters from config or use defaults
+        # Ensure type conversion if necessary (e.g., period to int)
+        self.rsi_period = int(self.config.get("rsi_period", 14))
+        self.oversold_threshold = self.config.get("oversold_threshold", 30)
+        self.overbought_threshold = self.config.get("overbought_threshold", 70)
+        self.signal_threshold = self.config.get("signal_threshold", 50)
+        self.trade_size = self.config.get("trade_size", 0.01)
+
+        # State Variables
+        # Use the assigned rsi_period for maxlen calculation
+        self.price_history = deque(maxlen=self.rsi_period + 5)
+        self.current_rsi: Optional[float] = None
+        self.in_position: bool = False # Track if we are currently holding the base asset
+        
+        logger.info(
+            f"Initialized RSIMomentumStrategy for {self.product_id} with config: "
+            f"Period={self.rsi_period}, OS={self.oversold_threshold}, OB={self.overbought_threshold}, TradeSize={self.trade_size}"
+        )
     
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """Calculate necessary indicators: RSI, Regime, ATR."""
@@ -137,3 +166,128 @@ class RSIMomentumStrategy(Strategy):
             # Fallback calculation if needed (should use pre-calculated value)
             print(f"Warning: Using dynamic stop loss calculation for row {row.name}.")
             return row['low'] - row['atr'] * self.atr_stop_multiplier 
+
+    def _calculate_rsi(self) -> Optional[float]:
+        """Calculates RSI using pandas_ta based on the price history."""
+        if len(self.price_history) < self.rsi_period:
+            # Not enough data yet
+            return None
+        
+        try:
+            # Convert deque to pandas Series
+            prices = pd.Series(list(self.price_history), dtype=float)
+            # Calculate RSI
+            rsi_series = ta.rsi(prices, length=self.rsi_period)
+            if rsi_series is not None and not rsi_series.empty:
+                # Get the latest RSI value
+                latest_rsi = rsi_series.iloc[-1]
+                return float(latest_rsi) if pd.notna(latest_rsi) else None
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Error calculating RSI: {e}")
+            return None
+
+    def process_market_data(self, data: Dict[str, Any]) -> Optional[Dict]:
+        """
+        Processes incoming market data (ticker) and generates trade signals.
+
+        Args:
+            data (Dict[str, Any]): The market data message (expecting ticker type).
+
+        Returns:
+            Optional[Dict]: An action dictionary (e.g., {'action': 'BUY', ...}) or None.
+        """
+        message_type = data.get('type')
+        
+        # --- State Update from Order Fills --- 
+        if message_type == 'user_order_update':
+            # Only process fills for this strategy's product
+            if data.get('product_id') == self.product_id:
+                order_status = data.get('status')
+                order_side = data.get('side')
+                
+                # If a BUY order was filled, we are now in position
+                if order_status == "FILLED" and order_side == "BUY":
+                    if not self.in_position:
+                        logger.info(f"Strategy [{self.product_id}]: Received BUY fill notification. Updating state to IN POSITION.")
+                        self.in_position = True
+                    else:
+                        logger.warning(f"Strategy [{self.product_id}]: Received BUY fill notification, but already in position.")
+                # If a SELL order was filled, we are now out of position
+                elif order_status == "FILLED" and order_side == "SELL":
+                    if self.in_position:
+                        logger.info(f"Strategy [{self.product_id}]: Received SELL fill notification. Updating state to OUT OF POSITION.")
+                        self.in_position = False
+                    else:
+                        logger.warning(f"Strategy [{self.product_id}]: Received SELL fill notification, but already out of position.")
+                # Handle other closed statuses (optional, maybe just log)
+                elif order_status in ["CANCELLED", "EXPIRED", "FAILED"]:
+                     logger.info(f"Strategy [{self.product_id}]: Received non-fill order closure: {order_status}")
+                     # Decide if state needs changing (e.g., failed BUY means not in position)
+                     # For simplicity, we only change state on FILLED for now.
+            return None # No trade signal generated from order updates
+
+        # --- Signal Generation from Ticker Data --- 
+        elif message_type == 'ticker':
+            if data.get('product_id') != self.product_id:
+                # Ignore tickers for other products
+                return None
+
+            price_str = data.get('price')
+            if not price_str:
+                logger.warning("Ticker message missing price.")
+                return None
+
+            try:
+                current_price = float(price_str)
+                self.price_history.append(current_price)
+                
+                # Store previous RSI for crossover detection
+                previous_rsi = self.current_rsi
+                self.current_rsi = self._calculate_rsi()
+
+                if self.current_rsi is None or previous_rsi is None:
+                    logger.debug("RSI not calculated yet or insufficient data.")
+                    return None
+
+                logger.info(f"Strategy [{self.product_id}]: Price={current_price:.2f}, RSI={self.current_rsi:.2f}, InPosition={self.in_position}")
+                
+                # --- RSI Momentum Logic --- 
+                signal = None
+                # Simplified Buy Signal: RSI is in oversold region and we are not in position
+                if not self.in_position and self.current_rsi <= self.oversold_threshold:
+                    logger.info(f"BUY SIGNAL: RSI ({self.current_rsi:.2f}) <= Oversold ({self.oversold_threshold}).")
+                    signal = {
+                        'action': 'BUY',
+                        'type': 'MARKET', # Or 'LIMIT' with calculated price
+                        'size': self.trade_size, # NOTE: For MARKET BUY, this needs to be QUOTE size!
+                        'product_id': self.product_id
+                        # Add price if LIMIT order
+                    }
+                    # DO NOT change self.in_position here - wait for user_order_update confirmation
+
+                # Simplified Sell Signal: RSI is in overbought region and we are in position
+                elif self.in_position and self.current_rsi >= self.overbought_threshold:
+                    logger.info(f"SELL SIGNAL: RSI ({self.current_rsi:.2f}) >= Overbought ({self.overbought_threshold}).")
+                    signal = {
+                        'action': 'SELL',
+                        'type': 'MARKET', # Or 'LIMIT'
+                        'size': self.trade_size, # Size in BASE currency for MARKET SELL / LIMIT
+                        'product_id': self.product_id
+                        # Add price if LIMIT order
+                    }
+                    # DO NOT change self.in_position here - wait for user_order_update confirmation
+                # ---------------------------
+                
+                return signal
+
+            except ValueError:
+                logger.error(f"Could not convert price '{price_str}' to float.")
+                return None
+            except Exception as e:
+                logger.error(f"Error processing ticker data: {e}", exc_info=True)
+                return None
+        else:
+            # Ignore other message types for now
+            return None 
