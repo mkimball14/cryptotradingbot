@@ -1,0 +1,92 @@
+{
+  "strategy_name": "Stochastic + Fixed SMA50 Filter",
+  "trend_filter_window": 50,
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 2.5,
+  "fixed_tsl_atr_multiplier": 3.5,
+  "best_params_per_split": {
+    "0": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "1": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "2": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "3": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "4": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "5": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "6": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    }
+  },
+  "oos_sharpe": {
+    "0": -0.8591352608338135,
+    "1": -1.1639319603928715,
+    "2": 0.66124769772572,
+    "3": 2.3588137224362162,
+    "4": -2.2424643378008513,
+    "5": 0.06424145824790821,
+    "6": -1.0497604220443093
+  },
+  "oos_return": {
+    "0": -0.06167303064488387,
+    "1": -0.08802617818352391,
+    "2": 0.030024880731956183,
+    "3": 0.12279439554353014,
+    "4": -0.08656992074987738,
+    "5": 0.00038621219381511764,
+    "6": -0.05126914530984322
+  },
+  "oos_drawdown": {
+    "0": 0.14265689233345275,
+    "1": 0.12248221149049864,
+    "2": 0.04175398173476312,
+    "3": 0.06392924024934671,
+    "4": 0.09548809075544833,
+    "5": 0.07822959815085044,
+    "6": 0.08286863340692968
+  },
+  "oos_mean_sharpe": -0.3187127289517145,
+  "oos_std_sharpe": 1.5009900782216534,
+  "oos_mean_return": -0.01919039805983242,
+  "oos_std_return": 0.07646050587267063,
+  "oos_mean_drawdown": 0.08962980687446996,
+  "oos_std_drawdown": 0.034287421781707114
+}
