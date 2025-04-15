@@ -18,6 +18,7 @@ import traceback
 from plotly.subplots import make_subplots
 import warnings
 import time
+from itertools import product
 
 # Add project root to sys.path to allow importing app modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +31,17 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# --- Utility Functions (Copied from backtest_rsi_vbt.py, potentially modify later) ---
+
+# Helper function to map seconds to vectorbt frequency strings (Copied from stoch_sma script)
+def get_vbt_freq_str(granularity_seconds: int) -> Optional[str]:
+    # Map seconds to pandas frequency strings suitable for vectorbt
+    vbt_freq_map = {
+        60: "1T", 300: "5T", 900: "15T", 1800: "30T",
+        3600: "1H", 7200: "2H", 14400: "4H", 21600: "6H", 86400: "1D"
+    }
+    return vbt_freq_map.get(granularity_seconds)
 
 def fetch_historical_data(product_id, start_date, end_date, granularity=86400):
     """
@@ -884,6 +896,122 @@ class RSIMomentumVBT:
         
         # Run the strategy and return the results
         return temp_strategy.run(data)
+        
+    def optimize(self, data: pd.DataFrame, param_grid: Dict, optimize_metric: str, granularity_seconds: int = 86400):
+        """
+        Run vectorized backtest optimization using vectorbtpro for RSI Momentum.
+        (Manual parameter iteration approach)
+
+        Args:
+            data: DataFrame with OHLCV data.
+            param_grid: Dictionary with parameter names as keys and arrays of values to test.
+                        Expected keys: 'window', 'lower_threshold', 'upper_threshold' (and optionally 'ma_window').
+            optimize_metric: The metric string used by vectorbtpro for ranking.
+            granularity_seconds: Data granularity for frequency calculation.
+
+        Returns:
+            vectorbtpro Portfolio object or None on error.
+        """
+        freq_str = get_vbt_freq_str(granularity_seconds)
+        if not freq_str:
+            logger.error(f"Invalid granularity seconds ({granularity_seconds}) for freq string. Cannot optimize RSI.")
+            return None
+            
+        if isinstance(data, pd.DataFrame):
+            if 'close' in data.columns:
+                close = data['close']
+            else:
+                logger.warning("No 'close' column found, using the first column as close prices")
+                close = data.iloc[:, 0]
+        else:
+            close = pd.Series(data) # Assuming data is a Series if not DataFrame
+
+        logger.info(f"Running RSIMomentum optimization with grid (manual iteration): {param_grid}")
+        
+        try:
+            # --- 1. Generate Parameter Combinations ---
+            # Handle potential single MA window value
+            ma_window_param = param_grid.get('ma_window', self.ma_window)
+            if not isinstance(ma_window_param, (np.ndarray, list, range)):
+                 ma_window_param = [ma_window_param] # Wrap single value in list
+                 
+            param_names = ['window', 'lower_threshold', 'upper_threshold', 'ma_window'] # Order matters
+            param_arrays = [
+                param_grid['window'],
+                param_grid['lower_threshold'],
+                param_grid['upper_threshold'],
+                ma_window_param # Use the list version
+            ]
+            param_combinations = list(product(*param_arrays))
+            logger.info(f"Generated {len(param_combinations)} parameter combinations manually.")
+            
+            all_entries = []
+            all_exits = []
+
+            # --- 2. Loop Through Combinations and Generate Signals ---
+            for rsi_w, lower_th, upper_th, ma_w in tqdm(param_combinations, desc="Simulating RSIMomentum"):
+                try:
+                    # Calculate RSI for this combination
+                    rsi = vbt.RSI.run(close, window=rsi_w, wtype=self.wtype).rsi
+                    
+                    # Calculate MA for this combination
+                    if self.ma_type == 'sma':
+                        ma = vbt.MA.run(close, window=ma_w).ma
+                    else:
+                        ma = vbt.EMA.run(close, window=ma_w).ma
+                    
+                    if rsi.isnull().all() or ma.isnull().all():
+                        # Append False series if indicator fails
+                        all_entries.append(pd.Series(False, index=close.index))
+                        all_exits.append(pd.Series(False, index=close.index))
+                        continue
+                        
+                    # Generate signals
+                    entry_signal = rsi.vbt.crossed_below(lower_th) & (close > ma)
+                    exit_signal = rsi.vbt.crossed_above(upper_th)
+                    
+                    all_entries.append(entry_signal)
+                    all_exits.append(exit_signal)
+
+                except Exception as loop_err:
+                     logger.warning(f"Error in loop for params ({rsi_w},{lower_th},{upper_th},{ma_w}): {loop_err}. Appending False signals.")
+                     all_entries.append(pd.Series(False, index=close.index))
+                     all_exits.append(pd.Series(False, index=close.index))
+            
+            if not all_entries:
+                 logger.error("No signals generated for any parameter combination.")
+                 return None
+
+            # --- 3. Combine Signals ---
+            param_multi_index = pd.MultiIndex.from_tuples(param_combinations, names=param_names)
+            entries_output = pd.concat(all_entries, axis=1, keys=param_multi_index)
+            exits_output = pd.concat(all_exits, axis=1, keys=param_multi_index)
+
+            # --- 4. Run Portfolio Simulation --- 
+            pf_kwargs = {
+                'close': close, # Use original close for portfolio price
+                'entries': entries_output,
+                'exits': exits_output,
+                'freq': freq_str,
+                'init_cash': self.initial_capital,
+                'fees': self.commission_pct,
+                'slippage': self.slippage_pct,
+                # 'metrics': optimize_metric # Removed - Portfolio doesn't take this directly
+            }
+            
+            # Add stops if this strategy implementation includes them
+            # if self.use_stops: ... calculate and add sl_stop/tsl_stop kwargs ...
+            
+            logger.info(f"Running Portfolio.from_signals with {entries_output.shape[1]} parameter combinations (manual loop).")
+            pf = vbt.Portfolio.from_signals(**pf_kwargs)
+            logger.info("Portfolio simulation complete.")
+
+            # --- 5. Return Portfolio Object --- 
+            return pf
+
+        except Exception as e:
+            logger.error(f"Error during RSIMomentum optimization (manual iteration): {e}", exc_info=True)
+            return None
 
 class MultiIndicatorStrategy(RSIMomentumVBT):
     """

@@ -686,3 +686,317 @@
 2025-04-15 13:10:35,282 - INFO - --- Run 160/192 --- End ---
 2025-04-15 13:10:35,290 - INFO - --- Run 161/192 --- Start ---
 2025-04-15 13:10:35,290 - INFO - Params: Gran=1h, Trend=100, SL=1.5, TSL=2.0
+2025-04-15 13:12:06,141 - INFO - Run 161/192: Script executed successfully.
+2025-04-15 13:12:06,143 - INFO - Run 161/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL2.0_SMA100.json
+2025-04-15 13:12:06,144 - INFO - Run 161/192: Sharpe=-0.9071 | Return=-0.0488 | Drawdown=0.0953 | Error=None
+2025-04-15 13:12:06,144 - INFO - --- Run 161/192 --- End ---
+2025-04-15 13:12:06,150 - INFO - --- Run 162/192 --- Start ---
+2025-04-15 13:12:06,150 - INFO - Params: Gran=1h, Trend=100, SL=1.5, TSL=2.5
+2025-04-15 13:13:31,021 - INFO - Run 162/192: Script executed successfully.
+2025-04-15 13:13:31,024 - INFO - Run 162/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL2.5_SMA100.json
+2025-04-15 13:13:31,026 - INFO - Run 162/192: Sharpe=-0.9522 | Return=-0.0514 | Drawdown=0.0964 | Error=None
+2025-04-15 13:13:31,026 - INFO - --- Run 162/192 --- End ---
+2025-04-15 13:13:31,035 - INFO - --- Run 163/192 --- Start ---
+2025-04-15 13:13:31,035 - INFO - Params: Gran=1h, Trend=100, SL=1.5, TSL=3.0
+2025-04-15 13:14:53,323 - INFO - Run 163/192: Script executed successfully.
+2025-04-15 13:14:53,327 - INFO - Run 163/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL3.0_SMA100.json
+2025-04-15 13:14:53,327 - INFO - Run 163/192: Sharpe=-0.9516 | Return=-0.0516 | Drawdown=0.0964 | Error=None
+2025-04-15 13:14:53,327 - INFO - --- Run 163/192 --- End ---
+2025-04-15 13:14:53,340 - INFO - --- Run 164/192 --- Start ---
+2025-04-15 13:14:53,340 - INFO - Params: Gran=1h, Trend=100, SL=1.5, TSL=3.5
+2025-04-15 13:16:09,284 - INFO - Run 164/192: Script executed successfully.
+2025-04-15 13:16:09,290 - INFO - Run 164/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL3.5_SMA100.json
+2025-04-15 13:16:09,290 - INFO - Run 164/192: Sharpe=-0.9568 | Return=-0.0519 | Drawdown=0.0966 | Error=None
+2025-04-15 13:16:09,290 - INFO - --- Run 164/192 --- End ---
+2025-04-15 13:16:09,299 - INFO - --- Run 165/192 --- Start ---
+2025-04-15 13:16:09,299 - INFO - Params: Gran=1h, Trend=100, SL=2.0, TSL=2.0
+2025-04-15 13:17:20,037 - INFO - Run 165/192: Script executed successfully.
+2025-04-15 13:17:20,039 - INFO - Run 165/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL2.0_SMA100.json
+2025-04-15 13:17:20,039 - INFO - Run 165/192: Sharpe=-1.0624 | Return=-0.0588 | Drawdown=0.1022 | Error=None
+2025-04-15 13:17:20,039 - INFO - --- Run 165/192 --- End ---
+2025-04-15 13:17:20,045 - INFO - --- Run 166/192 --- Start ---
+2025-04-15 13:17:20,045 - INFO - Params: Gran=1h, Trend=100, SL=2.0, TSL=2.5
+2025-04-15 13:48:00,526 - INFO - Run 166/192: Script executed successfully.
+2025-04-15 13:48:00,527 - INFO - Run 166/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL2.5_SMA100.json
+2025-04-15 13:48:00,528 - INFO - Run 166/192: Sharpe=-1.1134 | Return=-0.0621 | Drawdown=0.1050 | Error=None
+2025-04-15 13:48:00,529 - INFO - --- Run 166/192 --- End ---
+2025-04-15 13:48:00,549 - INFO - --- Run 167/192 --- Start ---
+2025-04-15 13:48:00,550 - INFO - Params: Gran=1h, Trend=100, SL=2.0, TSL=3.0
+2025-04-15 14:11:10,899 - INFO - Run 167/192: Script executed successfully.
+2025-04-15 14:11:10,904 - INFO - Run 167/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL3.0_SMA100.json
+2025-04-15 14:11:10,905 - INFO - Run 167/192: Sharpe=-1.1127 | Return=-0.0622 | Drawdown=0.1051 | Error=None
+2025-04-15 14:11:10,905 - INFO - --- Run 167/192 --- End ---
+2025-04-15 14:11:10,913 - INFO - --- Run 168/192 --- Start ---
+2025-04-15 14:11:10,913 - INFO - Params: Gran=1h, Trend=100, SL=2.0, TSL=3.5
+2025-04-15 14:12:38,601 - INFO - Run 168/192: Script executed successfully.
+2025-04-15 14:12:38,602 - INFO - Run 168/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL3.5_SMA100.json
+2025-04-15 14:12:38,603 - INFO - Run 168/192: Sharpe=-1.1176 | Return=-0.0625 | Drawdown=0.1054 | Error=None
+2025-04-15 14:12:38,603 - INFO - --- Run 168/192 --- End ---
+2025-04-15 14:12:38,611 - WARNING - Run 169/192: Skipping SL=2.5, TSL=2.0 because TSL < SL.
+2025-04-15 14:12:38,611 - INFO - --- Run 170/192 --- Start ---
+2025-04-15 14:12:38,612 - INFO - Params: Gran=1h, Trend=100, SL=2.5, TSL=2.5
+2025-04-15 14:14:02,035 - INFO - Run 170/192: Script executed successfully.
+2025-04-15 14:14:02,037 - INFO - Run 170/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL2.5_SMA100.json
+2025-04-15 14:14:02,038 - INFO - Run 170/192: Sharpe=-1.0924 | Return=-0.0622 | Drawdown=0.1084 | Error=None
+2025-04-15 14:14:02,038 - INFO - --- Run 170/192 --- End ---
+2025-04-15 14:14:02,044 - INFO - --- Run 171/192 --- Start ---
+2025-04-15 14:14:02,045 - INFO - Params: Gran=1h, Trend=100, SL=2.5, TSL=3.0
+2025-04-15 14:15:26,450 - INFO - Run 171/192: Script executed successfully.
+2025-04-15 14:15:26,453 - INFO - Run 171/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL3.0_SMA100.json
+2025-04-15 14:15:26,454 - INFO - Run 171/192: Sharpe=-1.1062 | Return=-0.0632 | Drawdown=0.1091 | Error=None
+2025-04-15 14:15:26,454 - INFO - --- Run 171/192 --- End ---
+2025-04-15 14:15:26,460 - INFO - --- Run 172/192 --- Start ---
+2025-04-15 14:15:26,460 - INFO - Params: Gran=1h, Trend=100, SL=2.5, TSL=3.5
+2025-04-15 14:16:50,597 - INFO - Run 172/192: Script executed successfully.
+2025-04-15 14:16:50,599 - INFO - Run 172/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL3.5_SMA100.json
+2025-04-15 14:16:50,599 - INFO - Run 172/192: Sharpe=-1.1126 | Return=-0.0636 | Drawdown=0.1094 | Error=None
+2025-04-15 14:16:50,599 - INFO - --- Run 172/192 --- End ---
+2025-04-15 14:16:50,604 - WARNING - Run 173/192: Skipping SL=3.0, TSL=2.0 because TSL < SL.
+2025-04-15 14:16:50,604 - WARNING - Run 174/192: Skipping SL=3.0, TSL=2.5 because TSL < SL.
+2025-04-15 14:16:50,604 - INFO - --- Run 175/192 --- Start ---
+2025-04-15 14:16:50,604 - INFO - Params: Gran=1h, Trend=100, SL=3.0, TSL=3.0
+2025-04-15 14:18:14,153 - INFO - Run 175/192: Script executed successfully.
+2025-04-15 14:18:14,153 - INFO - Run 175/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL3.0_TSL3.0_SMA100.json
+2025-04-15 14:18:14,154 - INFO - Run 175/192: Sharpe=-1.2178 | Return=-0.0708 | Drawdown=0.1157 | Error=None
+2025-04-15 14:18:14,154 - INFO - --- Run 175/192 --- End ---
+2025-04-15 14:18:14,162 - INFO - --- Run 176/192 --- Start ---
+2025-04-15 14:18:14,162 - INFO - Params: Gran=1h, Trend=100, SL=3.0, TSL=3.5
+2025-04-15 14:19:41,233 - INFO - Run 176/192: Script executed successfully.
+2025-04-15 14:19:41,234 - INFO - Run 176/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL3.0_TSL3.5_SMA100.json
+2025-04-15 14:19:41,237 - INFO - Run 176/192: Sharpe=-1.2413 | Return=-0.0723 | Drawdown=0.1172 | Error=None
+2025-04-15 14:19:41,237 - INFO - --- Run 176/192 --- End ---
+2025-04-15 14:19:41,242 - INFO - --- Run 177/192 --- Start ---
+2025-04-15 14:19:41,242 - INFO - Params: Gran=1h, Trend=200, SL=1.5, TSL=2.0
+2025-04-15 14:21:05,208 - INFO - Run 177/192: Script executed successfully.
+2025-04-15 14:21:05,211 - INFO - Run 177/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL2.0_SMA200.json
+2025-04-15 14:21:05,212 - INFO - Run 177/192: Sharpe=-1.0320 | Return=-0.0516 | Drawdown=0.0989 | Error=None
+2025-04-15 14:21:05,212 - INFO - --- Run 177/192 --- End ---
+2025-04-15 14:21:05,219 - INFO - --- Run 178/192 --- Start ---
+2025-04-15 14:21:05,220 - INFO - Params: Gran=1h, Trend=200, SL=1.5, TSL=2.5
+2025-04-15 14:22:31,903 - INFO - Run 178/192: Script executed successfully.
+2025-04-15 14:22:31,906 - INFO - Run 178/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL2.5_SMA200.json
+2025-04-15 14:22:31,915 - INFO - Run 178/192: Sharpe=-1.1133 | Return=-0.0563 | Drawdown=0.1019 | Error=None
+2025-04-15 14:22:31,915 - INFO - --- Run 178/192 --- End ---
+2025-04-15 14:22:31,939 - INFO - --- Run 179/192 --- Start ---
+2025-04-15 14:22:31,940 - INFO - Params: Gran=1h, Trend=200, SL=1.5, TSL=3.0
+2025-04-15 14:24:02,865 - INFO - Run 179/192: Script executed successfully.
+2025-04-15 14:24:02,866 - INFO - Run 179/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL3.0_SMA200.json
+2025-04-15 14:24:02,867 - INFO - Run 179/192: Sharpe=-1.1335 | Return=-0.0579 | Drawdown=0.1032 | Error=None
+2025-04-15 14:24:02,867 - INFO - --- Run 179/192 --- End ---
+2025-04-15 14:24:02,875 - INFO - --- Run 180/192 --- Start ---
+2025-04-15 14:24:02,875 - INFO - Params: Gran=1h, Trend=200, SL=1.5, TSL=3.5
+2025-04-15 14:25:33,290 - INFO - Run 180/192: Script executed successfully.
+2025-04-15 14:25:33,292 - INFO - Run 180/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL1.5_TSL3.5_SMA200.json
+2025-04-15 14:25:33,293 - INFO - Run 180/192: Sharpe=-1.1462 | Return=-0.0589 | Drawdown=0.1042 | Error=None
+2025-04-15 14:25:33,293 - INFO - --- Run 180/192 --- End ---
+2025-04-15 14:25:33,299 - INFO - --- Run 181/192 --- Start ---
+2025-04-15 14:25:33,300 - INFO - Params: Gran=1h, Trend=200, SL=2.0, TSL=2.0
+2025-04-15 14:26:58,170 - INFO - Run 181/192: Script executed successfully.
+2025-04-15 14:26:58,172 - INFO - Run 181/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL2.0_SMA200.json
+2025-04-15 14:26:58,172 - INFO - Run 181/192: Sharpe=-1.0198 | Return=-0.0560 | Drawdown=0.1016 | Error=None
+2025-04-15 14:26:58,172 - INFO - --- Run 181/192 --- End ---
+2025-04-15 14:26:58,179 - INFO - --- Run 182/192 --- Start ---
+2025-04-15 14:26:58,179 - INFO - Params: Gran=1h, Trend=200, SL=2.0, TSL=2.5
+2025-04-15 14:27:05,496 - ERROR - Run 182/192: Script execution failed! Error code: 2
+2025-04-15 14:27:05,496 - ERROR - stdout:
+
+2025-04-15 14:27:05,496 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:05,498 - INFO - Run 182/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL2.5_SMA200.json
+2025-04-15 14:27:05,499 - INFO - Run 182/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:05,499 - INFO - --- Run 182/192 --- End ---
+2025-04-15 14:27:05,507 - INFO - --- Run 183/192 --- Start ---
+2025-04-15 14:27:05,508 - INFO - Params: Gran=1h, Trend=200, SL=2.0, TSL=3.0
+2025-04-15 14:27:11,018 - ERROR - Run 183/192: Script execution failed! Error code: 2
+2025-04-15 14:27:11,018 - ERROR - stdout:
+
+2025-04-15 14:27:11,018 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:11,021 - INFO - Run 183/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL3.0_SMA200.json
+2025-04-15 14:27:11,021 - INFO - Run 183/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:11,022 - INFO - --- Run 183/192 --- End ---
+2025-04-15 14:27:11,029 - INFO - --- Run 184/192 --- Start ---
+2025-04-15 14:27:11,029 - INFO - Params: Gran=1h, Trend=200, SL=2.0, TSL=3.5
+2025-04-15 14:27:17,192 - ERROR - Run 184/192: Script execution failed! Error code: 2
+2025-04-15 14:27:17,192 - ERROR - stdout:
+
+2025-04-15 14:27:17,192 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:17,196 - INFO - Run 184/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.0_TSL3.5_SMA200.json
+2025-04-15 14:27:17,196 - INFO - Run 184/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:17,196 - INFO - --- Run 184/192 --- End ---
+2025-04-15 14:27:17,203 - WARNING - Run 185/192: Skipping SL=2.5, TSL=2.0 because TSL < SL.
+2025-04-15 14:27:17,203 - INFO - --- Run 186/192 --- Start ---
+2025-04-15 14:27:17,203 - INFO - Params: Gran=1h, Trend=200, SL=2.5, TSL=2.5
+2025-04-15 14:27:23,022 - ERROR - Run 186/192: Script execution failed! Error code: 2
+2025-04-15 14:27:23,023 - ERROR - stdout:
+
+2025-04-15 14:27:23,023 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:23,024 - INFO - Run 186/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL2.5_SMA200.json
+2025-04-15 14:27:23,024 - INFO - Run 186/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:23,025 - INFO - --- Run 186/192 --- End ---
+2025-04-15 14:27:23,032 - INFO - --- Run 187/192 --- Start ---
+2025-04-15 14:27:23,032 - INFO - Params: Gran=1h, Trend=200, SL=2.5, TSL=3.0
+2025-04-15 14:27:28,779 - ERROR - Run 187/192: Script execution failed! Error code: 2
+2025-04-15 14:27:28,779 - ERROR - stdout:
+
+2025-04-15 14:27:28,779 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:28,780 - INFO - Run 187/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL3.0_SMA200.json
+2025-04-15 14:27:28,781 - INFO - Run 187/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:28,781 - INFO - --- Run 187/192 --- End ---
+2025-04-15 14:27:28,787 - INFO - --- Run 188/192 --- Start ---
+2025-04-15 14:27:28,787 - INFO - Params: Gran=1h, Trend=200, SL=2.5, TSL=3.5
+2025-04-15 14:27:34,476 - ERROR - Run 188/192: Script execution failed! Error code: 2
+2025-04-15 14:27:34,477 - ERROR - stdout:
+
+2025-04-15 14:27:34,477 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:34,477 - INFO - Run 188/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL2.5_TSL3.5_SMA200.json
+2025-04-15 14:27:34,477 - INFO - Run 188/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:34,477 - INFO - --- Run 188/192 --- End ---
+2025-04-15 14:27:34,486 - WARNING - Run 189/192: Skipping SL=3.0, TSL=2.0 because TSL < SL.
+2025-04-15 14:27:34,486 - WARNING - Run 190/192: Skipping SL=3.0, TSL=2.5 because TSL < SL.
+2025-04-15 14:27:34,486 - INFO - --- Run 191/192 --- Start ---
+2025-04-15 14:27:34,486 - INFO - Params: Gran=1h, Trend=200, SL=3.0, TSL=3.0
+2025-04-15 14:27:40,299 - ERROR - Run 191/192: Script execution failed! Error code: 2
+2025-04-15 14:27:40,299 - ERROR - stdout:
+
+2025-04-15 14:27:40,299 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:40,299 - INFO - Run 191/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL3.0_TSL3.0_SMA200.json
+2025-04-15 14:27:40,299 - INFO - Run 191/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:40,300 - INFO - --- Run 191/192 --- End ---
+2025-04-15 14:27:40,305 - INFO - --- Run 192/192 --- Start ---
+2025-04-15 14:27:40,305 - INFO - Params: Gran=1h, Trend=200, SL=3.0, TSL=3.5
+2025-04-15 14:27:46,269 - ERROR - Run 192/192: Script execution failed! Error code: 2
+2025-04-15 14:27:46,269 - ERROR - stdout:
+
+2025-04-15 14:27:46,269 - ERROR - stderr:
+usage: backtest_stoch_sma_vbt_pro.py [-h] [--symbol SYMBOL]
+                                     [--start_date START_DATE]
+                                     [--end_date END_DATE]
+                                     [--granularity GRANULARITY]
+                                     [--initial_capital INITIAL_CAPITAL]
+                                     [--commission COMMISSION]
+                                     [--slippage SLIPPAGE] [--no_stops]
+                                     [--sl_atr SL_ATR] [--tsl_atr TSL_ATR]
+                                     [--trend_filter_window TREND_FILTER_WINDOW]
+                                     [--stoch_k STOCH_K] [--stoch_d STOCH_D]
+                                     [--stoch_smooth_k STOCH_SMOOTH_K]
+                                     [--stoch_lower_th STOCH_LOWER_TH]
+                                     [--stoch_upper_th STOCH_UPPER_TH]
+                                     [--reports_dir REPORTS_DIR] [--plot]
+backtest_stoch_sma_vbt_pro.py: error: unrecognized arguments: --optimize_metric Sharpe Ratio --wfo_test_days 180 --wfo_window_years 2.0
+
+2025-04-15 14:27:46,271 - INFO - Run 192/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1H_SL3.0_TSL3.5_SMA200.json
+2025-04-15 14:27:46,271 - INFO - Run 192/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Subprocess Error Code 2
+2025-04-15 14:27:46,271 - INFO - --- Run 192/192 --- End ---
+2025-04-15 14:27:46,279 - INFO - Finished all 192 backtest runs.
+2025-04-15 14:27:46,285 - INFO - Final summary saved to reports/backtest_summary.csv
