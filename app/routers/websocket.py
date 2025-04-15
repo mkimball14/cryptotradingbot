@@ -1,10 +1,12 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, FastAPI
 from app.core.config import Settings, get_settings
 from app.core.websocket_client import CoinbaseWebSocketClient
 from app.core.coinbase import CoinbaseClient
+from app.core.order_executor import OrderExecutor
+from app.core.dry_run_executor import DryRunExecutor
 from app.strategies.rsi_momentum import RSIMomentumStrategy
 from app.models.order import OrderSide, OrderType
 import logging
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.trade_log.database import AsyncSessionFactory, init_db
 from app.core.trade_log.crud import create_log_entry
 from app.core.trade_log.models import EventType, TradeSide, OrderStatus
+from app.core.live_trader import LiveTrader
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -28,7 +31,8 @@ class ConnectionManager:
         self.coinbase_ws_client: Optional[CoinbaseWebSocketClient] = None
         self.coinbase_rest_client: Optional[CoinbaseClient] = None
         self.strategy: Optional[RSIMomentumStrategy] = None
-        self.strategy_loop_task: Optional[asyncio.Task] = None
+        self.live_trader: Optional[LiveTrader] = None
+        self.order_executor: Optional[Union[OrderExecutor, DryRunExecutor]] = None
         
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -65,85 +69,6 @@ class ConnectionManager:
         elif message_type == "user_order":
              logger.info(f"Received user order update: {message}")
         
-    async def _strategy_loop(self):
-        """Consumes messages from the queue, triggers strategy/orders, and logs fills."""
-        logger.info("Starting strategy loop...")
-        while True:
-            message = None # Initialize message to None
-            try:
-                message = await self.message_queue.get()
-                logger.debug(f"Strategy loop received: {message}")
-
-                if message is None:
-                    logger.info("Received stop signal in strategy loop.")
-                    break
-                    
-                # --- Log Order Fills --- 
-                if isinstance(message, dict) and message.get('type') == 'user_order_update' and message.get('status') == 'FILLED':
-                    logger.info(f"Processing FILL message for order {message.get('order_id')}")
-                    try:
-                        # Use the globally available session factory
-                        async with AsyncSessionFactory() as db: 
-                            side_str = message.get('side', '').upper()
-                            event_type = EventType.ENTRY_FILL if side_str == 'BUY' else EventType.EXIT_FILL if side_str == 'SELL' else EventType.ORDER_UPDATE
-                            
-                            try:
-                                side_enum = TradeSide(side_str) if side_str else None
-                            except ValueError:
-                                side_enum = None 
-                                logger.warning(f"Invalid side '{message.get('side')}' received in fill message.")
-                                
-                            await create_log_entry(
-                                db=db,
-                                event_type=event_type,
-                                symbol=message.get('product_id'),
-                                status=OrderStatus.FILLED, 
-                                order_id=message.get('order_id'), 
-                                client_order_id=message.get('client_order_id'),
-                                side=side_enum,
-                                quantity=float(message.get('cumulative_quantity', 0)),
-                                price=float(message.get('average_filled_price', 0)), 
-                                fees=float(message.get('total_fees', 0)), 
-                                # strategy_name= ? # Still needs association logic
-                                event_timestamp=pd.to_datetime(message.get('time')), 
-                                notes=f"Order filled via WebSocket update."
-                            )
-                            logger.info(f"Logged FILL event for order {message.get('order_id')}")
-                    except Exception as log_err:
-                        logger.error(f"Error logging fill event: {log_err}", exc_info=True)
-                # --- End Log Order Fills --- 
-                
-                # --- Existing Strategy Processing --- 
-                elif isinstance(message, dict) and message.get('type') == 'ticker': # Process ticker for strategy
-                    if self.strategy and self.coinbase_rest_client:
-                        # This part might need adjustment if strategy expects different input
-                        # signal = self.strategy.process_market_data(message) 
-                        # Simplified for example - assumes strategy runs elsewhere or on ticker receipt
-                        logger.debug("Passing ticker data to strategy (if implemented)")
-                        pass # Placeholder - strategy logic might run elsewhere
-                else:
-                    logger.debug(f"Skipping message processing in strategy loop for type: {message.get('type')}")
-                # --- End Existing Strategy Processing --- 
-                    
-                # Mark task as done *after* processing
-                if message is not None:
-                    self.message_queue.task_done()
-                
-            except asyncio.CancelledError:
-                 logger.info("Strategy loop cancelled.")
-                 break # Exit the loop cleanly on cancellation
-            except Exception as e:
-                # Log any other exceptions that occur during message processing
-                logger.error(f"Error processing message in strategy loop: {e}", exc_info=True)
-                logger.error(f"Failed message content (if available): {message}")
-                # Mark task as done even if processing failed to avoid blocking queue
-                if message is not None:
-                   try:
-                       self.message_queue.task_done()
-                   except ValueError: # task_done() might raise if called too many times
-                       logger.warning("task_done() called on already completed task in error handler.")
-                await asyncio.sleep(1) # Prevent rapid error loops
-
 manager = ConnectionManager()
 
 @router.websocket("/ws/{product_id}")
@@ -210,6 +135,23 @@ async def lifespan(app: FastAPI):
         manager.coinbase_rest_client = CoinbaseClient(settings)
         logger.info("Coinbase REST Client initialized.")
 
+        # --- Conditional Executor Initialization --- 
+        if settings.DRY_RUN_MODE:
+            logger.warning("DRY RUN MODE ENABLED. Orders will be simulated.")
+            # Configure DryRunExecutor - potentially use settings for initial balance etc.
+            manager.order_executor = DryRunExecutor(
+                initial_balance={"USD": 50000.0, "BTC": 0.0}, # Example initial balance
+                simulated_latency=0.05, # Example latency
+                fill_probability=0.98, # Example fill probability
+                slippage_std=0.0005 # Example slippage
+            )
+        else:
+            logger.info("LIVE TRADING MODE ENABLED.")
+            # Ensure the real OrderExecutor gets the REST client
+            manager.order_executor = OrderExecutor(manager.coinbase_rest_client) 
+        logger.info(f"Order Executor initialized ({type(manager.order_executor).__name__}).")
+        # --- End Conditional Initialization --- 
+
         strategy_product_id = "BTC-USD"
         strategy_config = {
              "rsi_period": 14,
@@ -224,32 +166,72 @@ async def lifespan(app: FastAPI):
         ws_product_ids = ["BTC-USD", "ETH-USD"]
         ws_channels = ["ticker", "heartbeats", "user"]
         logger.info("Initializing Coinbase WebSocket Client...")
+        
+        # Create connection event for synchronization
+        connection_event = asyncio.Event()
         manager.coinbase_ws_client = CoinbaseWebSocketClient(
             api_key=settings.COINBASE_JWT_KEY_NAME,
             api_secret=settings.COINBASE_JWT_PRIVATE_KEY,
-            product_ids=ws_product_ids,
-            channels=ws_channels,
-            message_queue=manager.message_queue,
+            product_ids=ws_product_ids, # Initial subscribe list (can be modified later)
+            channels=ws_channels,       # Initial subscribe list
+            message_queue=manager.message_queue, # Pass the shared queue
+            loop=asyncio.get_running_loop(),
+            connection_established_event=connection_event,
             retry=True,
             verbose=settings.DEBUG
         )
-        
+
+        # Initialize LiveTrader (AFTER strategy and executor are ready)
+        logger.info("Initializing LiveTrader...")
+        manager.live_trader = LiveTrader(
+            settings=settings,
+            strategy=manager.strategy,
+            db_session_factory=AsyncSessionFactory, # Pass the factory
+            product_id=strategy_product_id, # Use the configured product ID
+            # Pass the conditionally initialized executor
+            order_executor=manager.order_executor,
+            # Pass the REST client
+            rest_client=manager.coinbase_rest_client,
+            # Pass the WS client and message queue (LiveTrader can handle messages)
+            ws_client=manager.coinbase_ws_client,
+            message_queue=manager.message_queue
+        )
+        logger.info("LiveTrader initialized.")
+
         logger.info("Attempting to connect Coinbase WebSocket Client...")
         try:
             manager.coinbase_ws_client.connect() # Starts in background thread
             logger.info("Coinbase WebSocket Client connect() method called.")
+            # Wait for connection using the event
+            logger.info("Waiting for WebSocket connection...")
+            await asyncio.wait_for(connection_event.wait(), timeout=15.0) # Wait up to 15s
+            logger.info("WebSocket connection established.")
+        except asyncio.TimeoutError:
+            logger.error("WebSocket connection timed out during startup.")
+            # Decide if app should fail or continue without WebSocket
+            raise ConnectionError("WebSocket timed out") # Example: Halt startup
         except Exception as ws_connect_err:
             logger.error(f"Error calling CoinbaseWebSocketClient.connect(): {ws_connect_err}", exc_info=True)
             raise # Re-raise to prevent startup if connect method itself fails
         
-        # Keep the delay for now, might still be useful
-        logger.info("Pausing briefly after initiating WebSocket connection...")
-        await asyncio.sleep(5) 
-        logger.info("Pause complete. Starting strategy loop and yielding...")
-        
-        # Restore the strategy loop start
-        manager.strategy_loop_task = asyncio.create_task(manager._strategy_loop())
-        logger.info("Strategy processing loop started.")
+        # Assign LiveTrader's handler to the WS client AFTER connection is confirmed
+        if manager.live_trader and manager.coinbase_ws_client:
+            logger.info("Assigning LiveTrader message handler to WebSocket client.")
+            # Ensure the LiveTrader's handler is used for processing messages
+            # This might override the default manager.handle_coinbase_message used for broadcasting
+            manager.coinbase_ws_client.on_message = manager.live_trader._handle_websocket_message
+            # Assign other handlers if LiveTrader implements them
+            if hasattr(manager.live_trader, '_handle_websocket_error'):
+                manager.coinbase_ws_client.on_error = manager.live_trader._handle_websocket_error
+            if hasattr(manager.live_trader, '_handle_websocket_connect'):
+                # Note: _on_open is handled internally by the client for connection_event
+                # We might not need to re-assign on_connect unless LiveTrader needs specific logic here.
+                # manager.coinbase_ws_client.on_connect = manager.live_trader._handle_websocket_connect
+                pass
+            if hasattr(manager.live_trader, '_handle_websocket_disconnect'):
+                manager.coinbase_ws_client.on_disconnect = manager.live_trader._handle_websocket_disconnect
+        else:
+            logger.error("LiveTrader or WebSocket client not initialized in lifespan. Cannot assign handlers.")
         
         # logger.warning("WebSocket Client and Strategy Loop are temporarily disabled for debugging.")
         yield # Yield control to Uvicorn
@@ -262,17 +244,7 @@ async def lifespan(app: FastAPI):
         logger.info("Application shutdown sequence initiated...")
         # Restore Finally Block logic
         logger.info("Application shutdown...")
-        if manager.strategy_loop_task:
-            logger.info("Stopping strategy loop...")
-            try:
-                await manager.message_queue.put(None) 
-                manager.strategy_loop_task.cancel()
-                await manager.strategy_loop_task
-            except asyncio.CancelledError:
-                logger.info("Strategy loop task cancelled successfully.")
-            except Exception as e:
-                logger.error(f"Error during strategy loop shutdown: {e}")
-
+        
         if manager.coinbase_ws_client:
             logger.info("Closing WebSocket client...")
             manager.coinbase_ws_client.close()

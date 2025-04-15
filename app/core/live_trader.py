@@ -16,6 +16,11 @@ from app.core.websocket_client import CoinbaseWebSocketClient
 from app.strategies.rsi_momentum import RSIMomentumStrategy
 # Import OrderExecutor
 from app.core.order_executor import OrderExecutor, OrderExecutionResult, OrderExecutionError 
+from app.core.dry_run_executor import DryRunExecutor # Import DryRunExecutor
+from app.db.repositories.log_repo import create_log_entry
+from app.models.log import EventType
+from app.models.order import OrderStatus, TradeSide
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +64,27 @@ class LiveTrader:
         # self.last_signal = 0 # Strategy state handles this implicitly now
 
         # Link WebSocket message handler
-        self.ws_client.on_message = self._handle_websocket_message
-        self.ws_client.on_error = self._handle_websocket_error
-        self.ws_client.on_connect = self._handle_websocket_connect
-        self.ws_client.on_disconnect = self._handle_websocket_disconnect
+        # self.ws_client.on_message = self._handle_websocket_message # Assigned in lifespan now
+        # self.ws_client.on_error = self._handle_websocket_error # Assigned in lifespan now
+        # self.ws_client.on_connect = self._handle_websocket_connect # Assigned in lifespan now
+        # self.ws_client.on_disconnect = self._handle_websocket_disconnect # Assigned in lifespan now
+
+        # --- Conditional Executor Initialization --- 
+        if settings.DRY_RUN_MODE:
+            logger.warning("DRY RUN MODE ENABLED. Orders will be simulated.")
+            # Configure DryRunExecutor - potentially use settings for initial balance etc.
+            self.order_executor = DryRunExecutor(
+                initial_balance={"USD": 50000.0, "BTC": 0.0}, # Example initial balance
+                simulated_latency=0.05, # Example latency
+                fill_probability=0.98, # Example fill probability
+                slippage_std=0.0005 # Example slippage
+            )
+        else:
+            logger.info("LIVE TRADING MODE ENABLED.")
+            self.order_executor = OrderExecutor(self.rest_client)
+        # --- End Conditional Initialization --- 
+
+        self.message_queue = asyncio.Queue()
 
     async def _handle_websocket_message(self, message: Dict):
         """Callback for processing incoming WebSocket messages."""
@@ -76,6 +98,13 @@ class LiveTrader:
                 volume = float(message.get("volume_24h", 0))
                 timestamp = pd.Timestamp.now(tz='UTC')
                 
+                # --- Feed price to DryRunExecutor if in dry run mode --- 
+                if self.settings.DRY_RUN_MODE and isinstance(self.order_executor, DryRunExecutor):
+                    # Ensure order_executor is DryRunExecutor before calling its specific method
+                    self.order_executor.set_simulated_price(self.product_id, price)
+                    logger.debug(f"Dry Run: Updated simulated price for {self.product_id} to {price}")
+                # --- End Dry Run Price Update ---
+
                 # Append new data point
                 self.data_buffer.append({
                     'timestamp': timestamp,
@@ -93,6 +122,9 @@ class LiveTrader:
                     # Create DB session for this strategy run
                     async with self.session_factory() as db:
                         await self._run_live_strategy(db)
+
+                # Process strategy after updating price/buffer
+                await self._process_strategy(db)
 
             except (TypeError, ValueError) as e:
                 logger.error(f"Error processing ticker message: {e} - Message: {message}")
@@ -250,10 +282,10 @@ class LiveTrader:
         logger.info(f"Strategy Parameters: RSI Period={self.strategy.rsi_period}, Entry={self.strategy.rsi_entry_threshold}, Exit={self.strategy.rsi_exit_threshold}, MA={self.strategy.ma_period}, ATR={self.strategy.atr_period}")
 
         # Ensure ws_client has correct callbacks assigned (in case re-initialized)
-        self.ws_client.on_message = self._handle_websocket_message
-        self.ws_client.on_error = self._handle_websocket_error
-        self.ws_client.on_connect = self._handle_websocket_connect
-        self.ws_client.on_disconnect = self._handle_websocket_disconnect
+        # self.ws_client.on_message = self._handle_websocket_message
+        # self.ws_client.on_error = self._handle_websocket_error
+        # self.ws_client.on_connect = self._handle_websocket_connect
+        # self.ws_client.on_disconnect = self._handle_websocket_disconnect
         
         if not await self.ws_client.connect():
             logger.error("Failed to connect WebSocket. Live Trader cannot start.")

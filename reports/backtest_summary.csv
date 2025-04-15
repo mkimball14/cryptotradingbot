@@ -1,0 +1,3 @@
+run,script,symbol,start_date,end_date,granularity,trend_filter_window,sl_atr,tsl_atr,wfo_test_days,wfo_window_years,oos_mean_sharpe,oos_mean_return,oos_mean_drawdown,oos_std_sharpe,oos_std_return,oos_std_drawdown,error
+1,backtest_stoch_sma_vbt_pro.py,BTC-USD,2020-01-01,2025-04-15,1d,0,1.5,2.0,180,2.0,,,,,,,Report file not found
+2,backtest_stoch_sma_vbt_pro.py,BTC-USD,2020-01-01,2025-04-15,1d,0,1.5,2.5,180,2.0,,,,,,,Report file not found

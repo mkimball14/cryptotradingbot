@@ -17,7 +17,7 @@
 Compare backtest results with manual analysis. Verify dry-run execution against expected outcomes. Test performance metrics accuracy against known outcomes.
 
 # Subtasks:
-## 1. Implement Dry-Run Mode with Simulated Order Execution [pending]
+## 1. Implement Dry-Run Mode with Simulated Order Execution [done]
 ### Dependencies: None
 ### Description: Create a dry-run mode that simulates order execution without actually placing trades, allowing traders to validate strategies with real-time market data but no financial risk.
 ### Details:

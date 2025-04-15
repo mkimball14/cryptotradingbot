@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     RISK_PERCENTAGE: float = 1.0
     DEFAULT_QUOTE_CURRENCY: str = "USD"
     
+    # Run Mode
+    DRY_RUN_MODE: bool = False # Set to True to simulate orders without real execution
+    
     # Database Settings (for future use)
     DATABASE_URL: Optional[str] = None
     

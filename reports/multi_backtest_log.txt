@@ -1,0 +1,20 @@
+2025-04-15 00:40:49,957 - INFO - Starting multiple backtests. Total runs planned: 192
+2025-04-15 00:40:49,957 - INFO - --- Run 1/192 --- Start ---
+2025-04-15 00:40:49,957 - INFO - Params: Gran=1d, Trend=0, SL=1.5, TSL=2.0
+2025-04-15 00:41:49,200 - INFO - Run 1/192: Script executed successfully.
+2025-04-15 00:41:49,200 - INFO - Run 1/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1D_SL1.5_TSL2.0_NoTrend.json
+2025-04-15 00:42:46,222 - INFO - Starting multiple backtests. Total runs planned: 192
+2025-04-15 00:42:46,222 - INFO - --- Run 1/192 --- Start ---
+2025-04-15 00:42:46,222 - INFO - Params: Gran=1d, Trend=0, SL=1.5, TSL=2.0
+2025-04-15 00:43:43,718 - INFO - Run 1/192: Script executed successfully.
+2025-04-15 00:43:43,718 - INFO - Run 1/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1D_SL1.5_TSL2.0_NoTrend.json
+2025-04-15 00:43:43,718 - INFO - Run 1/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Report file not found
+2025-04-15 00:43:43,718 - INFO - --- Run 1/192 --- End ---
+2025-04-15 00:43:43,726 - INFO - --- Run 2/192 --- Start ---
+2025-04-15 00:43:43,726 - INFO - Params: Gran=1d, Trend=0, SL=1.5, TSL=2.5
+2025-04-15 00:44:42,791 - INFO - Run 2/192: Script executed successfully.
+2025-04-15 00:44:42,792 - INFO - Run 2/192: Attempting to parse results from: reports/manual_stoch_sma_wfo_results_BTC-USD_1D_SL1.5_TSL2.5_NoTrend.json
+2025-04-15 00:44:42,792 - INFO - Run 2/192: Sharpe=N/A | Return=N/A | Drawdown=N/A | Error=Report file not found
+2025-04-15 00:44:42,792 - INFO - --- Run 2/192 --- End ---
+2025-04-15 00:44:42,795 - INFO - --- Run 3/192 --- Start ---
+2025-04-15 00:44:42,796 - INFO - Params: Gran=1d, Trend=0, SL=1.5, TSL=3.0
