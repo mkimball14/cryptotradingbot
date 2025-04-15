@@ -63,6 +63,20 @@ api_keys.yaml
 *.model
 charts/
 analysis/temp/
+# Sensitive keys and secrets
+*.pem
+*key.json
+*secret*
+cdp_api_key.json
+*.crt
+*.p12
+*.der
+*.enc
+*.private
+*.pub
+*.pfx
+*.jks
+*.keystore
 
 # OS specific
 .DS_Store
