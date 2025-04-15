@@ -220,6 +220,7 @@ async def lifespan(app: FastAPI):
         manager.strategy = RSIMomentumStrategy(product_id=strategy_product_id, config=strategy_config)
         logger.info("Trading Strategy initialized.")
 
+        # Restore WebSocket Client initialization and connection
         ws_product_ids = ["BTC-USD", "ETH-USD"]
         ws_channels = ["ticker", "heartbeats", "user"]
         logger.info("Initializing Coinbase WebSocket Client...")
@@ -240,16 +241,18 @@ async def lifespan(app: FastAPI):
         except Exception as ws_connect_err:
             logger.error(f"Error calling CoinbaseWebSocketClient.connect(): {ws_connect_err}", exc_info=True)
             raise # Re-raise to prevent startup if connect method itself fails
-
-        # Add a small delay to allow the background thread to potentially fail
+        
+        # Keep the delay for now, might still be useful
         logger.info("Pausing briefly after initiating WebSocket connection...")
-        await asyncio.sleep(5) # Increased sleep duration to 5 seconds
+        await asyncio.sleep(5) 
         logger.info("Pause complete. Starting strategy loop and yielding...")
         
+        # Restore the strategy loop start
         manager.strategy_loop_task = asyncio.create_task(manager._strategy_loop())
         logger.info("Strategy processing loop started.")
         
-        yield
+        # logger.warning("WebSocket Client and Strategy Loop are temporarily disabled for debugging.")
+        yield # Yield control to Uvicorn
         
     except Exception as e:
         logger.error(f"Error during application lifespan startup: {str(e)}", exc_info=True)
@@ -257,11 +260,12 @@ async def lifespan(app: FastAPI):
         # raise # Optional: re-raise to halt FastAPI startup completely on error
     finally:
         logger.info("Application shutdown sequence initiated...")
+        # Restore Finally Block logic
         logger.info("Application shutdown...")
         if manager.strategy_loop_task:
             logger.info("Stopping strategy loop...")
             try:
-                await manager.message_queue.put(None)
+                await manager.message_queue.put(None) 
                 manager.strategy_loop_task.cancel()
                 await manager.strategy_loop_task
             except asyncio.CancelledError:

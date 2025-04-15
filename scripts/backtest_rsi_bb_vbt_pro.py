@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 # --- Utility Functions (Copied from backtest_rsi_vbt_pro.py, potentially modify later) ---
 
-def fetch_historical_data(product_id, start_date, end_date, granularity=3600):
+def fetch_historical_data(product_id, start_date, end_date, granularity=86400): # Default to 1 day (86400 seconds)
     """
     Fetch historical price data from Coinbase or from cache.
     (Handles different granularities)
@@ -225,6 +225,15 @@ def get_granularity_str(granularity_seconds: int) -> Optional[str]:
     }
     return gran_map.get(granularity_seconds)
 
+# Helper function to map seconds to vectorbt frequency strings
+def get_vbt_freq_str(granularity_seconds: int) -> Optional[str]:
+    # Map seconds to pandas frequency strings suitable for vectorbt
+    vbt_freq_map = {
+        60: "1T", 300: "5T", 900: "15T", 1800: "30T",
+        3600: "1H", 7200: "2H", 14400: "4H", 21600: "6H", 86400: "1D"
+    }
+    return vbt_freq_map.get(granularity_seconds)
+
 def create_sample_data(start_date, end_date, initial_price=20000.0, daily_vol=0.02):
     """Creates sample daily OHLCV data."""
     logger.info(f"Creating sample price data from {start_date} to {end_date}...")
@@ -362,14 +371,14 @@ def run_backtest(
     full_price_data = fetch_historical_data(symbol, start_date, end_date, granularity)
     if full_price_data is None or full_price_data.empty: return None, None, None
 
-    # --- Define Parameter Grid (RSI + BB - Original) ---
+    # --- Define Parameter Grid (RSI + BB - Wider) ---
     if param_grid is None:
         param_grid = {
-            'rsi_window': np.arange(10, 25, 4),  # 10, 14, 18, 22
-            'rsi_lower_th': np.arange(20, 40, 5), # 20, 25, 30, 35
-            'rsi_upper_th': np.arange(65, 81, 5), # 65, 70, 75, 80
-            'bb_window': np.arange(15, 31, 5),    # 15, 20, 25, 30
-            'bb_std': np.arange(1.5, 3.1, 0.5)    # 1.5, 2.0, 2.5, 3.0
+            'rsi_window': np.arange(10, 25, 4),      # [10, 14, 18, 22]
+            'rsi_lower_th': np.arange(15, 40, 5),     # [15, 20, 25, 30, 35] - Wider range
+            'rsi_upper_th': np.arange(65, 86, 5),     # [65, 70, 75, 80, 85] - Wider range
+            'bb_window': np.arange(15, 31, 5),       # [15, 20, 25, 30]
+            'bb_std': np.arange(1.0, 3.6, 0.5)       # [1.0, 1.5, 2.0, 2.5, 3.0, 3.5] - Wider range
         }
     logger.info(f"Optimization Parameter Grid: {param_grid}")
     param_names_ordered = list(param_grid.keys())
@@ -497,8 +506,11 @@ def run_backtest(
     return None, wfo_results_dict, full_price_data
 
 # --- WFO Helper Function: Simulate All Parameters (Direct Calculation + pandas-ta) ---
-def simulate_all_params_single_split_direct(price_data, param_grid, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, trend_sma_window, metric='sharpe_ratio'):
-    freq_str = '1H' # Explicitly set frequency for 1-hour data
+def simulate_all_params_single_split_direct(price_data, param_grid, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, trend_sma_window, metric='sharpe_ratio', granularity_seconds=3600): # Add granularity_seconds param
+    freq_str = get_vbt_freq_str(granularity_seconds) # Get frequency string dynamically
+    if not freq_str:
+        logger.error(f"Invalid granularity seconds ({granularity_seconds}) for freq string. Cannot simulate.")
+        return None
     logger.debug(f"Simulating RSI+BB params (pandas-ta, fixed stops) on single split data shape: {price_data.shape} ({freq_str})")
     close = price_data['close']; high = price_data['high']; low = price_data['low']
 
@@ -725,8 +737,11 @@ def simulate_all_params_single_split_direct(price_data, param_grid, initial_capi
         return None
 
 # --- WFO Helper Function: Simulate Best Parameters (Direct Calculation + pandas-ta) ---
-def simulate_best_params_single_split_direct(price_data, best_params_dict, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, trend_sma_window):
-    freq_str = '1H' # Explicitly set frequency for 1-hour data
+def simulate_best_params_single_split_direct(price_data, best_params_dict, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, trend_sma_window, granularity_seconds=3600): # Add granularity_seconds param
+    freq_str = get_vbt_freq_str(granularity_seconds) # Get frequency string dynamically
+    if not freq_str:
+        logger.error(f"Invalid granularity seconds ({granularity_seconds}) for freq string. Cannot simulate best params.")
+        return {'sharpe_ratio': np.nan, 'total_return': np.nan, 'max_drawdown': np.nan}
     logger.debug(f"Simulating best RSI+BB params (pandas-ta, fixed stops) on OOS data shape: {price_data.shape} ({freq_str})")
     close = price_data['close']; high = price_data['high']; low = price_data['low']
 
@@ -872,7 +887,7 @@ def main():
     parser.add_argument('--symbol', type=str, default='BTC-USD', help='Symbol to backtest')
     parser.add_argument('--start_date', type=str, default='2020-01-01', help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end_date', type=str, default=datetime.now().strftime('%Y-%m-%d'), help='End date (YYYY-MM-DD)')
-    parser.add_argument('--granularity', type=str, default='1h', help='Data granularity (e.g., 1d, 4h, 1h)')
+    parser.add_argument('--granularity', type=str, default='1d', help='Data granularity (e.g., 1d, 4h, 1h)') # Changed default to 1d
     parser.add_argument('--initial_capital', type=float, default=10000, help='Initial capital')
     parser.add_argument('--commission', type=float, default=0.001, help='Commission per trade')
     parser.add_argument('--slippage', type=float, default=0.0005, help='Slippage per trade')
@@ -883,7 +898,7 @@ def main():
     parser.add_argument('--reports_dir', type=str, default='reports', help='Directory to save reports')
     parser.add_argument('--wfo_test_days', type=int, default=90, help='Days in OOS test set')
     parser.add_argument('--wfo_window_years', type=float, default=2.0, help='Total years in each rolling window')
-    parser.add_argument('--trend_sma_window', type=int, default=100, help='Fixed SMA window for trend filter (0 to disable)')
+    parser.add_argument('--trend_sma_window', type=int, default=50, help='Fixed SMA window for trend filter (0 to disable)') # Changed default to 50
 
     args = parser.parse_args()
     # Updated granularity mapping

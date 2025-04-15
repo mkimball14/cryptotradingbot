@@ -1,0 +1,122 @@
+{
+  "strategy_name": "Stochastic + Fixed SMA100 Filter",
+  "trend_filter_window": 100,
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 2.0,
+  "fixed_tsl_atr_multiplier": 2.5,
+  "best_params_per_split": {
+    "0": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "1": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "2": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "3": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "4": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "5": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "6": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "7": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "8": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    },
+    "9": {
+      "stoch_k": 5,
+      "stoch_d": 3,
+      "stoch_smooth_k": 3,
+      "stoch_lower_th": 15,
+      "stoch_upper_th": 65
+    }
+  },
+  "oos_sharpe": {
+    "0": -4.358974127870151,
+    "1": 3.3916906070370056,
+    "2": -3.5412955386730145,
+    "3": -2.251850995264869,
+    "4": -2.298824805812616,
+    "5": -0.7770408638455628,
+    "6": -1.9679580264460133,
+    "7": -4.08407302115459,
+    "8": -2.2928729134902937,
+    "9": -4.450727557762301
+  },
+  "oos_return": {
+    "0": -0.03581656410656142,
+    "1": 0.0902640549211177,
+    "2": -0.04097289953128183,
+    "3": -0.04278876072109687,
+    "4": -0.05086508169655226,
+    "5": -0.02184554653523628,
+    "6": -0.038583456759283215,
+    "7": -0.08724874413676062,
+    "8": -0.07547865492324418,
+    "9": -0.12961128071369693
+  },
+  "oos_drawdown": {
+    "0": 0.03581656410656142,
+    "1": 0.028026956876854876,
+    "2": 0.055526879054329334,
+    "3": 0.050643159942606,
+    "4": 0.06719906780104393,
+    "5": 0.06409781503731306,
+    "6": 0.06307053838916797,
+    "7": 0.09761986051531892,
+    "8": 0.08459444775600707,
+    "9": 0.15265000426908812
+  },
+  "oos_mean_sharpe": -2.2631927243282406,
+  "oos_std_sharpe": 2.319064844156079,
+  "oos_mean_return": -0.043294693420259586,
+  "oos_std_return": 0.05662488655601245,
+  "oos_mean_drawdown": 0.06992452937482907,
+  "oos_std_drawdown": 0.035608865032090625
+}

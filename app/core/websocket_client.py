@@ -63,6 +63,8 @@ class CoinbaseWebSocketClient:
         channels: List[str],
         message_queue: Optional[asyncio.Queue] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+        connection_established_event: Optional[asyncio.Event] = None,
         retry: bool = True,
         verbose: bool = False # Set to True for detailed SDK logging
     ):
@@ -76,6 +78,8 @@ class CoinbaseWebSocketClient:
             channels (List[str]): List of channels to subscribe to (e.g., ["ticker", "heartbeats"]).
             message_queue (Optional[asyncio.Queue]): Queue to put processed messages onto.
             on_error (Optional[Callable[[Exception], None]]): Optional callback for handling errors.
+            loop (Optional[asyncio.AbstractEventLoop]): The main asyncio event loop.
+            connection_established_event (Optional[asyncio.Event]): Event to set when connection is open.
             retry (bool): Whether the client should automatically attempt reconnection. Defaults to True.
             verbose (bool): Enable verbose logging from the underlying WSClient. Defaults to False.
         """
@@ -87,14 +91,24 @@ class CoinbaseWebSocketClient:
         self._on_error_callback = on_error
         self._should_retry = retry
         self._verbose = verbose
+        self.main_loop = loop
+        self._connection_event = connection_established_event
         
         self.ws_client: Optional[WSClient] = None
-        self._is_running = False
+        self._is_running = False # Flag set in _on_open
 
     def _on_open(self):
         """Callback executed when the WebSocket connection is opened."""
-        logger.info("WebSocket connection opened. Subscribing...")
-        self.subscribe()
+        logger.info("WebSocket connection opened.") # Simplified log
+        self._is_running = True # Set running flag here
+        # self.subscribe() # Removed initial subscribe call
+        # Signal that the connection process is done
+        if self._connection_event:
+            # Use call_soon_threadsafe as this callback runs in the SDK's thread
+            if self.main_loop:
+                self.main_loop.call_soon_threadsafe(self._connection_event.set)
+            else:
+                logger.warning("Cannot signal connection established event: main_loop not set.")
 
     def _on_close(self):
         """Callback executed when the WebSocket connection is closed."""
@@ -131,9 +145,11 @@ class CoinbaseWebSocketClient:
                             'time': ws_response.timestamp # Use message timestamp
                         }
                         try:
-                            # Use asyncio.create_task for non-blocking put
-                            # Requires the main application to have a running event loop
-                            asyncio.create_task(self.message_queue.put(ticker_data))
+                            # Use threadsafe call to put item on the queue owned by the main loop
+                            if self.main_loop and self.message_queue:
+                                self.main_loop.call_soon_threadsafe(self.message_queue.put_nowait, ticker_data)
+                            else:
+                                logger.warning("Main loop or message queue not available for ticker data.")
                         except Exception as e:
                             # Log error during task creation or putting on queue
                             logger.error(f"Error putting ticker message on queue: {e}", exc_info=True)
@@ -165,10 +181,35 @@ class CoinbaseWebSocketClient:
                             }
                             logger.info(f"Putting order update onto queue: {order.order_id} ({order.status})")
                             try:
-                                asyncio.create_task(self.message_queue.put(order_data))
+                                # Use threadsafe call for user order updates as well
+                                if self.main_loop and self.message_queue:
+                                    self.main_loop.call_soon_threadsafe(self.message_queue.put_nowait, order_data)
+                                else:
+                                    logger.warning("Main loop or message queue not available for user order data.")
                             except Exception as e:
                                 # Log error during task creation or putting on queue
                                 logger.error(f"Error putting user order update on queue: {e}", exc_info=True)
+
+            elif channel == "market_trades" and self.message_queue: # Added market_trades handling
+                 for event in ws_response.events:
+                     for trade in event.trades:
+                         trade_data = {
+                             'type': 'market_trade',
+                             'trade_id': trade.trade_id,
+                             'product_id': trade.product_id,
+                             'price': trade.price,
+                             'size': trade.size,
+                             'side': trade.side,
+                             'time': trade.time # Use trade timestamp
+                         }
+                         logger.debug(f"Putting market trade onto queue: {trade.trade_id}")
+                         try:
+                             if self.main_loop and self.message_queue:
+                                 self.main_loop.call_soon_threadsafe(self.message_queue.put_nowait, trade_data)
+                             else:
+                                 logger.warning("Main loop or message queue not available for market trade data.")
+                         except Exception as e:
+                             logger.error(f"Error putting market trade message on queue: {e}", exc_info=True)
 
             elif channel == "subscriptions":
                  logger.info(f"Subscription confirmation received: {data}")
@@ -194,6 +235,15 @@ class CoinbaseWebSocketClient:
             logger.warning("WebSocket client is already running.")
             return
 
+        # Ensure we have the main event loop
+        if not self.main_loop:
+            try:
+                self.main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                logger.error("Could not get running asyncio loop during connect. Queueing will fail.")
+                # Optionally raise an error or handle appropriately
+                # raise ConnectionError("Could not get running asyncio loop for WebSocket client.")
+
         logger.info(f"Connecting to WebSocket with products={self.product_ids}, channels={self.channels}...")
         self.ws_client = WSClient(
             api_key=self.api_key,
@@ -208,8 +258,7 @@ class CoinbaseWebSocketClient:
         try:
             # open() starts the client in a separate thread
             self.ws_client.open()
-            self._is_running = True
-            logger.info("WebSocket client opened successfully.")
+            logger.info("WebSocket client open() called successfully.") # Changed log message
         except (WSClientException, WSClientConnectionClosedException) as e:
              logger.error(f"WebSocket connection failed during open(): {e}")
              self._is_running = False
@@ -229,29 +278,29 @@ class CoinbaseWebSocketClient:
                 except Exception as callback_err:
                     logger.error(f"Error executing on_error callback after unexpected connect error: {callback_err}", exc_info=True)
 
-    def subscribe(self):
+    def subscribe(self, product_ids: List[str], channels: List[str]):
         """Subscribes to the specified products and channels."""
         if not self.ws_client:
             logger.error("WebSocket client not initialized. Call connect() first.")
             return
             
-        logger.info(f"Subscribing to channels {self.channels} for products {self.product_ids}")
+        logger.info(f"Subscribing to channels {channels} for products {product_ids}")
         try:
-            self.ws_client.subscribe(product_ids=self.product_ids, channels=self.channels)
+            self.ws_client.subscribe(product_ids=product_ids, channels=channels)
         except Exception as e:
             logger.error(f"Error subscribing to WebSocket channels: {e}", exc_info=True)
             if self._on_error_callback:
                  self._on_error_callback(e)
 
-    def unsubscribe(self):
+    def unsubscribe(self, product_ids: List[str], channels: List[str]):
         """Unsubscribes from the specified products and channels."""
         if not self.ws_client or not self._is_running :
             logger.warning("WebSocket client not connected or running.")
             return
             
-        logger.info(f"Unsubscribing from channels {self.channels} for products {self.product_ids}")
+        logger.info(f"Unsubscribing from channels {channels} for products {product_ids}")
         try:
-            self.ws_client.unsubscribe(product_ids=self.product_ids, channels=self.channels)
+            self.ws_client.unsubscribe(product_ids=product_ids, channels=channels)
         except Exception as e:
             logger.error(f"Error unsubscribing from WebSocket channels: {e}", exc_info=True)
             if self._on_error_callback:

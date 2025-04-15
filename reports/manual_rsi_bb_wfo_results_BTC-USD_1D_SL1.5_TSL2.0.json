@@ -1,0 +1,152 @@
+{
+  "strategy_name": "RSI + BBands + Fixed SMA100 Filter (pandas-ta)",
+  "trend_sma_window": 100,
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 1.5,
+  "fixed_tsl_atr_multiplier": 2.0,
+  "best_params_per_split": {
+    "0": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "1": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "2": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "3": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "4": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "5": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "6": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "7": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "8": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "9": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "10": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "11": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    },
+    "12": {
+      "rsi_window": 10,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.0
+    }
+  },
+  "oos_sharpe": {
+    "0": null,
+    "1": 8.309073224610106,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": null,
+    "6": 7.665985860838648,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null
+  },
+  "oos_return": {
+    "0": 0.0,
+    "1": 0.05265629045714395,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.013016097372844523,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0
+  },
+  "oos_drawdown": {
+    "0": null,
+    "1": 0.03958226731122195,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": null,
+    "6": 0.0056141591514650094,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null
+  },
+  "oos_mean_sharpe": 7.987529542724378,
+  "oos_std_sharpe": 0.45473143581817793,
+  "oos_mean_return": 0.005051722140768344,
+  "oos_std_return": 0.014748856057020716,
+  "oos_mean_drawdown": 0.022598213231343478,
+  "oos_std_drawdown": 0.02401907962384223
+}
