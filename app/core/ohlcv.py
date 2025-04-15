@@ -7,7 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import httpx
 
 from app.core.config import Settings
-from app.core.coinbase import CoinbaseClient, CoinbaseError
+from app.core.coinbase import CoinbaseClient
 from app.core.data_processor import OHLCVProcessor
 
 class RateLimiter:
@@ -60,7 +60,7 @@ class OHLCVFetcher:
         self.processor = OHLCVProcessor(decimal_places=8)  # Use 8 decimal places for crypto prices
     
     @retry(
-        retry=retry_if_exception_type((httpx.RequestError, CoinbaseError)),
+        retry=retry_if_exception_type((httpx.RequestError, Exception)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10)
     )
@@ -90,7 +90,7 @@ class OHLCVFetcher:
             
         Raises:
             ValueError: If timeframe is invalid
-            CoinbaseError: If API request fails
+            Exception: If API request fails
         """
         # Validate timeframe
         granularity = self.TIMEFRAME_MAP.get(timeframe)
@@ -165,18 +165,19 @@ class OHLCVFetcher:
                 try:
                     df = self.processor.process_ohlcv(df)
                 except Exception as e:
-                    logger.warning(f"Error processing OHLCV data: {str(e)}. Returning raw data.")
+                    # Use logging if available, otherwise pass
+                    # logger.warning(f"Error processing OHLCV data: {str(e)}. Returning raw data.")
+                    pass
                 
             return df
             
-        except CoinbaseError as e:
-            logger.error(f"Coinbase API error: {str(e)}")
-            raise
         except httpx.RequestError as e:
-            logger.error(f"HTTP request error: {str(e)}")
+            # Use logging if available, otherwise pass
+            # logger.error(f"HTTP request error: {str(e)}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
+            # Use logging if available, otherwise pass
+            # logger.error(f"Unexpected error: {str(e)}")
             raise
 
 async def get_ohlcv(

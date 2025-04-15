@@ -1,0 +1,133 @@
+{
+  "strategy_name": "RSI Only (Direct Calc)",
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 1.5,
+  "fixed_tsl_atr_multiplier": 2.0,
+  "best_params_per_split": {
+    "0": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "1": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "2": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "3": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "4": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "5": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "6": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "7": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "8": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "9": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "10": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "11": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "12": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    },
+    "13": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65
+    }
+  },
+  "oos_sharpe": {
+    "0": null,
+    "1": 1.7998657093410384,
+    "2": -2.0093755761582717,
+    "3": null,
+    "4": 1.6374462598965482,
+    "5": null,
+    "6": null,
+    "7": -0.4293195622534429,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null,
+    "13": 0.39551064455574786
+  },
+  "oos_return": {
+    "0": 0.0,
+    "1": 0.12851845801361525,
+    "2": -0.2432158296262366,
+    "3": 0.0,
+    "4": 0.11502548119304866,
+    "5": 0.0,
+    "6": 0.0,
+    "7": -0.0208644670305528,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.01815173246456652
+  },
+  "oos_drawdown": {
+    "0": null,
+    "1": 0.08906567042113231,
+    "2": 0.2780184074758804,
+    "3": null,
+    "4": 0.10218532758266116,
+    "5": null,
+    "6": null,
+    "7": 0.05797172162088732,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null,
+    "13": 0.0901541563385956
+  },
+  "oos_mean_sharpe": 0.278825495076324,
+  "oos_std_sharpe": 1.5740364278456125,
+  "oos_mean_return": -0.00017033035611135547,
+  "oos_std_return": 0.08305058715884672,
+  "oos_mean_drawdown": 0.12347905668783135,
+  "oos_std_drawdown": 0.0879230841792934
+}

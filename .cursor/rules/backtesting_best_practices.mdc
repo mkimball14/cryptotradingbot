@@ -1,6 +1,257 @@
----
-description: 
-globs: 
-alwaysApply: false
----
----
+# Backtesting Best Practices
+
+- **Data Loading and Parsing**
+  - **DO** specify date format explicitly when reading CSV files with timestamps
+    ```python
+    # ✅ DO: Explicitly specify date format
+    df = pd.read_csv(file_path, index_col=0, parse_dates=True, date_format='ISO8601')
+    
+    # ❌ DON'T: Let pandas guess the date format
+    df = pd.read_csv(file_path, index_col=0, parse_dates=True)  # May cause warnings
+    ```
+  
+  - **DO** handle string representations of JSON/dict data explicitly
+    ```python
+    # ✅ DO: Safely parse string representations of dictionaries
+    if 'data' in df.columns and isinstance(df['data'].iloc[0], str):
+        df['parsed_data'] = df['data'].apply(lambda x: eval(x) if isinstance(x, str) else x)
+        
+        # Extract columns from parsed dictionaries
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df['parsed_data'].apply(lambda x: float(x.get(col, 0)) if x else None)
+    
+    # ❌ DON'T: Assume data is already in the correct format
+    df['close'] = df['data'].apply(lambda x: x['close'])  # Will fail if x is a string
+    ```
+
+- **File and Directory Management**
+  - **DO** ensure output directories exist before saving
+    ```python
+    # ✅ DO: Create directories if they don't exist
+    reports_dir = 'reports'
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    # ❌ DON'T: Assume directories exist
+    plt.savefig('reports/my_plot.png')  # Will fail if directory doesn't exist
+    ```
+  
+  - **DO** use consistent path handling with os.path
+    ```python
+    # ✅ DO: Use os.path for consistent path handling
+    file_path = os.path.join('data', 'cache', f"{symbol}_{timeframe}.csv")
+    
+    # ❌ DON'T: Use string concatenation for paths
+    file_path = 'data/cache/' + symbol + '_' + timeframe + '.csv'  # Platform inconsistent
+    ```
+
+- **Error Handling and Logging**
+  - **DO** implement robust error handling for data fetching and processing
+    ```python
+    # ✅ DO: Use try-except with specific error handling
+    try:
+        data = fetch_data_from_api(symbol, start_date, end_date)
+    except ConnectionError:
+        logger.error("API connection failed. Trying backup source.")
+        data = fetch_from_backup_source(symbol, start_date, end_date)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        # Fall back to cached data or raise informative error
+    
+    # ❌ DON'T: Use bare except or ignore errors
+    try:
+        data = fetch_data_from_api(symbol, start_date, end_date)
+    except:
+        print("Error")  # Uninformative and swallows all exceptions
+    ```
+  
+  - **DO** use proper logging instead of print statements
+    ```python
+    # ✅ DO: Use logging with appropriate levels
+    import logging
+    logging.info(f"Fetched {len(data)} rows of {symbol} data")
+    logging.warning("Using cached data due to API limitations")
+    logging.error(f"Failed to process data: {str(e)}")
+    
+    # ❌ DON'T: Use print statements
+    print(f"Fetched {len(data)} rows")  # No timestamp, level, or context
+    ```
+
+- **API Integration**
+  - **DO** respect API rate limits with chunking and pagination
+    ```python
+    # ✅ DO: Implement chunking for API requests
+    chunk_size = 300  # Coinbase limit is 300 candles per request
+    all_candles = []
+    
+    for chunk_start in range(start_time, end_time, chunk_size * granularity):
+        chunk_end = min(chunk_start + chunk_size * granularity, end_time)
+        candles = fetch_api_chunk(product_id, chunk_start, chunk_end, granularity)
+        all_candles.extend(candles)
+        time.sleep(0.5)  # Rate limiting
+    
+    # ❌ DON'T: Request large date ranges in a single call
+    candles = fetch_api(product_id, start_time, end_time, granularity)  # May exceed limits
+    ```
+  
+  - **DO** implement retries with exponential backoff
+    ```python
+    # ✅ DO: Use retry mechanism with backoff
+    max_retries = 3
+    retry_delay = 1
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            if attempt < max_retries - 1:
+                sleep_time = retry_delay * (2 ** attempt)
+                logging.warning(f"Request failed: {e}. Retrying in {sleep_time}s...")
+                time.sleep(sleep_time)
+            else:
+                logging.error(f"Failed after {max_retries} attempts: {e}")
+                raise
+    
+    # ❌ DON'T: Make a single request with no retry logic
+    response = requests.get(url, headers=headers)
+    return response.json()  # Will fail on temporary errors
+    ```
+
+- **Data Caching**
+  - **DO** implement cache validation and expiration
+    ```python
+    # ✅ DO: Check cache freshness
+    cache_file = os.path.join(cache_dir, f"{symbol}_{timeframe}.csv")
+    
+    if os.path.exists(cache_file):
+        cache_mod_time = os.path.getmtime(cache_file)
+        cache_age = time.time() - cache_mod_time
+        
+        if cache_age < MAX_CACHE_AGE and os.path.getsize(cache_file) > 0:
+            return pd.read_csv(cache_file, index_col=0, parse_dates=True, date_format='ISO8601')
+    
+    # Fetch and cache new data
+    
+    # ❌ DON'T: Use cache without validation
+    if os.path.exists(cache_file):
+        return pd.read_csv(cache_file)  # Could be empty or outdated
+    ```
+  
+  - **DO** handle corrupted cache files
+    ```python
+    # ✅ DO: Handle potential cache corruption
+    try:
+        data = pd.read_csv(cache_file, index_col=0, parse_dates=True, date_format='ISO8601')
+        if data.empty or 'close' not in data.columns:
+            logging.warning("Invalid cache file. Fetching fresh data.")
+            raise ValueError("Invalid cache data")
+        return data
+    except Exception as e:
+        logging.warning(f"Cache error: {e}. Fetching fresh data.")
+        # Fetch fresh data
+    
+    # ❌ DON'T: Assume cache is valid
+    if os.path.exists(cache_file):
+        return pd.read_csv(cache_file)  # Could be corrupted
+    ```
+
+- **Vectorized Backtesting (VectorBT)**
+  - **DO** verify attribute existence before accessing
+    ```python
+    # ✅ DO: Check attribute existence
+    best_params = {}
+    if hasattr(portfolio, 'param_names') and portfolio.param_names:
+        for i, param_name in enumerate(portfolio.param_names):
+            best_params[param_name] = portfolio.optimal_idx[i]
+    else:
+        # Alternative approach when param_names is not available
+        best_params = {
+            'window': param_combinations[0][portfolio.optimal_idx],
+            'lower_threshold': param_combinations[1][portfolio.optimal_idx],
+            'upper_threshold': param_combinations[2][portfolio.optimal_idx]
+        }
+    
+    # ❌ DON'T: Directly access attributes without verification
+    best_params = {}
+    for i, param_name in enumerate(portfolio.param_names):  # May raise AttributeError
+        best_params[param_name] = portfolio.optimal_idx[i]
+    ```
+  
+  - **DO** handle empty or invalid optimization results
+    ```python
+    # ✅ DO: Handle cases with no valid parameter combinations
+    if not valid_portfolios:
+        logging.warning("No valid parameter combinations found.")
+        # Return reasonable defaults or raise informative error
+        return {
+            'window': default_window,
+            'lower_threshold': default_lower,
+            'upper_threshold': default_upper,
+            'metrics': None,
+            'portfolio': None
+        }
+    
+    # ❌ DON'T: Assume optimization always produces valid results
+    best_idx = np.argmax(sharpe_ratios)  # Will fail if sharpe_ratios is empty
+    best_params = param_combinations[best_idx]
+    ```
+
+- **Backtesting Result Handling**
+  - **DO** save detailed reports with metadata
+    ```python
+    # ✅ DO: Include comprehensive metadata with results
+    report = {
+        'strategy': strategy_name,
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'start_date': start_date,
+        'end_date': end_date,
+        'parameters': strategy_params,
+        'metrics': {
+            'total_return': total_return,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown,
+            'win_rate': win_rate
+        },
+        'trades': list(trades.to_dict('records')),
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    with open(os.path.join(reports_dir, f"{strategy_name}_{symbol}_results.json"), 'w') as f:
+        json.dump(report, f, indent=2)
+    
+    # ❌ DON'T: Save only minimal results
+    results = {
+        'return': total_return,
+        'sharpe': sharpe_ratio
+    }  # Insufficient for proper analysis
+    ```
+  
+  - **DO** include visualization with trade markers
+    ```python
+    # ✅ DO: Create rich visualizations with trade information
+    fig = plt.figure(figsize=(12, 8))
+    
+    # Price chart with trades
+    ax1 = fig.add_subplot(2, 1, 1)
+    data['close'].plot(ax=ax1, label='Price')
+    
+    # Mark entry and exit points
+    for trade in trades.itertuples():
+        ax1.axvline(trade.entry_time, color='g', linestyle='--', alpha=0.6)
+        ax1.axvline(trade.exit_time, color='r', linestyle='--', alpha=0.6)
+    
+    # Indicator chart
+    ax2 = fig.add_subplot(2, 1, 2, sharex=ax1)
+    indicator.plot(ax=ax2, label='Indicator')
+    ax2.axhline(upper_threshold, color='r', linestyle='-', alpha=0.3)
+    ax2.axhline(lower_threshold, color='g', linestyle='-', alpha=0.3)
+    
+    # ❌ DON'T: Create basic plots without trade information
+    plt.figure()
+    data['close'].plot()
+    plt.title('Price Chart')  # Lacks trading context
+    ```
+
+Following these guidelines will help ensure your backtesting code is reliable, reproducible, and maintains high standards of quality. 

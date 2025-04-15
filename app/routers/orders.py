@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from decimal import Decimal
 import json
 
-from app.core.coinbase import CoinbaseClient, CoinbaseError
+from app.core.coinbase import CoinbaseClient
 from app.core.deps import get_coinbase_client
 from app.models.order import OrderSide, OrderType, TimeInForce, OrderStatus
 from app.models.responses import OrderDetailResponse, OrdersResponse, ErrorResponse
@@ -87,17 +87,11 @@ async def create_order(
             time_in_force=order.time_in_force
         )
         return OrderDetailResponse(order=result)
-    except CoinbaseError as e:
-        raise HTTPException(
-            status_code=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
-    except HTTPException:
-        raise
     except Exception as e:
+        logger.error(f"Error creating order: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"An unexpected error occurred: {str(e)}"}
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail={"error": "Failed to create order due to an internal error."}
         )
 
 @router.get(
@@ -125,15 +119,11 @@ async def list_orders(
     try:
         orders = await client.get_orders(product_id=product_id, status=status_filter, limit=limit)
         return OrdersResponse(orders=orders)
-    except CoinbaseError as e:
-        raise HTTPException(
-            status_code=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
     except Exception as e:
+        logger.error(f"Error listing orders: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"An unexpected error occurred: {str(e)}"}
+            detail={"error": "Failed to list orders due to an internal error."}
         )
 
 @router.get(
@@ -159,20 +149,15 @@ async def get_order(
     """
     try:
         order_data = await client.get_order(order_id)
-        return OrderDetailResponse(order=order_data)
-    except CoinbaseError as e:
-        status_code = e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
-        if status_code == 404:
+        if not order_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": f"Order with ID {order_id} not found"}
             )
-        raise HTTPException(
-            status_code=status_code,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
+        return OrderDetailResponse(order=order_data)
     except Exception as e:
+        logger.error(f"Error getting order {order_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": f"An unexpected error occurred: {str(e)}"}
+            detail={"error": "Failed to retrieve order due to an internal error."}
         ) 

@@ -3,12 +3,19 @@ import logging
 import pandas as pd
 from collections import deque
 from typing import Optional, Dict, List
+import uuid
+# SQLAlchemy session for logging
+from sqlalchemy.ext.asyncio import AsyncSession
+# Import session factory
+from app.core.trade_log.database import AsyncSessionFactory 
 
 from app.core.config import Settings, get_settings
 from app.models.order import OrderSide, OrderType
 from app.core.coinbase import CoinbaseClient, CoinbaseError
 from app.core.websocket_client import CoinbaseWebSocketClient
 from app.strategies.rsi_momentum import RSIMomentumStrategy
+# Import OrderExecutor
+from app.core.order_executor import OrderExecutor, OrderExecutionResult, OrderExecutionError 
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +23,18 @@ class LiveTrader:
     """
     Handles live trading based on real-time data and strategy signals.
     """
-    def __init__(self, settings: Settings, rest_client: CoinbaseClient, ws_client: CoinbaseWebSocketClient):
+    def __init__(self,
+                 settings: Settings,
+                 rest_client: CoinbaseClient, # Keep for other potential uses like fetching accounts
+                 ws_client: CoinbaseWebSocketClient,
+                 order_executor: OrderExecutor, # Add OrderExecutor
+                 session_factory: sessionmaker # Add Session Factory
+                 ):
         self.settings = settings
-        self.rest_client = rest_client
+        self.rest_client = rest_client # Keep rest_client for non-order actions
         self.ws_client = ws_client
+        self.order_executor = order_executor # Store the order executor
+        self.session_factory = session_factory # Store session factory
         self.product_id = "BTC-USD"  # Default, can be changed
         
         # Initialize strategy with default parameters from RSIMomentumStrategy
@@ -75,7 +90,9 @@ class LiveTrader:
 
                 # Only run strategy if we have enough data for all indicators
                 if len(self.data_buffer) >= self.strategy.ma_period + self.strategy.atr_period: # Ensure enough data for longest indicator dependency (regime)
-                    await self._run_live_strategy()
+                    # Create DB session for this strategy run
+                    async with self.session_factory() as db:
+                        await self._run_live_strategy(db)
 
             except (TypeError, ValueError) as e:
                 logger.error(f"Error processing ticker message: {e} - Message: {message}")
@@ -106,7 +123,7 @@ class LiveTrader:
         logger.warning("LiveTrader WebSocket disconnected.")
         # Reconnection is handled by the ws_client itself if auto_reconnect=True
 
-    async def _run_live_strategy(self):
+    async def _run_live_strategy(self, db: AsyncSession):
         """Runs the RSI Momentum strategy on the current data buffer."""
         try:
             # Convert deque to DataFrame
@@ -122,34 +139,39 @@ class LiveTrader:
             # Use strategy methods to determine entry/exit
             if self.strategy.should_enter_trade(latest_row):
                 logger.info("BUY SIGNAL DETECTED by strategy")
-                await self._execute_trade(OrderSide.BUY, latest_row)
+                # Pass db session to execute_trade
+                await self._execute_trade(db, OrderSide.BUY, latest_row)
                 # Update strategy state after trade attempt
                 # Position size/entry price are unknown until order fills, update basic state
                 self.strategy.update_state(latest_row.name, True, 0, None, latest_row.get('regime')) 
             elif self.strategy.should_exit_trade(latest_row):
                 logger.info("SELL SIGNAL DETECTED by strategy")
-                await self._execute_trade(OrderSide.SELL, latest_row)
+                # Pass db session to execute_trade
+                await self._execute_trade(db, OrderSide.SELL, latest_row)
                 # Update strategy state after trade attempt
                 self.strategy.update_state(latest_row.name, False, 0, None, latest_row.get('regime'))
 
         except Exception as e:
             logger.error(f"Error running live strategy: {e}", exc_info=True)
 
-    async def _execute_trade(self, side: OrderSide, strategy_row: pd.Series):
-        """Executes a trade based on the signal."""
+    async def _execute_trade(self, db: AsyncSession, side: OrderSide, strategy_row: pd.Series):
+        """Executes a trade based on the signal using OrderExecutor."""
         if not self.settings.TRADING_ENABLED:
             logger.warning(f"TRADING DISABLED: Would place {side.value} order for {self.product_id}")
             return
 
-        logger.info(f"Attempting to place {side.value} MARKET order for {self.product_id}")
+        strategy_name = self.strategy.__class__.__name__ # Get strategy name
+        logger.info(f"Attempting to place {side.value} MARKET order for {self.product_id} via {strategy_name}")
         try:
             # Use strategy's risk management to calculate size
             # Note: Requires account balance and current price
+            # Fetch accounts using the rest_client (OrderExecutor doesn't handle this)
             accounts = await self.rest_client.get_accounts()
             usd_account = next((acc for acc in accounts if acc.get('currency') == 'USD'), None)
             
             if not usd_account or 'available_balance' not in usd_account:
                 logger.error("Could not find USD account or available balance.")
+                # Log error event? Maybe later.
                 return
                 
             available_balance = float(usd_account['available_balance'])
@@ -160,6 +182,7 @@ class LiveTrader:
             
             if current_price <= 0:
                 logger.error(f"Invalid current price for trade calculation: {current_price}")
+                # Log error event?
                 return
 
             # Calculate position size using strategy's method
@@ -174,8 +197,9 @@ class LiveTrader:
                 logger.warning(f"Calculated position size is zero or negative ({position_size}). Skipping trade.")
                 return
             
-            # Coinbase API requires size as string
-            order_size_str = f"{position_size:.8f}" 
+            # Coinbase API requires size as string, but OrderExecutor might handle float?
+            # Let's pass float for now, OrderExecutor can format if needed.
+            # order_size_str = f"{position_size:.8f}" 
             
             # Check minimum order size (e.g., $1 USD for Coinbase)
             notional_value = position_size * current_price
@@ -183,22 +207,39 @@ class LiveTrader:
                 logger.warning(f"Order notional value ${notional_value:.2f} is below minimum threshold ($1.00). Skipping trade.")
                 return
 
-            logger.info(f"Calculated trade details: Balance={available_balance:.2f}, Price={current_price:.2f}, SL={stop_loss_price:.2f}, Size={order_size_str}")
+            logger.info(f"Calculated trade details: Balance={available_balance:.2f}, Price={current_price:.2f}, SL={stop_loss_price:.2f}, Size={position_size:.8f}")
 
-            # Place the order
-            order = await self.rest_client.create_order(
+            # --- Use OrderExecutor to place the order --- 
+            # Generate a client order ID for tracking
+            client_order_id = f"live_{strategy_name}_{side.value}_{uuid.uuid4().hex[:8]}"
+            
+            result: OrderExecutionResult = await self.order_executor.execute_market_order(
+                db=db,
                 product_id=self.product_id,
                 side=side, # Pass the enum directly
-                order_type=OrderType.MARKET,
-                size=order_size_str # Pass size as string
+                size=position_size, # Pass float size
+                client_order_id=client_order_id,
+                strategy_name=strategy_name
             )
-            logger.info(f"Successfully placed {side.value} order: {order}")
-            # TODO: Need to monitor order status and update strategy state accurately on fill
+            # --- End OrderExecutor call --- 
+            
+            if result.success and result.order:
+                logger.info(f"Successfully SENT {side.value} order via OrderExecutor: {result.order.order_id}")
+                # TODO: Need to monitor order status and update strategy state accurately on fill
+            else:
+                 logger.error(f"OrderExecutor failed to send {side.value} order: {result.error}")
+                 # Error logging is handled within OrderExecutor now.
 
-        except CoinbaseError as e:
-             logger.error(f"Coinbase API error placing {side.value} order: {e.status_code} - {e.message} - {e.response}")
+        # except CoinbaseError as e:
+        #      logger.error(f"Coinbase API error placing {side.value} order: {e.status_code} - {e.message} - {e.response}")
+        #      # Error logging is handled within OrderExecutor now
+        except OrderExecutionError as e:
+            # This might catch validation errors from OrderExecutor if we re-raise them
+            logger.error(f"Order execution error placing {side.value} order: {e}")
         except Exception as e:
-            logger.error(f"Failed to place {side.value} order for {self.product_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error in _execute_trade {side.value} for {self.product_id}: {e}", exc_info=True)
+            # Consider logging this unexpected error to DB as well?
+            # await create_log_entry(db=db, event_type=EventType.ERROR, symbol=self.product_id, notes=f"_execute_trade failure: {e}")
 
     async def start(self, product_id: str = "BTC-USD"):
         """Starts the live trading bot."""

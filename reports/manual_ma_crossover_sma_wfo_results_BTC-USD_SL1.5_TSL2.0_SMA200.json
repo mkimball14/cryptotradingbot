@@ -1,0 +1,120 @@
+{
+  "strategy_name": "MA Crossover + Fixed SMA200 Filter",
+  "trend_filter_window": 200,
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 1.5,
+  "fixed_tsl_atr_multiplier": 2.0,
+  "best_params_per_split": {
+    "0": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "1": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "2": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "3": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "4": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "5": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "6": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "7": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "8": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "9": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "10": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "11": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "12": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    },
+    "13": {
+      "short_ma_window": 10,
+      "long_ma_window": 50
+    }
+  },
+  "oos_sharpe": {
+    "0": null,
+    "1": -0.365296281564549,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": 1.0293102716848994,
+    "6": -2.4984089124558215,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": -1.7594765986016805,
+    "11": null,
+    "12": null,
+    "13": null
+  },
+  "oos_return": {
+    "0": 0.0,
+    "1": -0.02477686410674469,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0359746847295346,
+    "6": -0.006714862200341668,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": -0.06145032299390514,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0
+  },
+  "oos_drawdown": {
+    "0": null,
+    "1": 0.09225419246867152,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": 0.031274849480613605,
+    "6": 0.006714862200341668,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": 0.06145032299390514,
+    "11": null,
+    "12": null,
+    "13": null
+  },
+  "oos_mean_sharpe": -0.8984678802342879,
+  "oos_std_sharpe": 1.560101265552525,
+  "oos_mean_return": -0.004069097469389779,
+  "oos_std_return": 0.020564152431173165,
+  "oos_mean_drawdown": 0.047923556785882976,
+  "oos_std_drawdown": 0.037074315585804894
+}

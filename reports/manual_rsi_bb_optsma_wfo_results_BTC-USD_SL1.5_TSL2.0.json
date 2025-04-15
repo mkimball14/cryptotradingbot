@@ -1,0 +1,175 @@
+{
+  "strategy_name": "RSI + BBands + Optimized SMA Filter (pandas-ta)",
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 1.5,
+  "fixed_tsl_atr_multiplier": 2.0,
+  "best_params_per_split": {
+    "0": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "1": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "2": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "3": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "4": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "5": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "6": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "7": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "8": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "9": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "10": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "11": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "12": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    },
+    "13": {
+      "rsi_window": 10,
+      "rsi_lower_th": 20,
+      "rsi_upper_th": 65,
+      "bb_window": 15,
+      "bb_std": 1.5,
+      "trend_sma_window": 50
+    }
+  },
+  "oos_sharpe": {
+    "0": null,
+    "1": null,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": null,
+    "6": null,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null,
+    "13": null
+  },
+  "oos_return": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0
+  },
+  "oos_drawdown": {
+    "0": null,
+    "1": null,
+    "2": null,
+    "3": null,
+    "4": null,
+    "5": null,
+    "6": null,
+    "7": null,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": null,
+    "12": null,
+    "13": null
+  },
+  "oos_mean_sharpe": null,
+  "oos_std_sharpe": null,
+  "oos_mean_return": 0.0,
+  "oos_std_return": 0.0,
+  "oos_mean_drawdown": null,
+  "oos_std_drawdown": null
+}

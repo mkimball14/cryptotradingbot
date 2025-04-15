@@ -1,0 +1,161 @@
+{
+  "strategy_name": "RSI + Bollinger Bands (pandas-ta)",
+  "optimized_metric": "sharpe_ratio",
+  "stops_enabled": true,
+  "fixed_sl_atr_multiplier": 1.5,
+  "fixed_tsl_atr_multiplier": 2.0,
+  "best_params_per_split": {
+    "0": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "1": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "2": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "3": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "4": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "5": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "6": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "7": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "8": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "9": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "10": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "11": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "12": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    },
+    "13": {
+      "rsi_window": 5,
+      "rsi_lower_th": 15,
+      "rsi_upper_th": 60,
+      "bb_window": 10,
+      "bb_std": 1.0
+    }
+  },
+  "oos_sharpe": {
+    "0": null,
+    "1": 1.190900301085081,
+    "2": -1.05986943945701,
+    "3": -0.9257590661883923,
+    "4": 0.7436342818888073,
+    "5": 2.2308275115979,
+    "6": null,
+    "7": 1.176015602779695,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": -2.056324980530781,
+    "12": null,
+    "13": 1.1937986740433952
+  },
+  "oos_return": {
+    "0": 0.0,
+    "1": 0.0321448794280901,
+    "2": -0.09132021523919227,
+    "3": -0.042723150324763266,
+    "4": 0.04060880813389031,
+    "5": 0.08766690001795523,
+    "6": 0.0,
+    "7": 0.03783224100232819,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": -0.07246287176251044,
+    "12": 0.0,
+    "13": 0.0609521257546352
+  },
+  "oos_drawdown": {
+    "0": null,
+    "1": 0.03958226731122195,
+    "2": 0.1498324028339293,
+    "3": 0.09311951751843309,
+    "4": 0.10218532758266116,
+    "5": 0.008211306188401614,
+    "6": null,
+    "7": 0.024671006287850288,
+    "8": null,
+    "9": null,
+    "10": null,
+    "11": 0.07246287176251044,
+    "12": null,
+    "13": 0.051905469693781195
+  },
+  "oos_mean_sharpe": 0.3116528606523369,
+  "oos_std_sharpe": 1.4729853209148087,
+  "oos_mean_return": 0.003764194072173787,
+  "oos_std_return": 0.04862054242524034,
+  "oos_mean_drawdown": 0.06774627114734863,
+  "oos_std_drawdown": 0.04634384251647628
+}

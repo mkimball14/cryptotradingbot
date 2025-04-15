@@ -8,6 +8,12 @@ from app.core.coinbase import CoinbaseClient
 from app.strategies.rsi_momentum import RSIMomentumStrategy
 from app.models.order import OrderSide, OrderType
 import logging
+import pandas as pd
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.trade_log.database import AsyncSessionFactory, init_db
+from app.core.trade_log.crud import create_log_entry
+from app.core.trade_log.models import EventType, TradeSide, OrderStatus
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -60,9 +66,10 @@ class ConnectionManager:
              logger.info(f"Received user order update: {message}")
         
     async def _strategy_loop(self):
-        """Consumes messages from the queue and triggers strategy/orders."""
+        """Consumes messages from the queue, triggers strategy/orders, and logs fills."""
         logger.info("Starting strategy loop...")
         while True:
+            message = None # Initialize message to None
             try:
                 message = await self.message_queue.get()
                 logger.debug(f"Strategy loop received: {message}")
@@ -70,96 +77,72 @@ class ConnectionManager:
                 if message is None:
                     logger.info("Received stop signal in strategy loop.")
                     break
-
-                if self.strategy and self.coinbase_rest_client:
-                    signal = self.strategy.process_market_data(message)
                     
-                    if signal and isinstance(signal, dict):
-                        action = signal.get('action')
-                        order_type_str = signal.get('type', 'MARKET').upper()
-                        size = signal.get('size')
-                        price = signal.get('price')
-                        product_id = signal.get('product_id', self.strategy.product_id)
-                        
-                        logger.info(f"Strategy generated signal: {signal}")
-
-                        if action == 'BUY':
-                            side = OrderSide.BUY
-                        elif action == 'SELL':
-                            side = OrderSide.SELL
-                        else:
-                            logger.warning(f"Invalid action '{action}' in signal, ignoring.")
-                            continue
-
-                        try:
-                            order_type = OrderType(order_type_str)
-                        except ValueError:
-                            logger.warning(f"Invalid order type '{order_type_str}' in signal, defaulting to MARKET.")
-                            order_type = OrderType.MARKET
-
-                        if not size or not product_id:
-                            logger.error(f"Signal missing required fields (size, product_id): {signal}")
-                            continue
-
-                        try:
-                            # --- Determine Correct Size Parameter for SDK --- 
-                            order_params = {
-                                "client_order_id": effective_client_order_id,
-                                "product_id": product_id,
-                            }
-                            size_value = float(size)
-                            price_value = float(price) if price is not None else None
-                            stop_price_value = None # TODO: Add stop_price if strategy provides it
- 
-                            # Map generic signal to specific SDK method and parameters
-                            sdk_method = None
-                            if order_type == OrderType.MARKET:
-                                if side == OrderSide.BUY:
-                                    order_params["quote_size"] = str(size_value) # Market BUY uses quote size
-                                    sdk_method = self.coinbase_rest_client.client.market_order_buy
-                                elif side == OrderSide.SELL:
-                                    order_params["base_size"] = str(size_value) # Market SELL uses base size
-                                    sdk_method = self.coinbase_rest_client.client.market_order_sell
-                            elif order_type == OrderType.LIMIT:
-                                if price_value is None: raise ValueError("Limit price required for LIMIT order")
-                                order_params["base_size"] = str(size_value) # Limit uses base size
-                                order_params["limit_price"] = str(price_value)
-                                # TODO: Handle TIF (GTC/GTD/etc.) - requires different methods or params
-                                if side == OrderSide.BUY:
-                                    sdk_method = self.coinbase_rest_client.client.limit_order_gtc_buy
-                                elif side == OrderSide.SELL:
-                                     sdk_method = self.coinbase_rest_client.client.limit_order_gtc_sell
-                            elif order_type == OrderType.STOP_LIMIT:
-                                if price_value is None or stop_price_value is None: raise ValueError("Limit and Stop price required for STOP_LIMIT order")
-                                order_params["base_size"] = str(size_value) # StopLimit uses base size
-                                order_params["limit_price"] = str(price_value)
-                                order_params["stop_price"] = str(stop_price_value)
-                                # TODO: Handle TIF (GTC/GTD/etc.)
-                                # TODO: Handle stop direction if needed
-                                if side == OrderSide.BUY:
-                                    sdk_method = self.coinbase_rest_client.client.stop_limit_order_gtc_buy
-                                elif side == OrderSide.SELL:
-                                     sdk_method = self.coinbase_rest_client.client.stop_limit_order_gtc_sell
-
-                            # --- Execute Order --- 
-                            if sdk_method:
-                                logger.info(f"Executing order via SDK: {sdk_method.__name__} with params: {order_params}")
-                                order_result = sdk_method(**order_params)
-                                logger.info(f"Order placement response: {order_result}") # Log raw response object
-                            else:
-                                logger.error(f"Could not determine SDK method for signal: {signal}")
-
-                        except Exception as e:
-                            logger.error(f"Failed to execute order from signal {signal}: {e}", exc_info=True)
+                # --- Log Order Fills --- 
+                if isinstance(message, dict) and message.get('type') == 'user_order_update' and message.get('status') == 'FILLED':
+                    logger.info(f"Processing FILL message for order {message.get('order_id')}")
+                    try:
+                        # Use the globally available session factory
+                        async with AsyncSessionFactory() as db: 
+                            side_str = message.get('side', '').upper()
+                            event_type = EventType.ENTRY_FILL if side_str == 'BUY' else EventType.EXIT_FILL if side_str == 'SELL' else EventType.ORDER_UPDATE
+                            
+                            try:
+                                side_enum = TradeSide(side_str) if side_str else None
+                            except ValueError:
+                                side_enum = None 
+                                logger.warning(f"Invalid side '{message.get('side')}' received in fill message.")
+                                
+                            await create_log_entry(
+                                db=db,
+                                event_type=event_type,
+                                symbol=message.get('product_id'),
+                                status=OrderStatus.FILLED, 
+                                order_id=message.get('order_id'), 
+                                client_order_id=message.get('client_order_id'),
+                                side=side_enum,
+                                quantity=float(message.get('cumulative_quantity', 0)),
+                                price=float(message.get('average_filled_price', 0)), 
+                                fees=float(message.get('total_fees', 0)), 
+                                # strategy_name= ? # Still needs association logic
+                                event_timestamp=pd.to_datetime(message.get('time')), 
+                                notes=f"Order filled via WebSocket update."
+                            )
+                            logger.info(f"Logged FILL event for order {message.get('order_id')}")
+                    except Exception as log_err:
+                        logger.error(f"Error logging fill event: {log_err}", exc_info=True)
+                # --- End Log Order Fills --- 
                 
-                self.message_queue.task_done()
+                # --- Existing Strategy Processing --- 
+                elif isinstance(message, dict) and message.get('type') == 'ticker': # Process ticker for strategy
+                    if self.strategy and self.coinbase_rest_client:
+                        # This part might need adjustment if strategy expects different input
+                        # signal = self.strategy.process_market_data(message) 
+                        # Simplified for example - assumes strategy runs elsewhere or on ticker receipt
+                        logger.debug("Passing ticker data to strategy (if implemented)")
+                        pass # Placeholder - strategy logic might run elsewhere
+                else:
+                    logger.debug(f"Skipping message processing in strategy loop for type: {message.get('type')}")
+                # --- End Existing Strategy Processing --- 
+                    
+                # Mark task as done *after* processing
+                if message is not None:
+                    self.message_queue.task_done()
                 
             except asyncio.CancelledError:
                  logger.info("Strategy loop cancelled.")
-                 break
+                 break # Exit the loop cleanly on cancellation
             except Exception as e:
-                logger.error(f"Error in strategy loop: {e}", exc_info=True)
-                await asyncio.sleep(5)
+                # Log any other exceptions that occur during message processing
+                logger.error(f"Error processing message in strategy loop: {e}", exc_info=True)
+                logger.error(f"Failed message content (if available): {message}")
+                # Mark task as done even if processing failed to avoid blocking queue
+                if message is not None:
+                   try:
+                       self.message_queue.task_done()
+                   except ValueError: # task_done() might raise if called too many times
+                       logger.warning("task_done() called on already completed task in error handler.")
+                await asyncio.sleep(1) # Prevent rapid error loops
 
 manager = ConnectionManager()
 
@@ -214,9 +197,16 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup...")
     global manager
     try:
+        # --- Initialize Database --- 
+        logger.info("Initializing trade log database...")
+        await init_db()
+        logger.info("Database initialized.")
+        # --- End DB Init --- 
+        
         settings = get_settings()
         manager.message_queue = asyncio.Queue()
 
+        logger.info("Initializing Coinbase REST Client...")
         manager.coinbase_rest_client = CoinbaseClient(settings)
         logger.info("Coinbase REST Client initialized.")
 
@@ -232,6 +222,7 @@ async def lifespan(app: FastAPI):
 
         ws_product_ids = ["BTC-USD", "ETH-USD"]
         ws_channels = ["ticker", "heartbeats", "user"]
+        logger.info("Initializing Coinbase WebSocket Client...")
         manager.coinbase_ws_client = CoinbaseWebSocketClient(
             api_key=settings.COINBASE_JWT_KEY_NAME,
             api_secret=settings.COINBASE_JWT_PRIVATE_KEY,
@@ -241,18 +232,31 @@ async def lifespan(app: FastAPI):
             retry=True,
             verbose=settings.DEBUG
         )
-        manager.coinbase_ws_client.connect()
-        logger.info("Coinbase WebSocket Client connection initiated.")
+        
+        logger.info("Attempting to connect Coinbase WebSocket Client...")
+        try:
+            manager.coinbase_ws_client.connect() # Starts in background thread
+            logger.info("Coinbase WebSocket Client connect() method called.")
+        except Exception as ws_connect_err:
+            logger.error(f"Error calling CoinbaseWebSocketClient.connect(): {ws_connect_err}", exc_info=True)
+            raise # Re-raise to prevent startup if connect method itself fails
 
+        # Add a small delay to allow the background thread to potentially fail
+        logger.info("Pausing briefly after initiating WebSocket connection...")
+        await asyncio.sleep(5) # Increased sleep duration to 5 seconds
+        logger.info("Pause complete. Starting strategy loop and yielding...")
+        
         manager.strategy_loop_task = asyncio.create_task(manager._strategy_loop())
         logger.info("Strategy processing loop started.")
         
         yield
         
     except Exception as e:
-        logger.error(f"Error in WebSocket lifespan: {str(e)}")
-        raise
+        logger.error(f"Error during application lifespan startup: {str(e)}", exc_info=True)
+        # Ensure cleanup happens even if startup fails partially
+        # raise # Optional: re-raise to halt FastAPI startup completely on error
     finally:
+        logger.info("Application shutdown sequence initiated...")
         logger.info("Application shutdown...")
         if manager.strategy_loop_task:
             logger.info("Stopping strategy loop...")

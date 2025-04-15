@@ -135,7 +135,8 @@ class CoinbaseWebSocketClient:
                             # Requires the main application to have a running event loop
                             asyncio.create_task(self.message_queue.put(ticker_data))
                         except Exception as e:
-                            logger.error(f"Error putting message on queue: {e}")
+                            # Log error during task creation or putting on queue
+                            logger.error(f"Error putting ticker message on queue: {e}", exc_info=True)
 
             elif channel == "heartbeats":
                 # Heartbeats are useful for checking connection health, but maybe not needed in queue
@@ -163,7 +164,11 @@ class CoinbaseWebSocketClient:
                                 'time': ws_response.timestamp
                             }
                             logger.info(f"Putting order update onto queue: {order.order_id} ({order.status})")
-                            asyncio.create_task(self.message_queue.put(order_data))
+                            try:
+                                asyncio.create_task(self.message_queue.put(order_data))
+                            except Exception as e:
+                                # Log error during task creation or putting on queue
+                                logger.error(f"Error putting user order update on queue: {e}", exc_info=True)
 
             elif channel == "subscriptions":
                  logger.info(f"Subscription confirmation received: {data}")
@@ -174,9 +179,14 @@ class CoinbaseWebSocketClient:
         except json.JSONDecodeError:
             logger.error(f"Failed to decode JSON message: {msg}")
         except Exception as e:
-            logger.error(f"Error processing WebSocket message: {e}", exc_info=True)
+            # Catch-all for errors during message processing *within this callback*
+            logger.error(f"Error processing WebSocket message in _on_message: {e}", exc_info=True)
+            # Call the user-provided callback if it exists
             if self._on_error_callback:
-                self._on_error_callback(e)
+                try:
+                    self._on_error_callback(e)
+                except Exception as callback_err:
+                    logger.error(f"Error executing on_error callback: {callback_err}", exc_info=True)
 
     def connect(self):
         """Establishes the WebSocket connection and starts listening."""
@@ -193,7 +203,6 @@ class CoinbaseWebSocketClient:
             on_close=self._on_close,
             retry=self._should_retry,
             verbose=self._verbose
-            # TODO: Consider adding on_error handling if WSClient provides it
         )
         
         try:
@@ -201,20 +210,24 @@ class CoinbaseWebSocketClient:
             self.ws_client.open()
             self._is_running = True
             logger.info("WebSocket client opened successfully.")
-            # Keep the main thread alive or manage lifecycle via FastAPI/other framework
-            # For simple testing, could use: self.ws_client.run_forever_with_exception_check()
-            # but that blocks. We want it running in the background.
         except (WSClientException, WSClientConnectionClosedException) as e:
-             logger.error(f"WebSocket connection failed: {e}")
+             logger.error(f"WebSocket connection failed during open(): {e}")
              self._is_running = False
+             # Call the user-provided error callback if connection fails
              if self._on_error_callback:
-                 self._on_error_callback(e)
+                 try: 
+                     self._on_error_callback(e)
+                 except Exception as callback_err:
+                     logger.error(f"Error executing on_error callback after open() failed: {callback_err}", exc_info=True)
         except Exception as e:
             logger.error(f"Unexpected error during WebSocket connect: {e}", exc_info=True)
             self._is_running = False
+            # Call the user-provided error callback
             if self._on_error_callback:
-                self._on_error_callback(e)
-
+                try:
+                    self._on_error_callback(e)
+                except Exception as callback_err:
+                    logger.error(f"Error executing on_error callback after unexpected connect error: {callback_err}", exc_info=True)
 
     def subscribe(self):
         """Subscribes to the specified products and channels."""

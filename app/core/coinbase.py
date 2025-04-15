@@ -37,11 +37,12 @@ class CoinbaseClient:
             raise
 
     # Account endpoints
-    def get_accounts(self) -> List[Dict]:
+    async def get_accounts(self) -> List[Dict]:
         """Get list of trading accounts"""
         # SDK Method: get_accounts()
         try:
-            response_obj = self.client.get_accounts()
+            # Await underlying call
+            response_obj = await self.client.get_accounts()
             # Return the raw response object (e.g., ListAccountsResponse)
             # Caller can access response_obj.accounts and convert if needed
             return response_obj
@@ -111,7 +112,7 @@ class CoinbaseClient:
             raise # Or return []
         
     # Order endpoints
-    def create_order(
+    async def create_order(
         self,
         product_id: str,
         side: OrderSide,
@@ -148,18 +149,23 @@ class CoinbaseClient:
         
         response_obj = None
         
-        logger.info(f"Attempting to create order: {product_id} {side.value} {order_type.value} {size_str} Price={price_str} Stop={stop_price_str} TIF={time_in_force.value}")
+        # Adjust logging to handle side as string and time_in_force/order_type potentially being string or enum
+        tif_log_value = time_in_force.value if hasattr(time_in_force, 'value') else time_in_force
+        order_type_log_value = order_type.value if hasattr(order_type, 'value') else order_type
+        logger.info(f"Attempting to create order: {product_id} {side} {order_type_log_value} {size_str} Price={price_str} Stop={stop_price_str} TIF={tif_log_value}")
 
         try:
             if order_type == OrderType.MARKET:
                 if side == OrderSide.BUY:
                     # Market BUY typically uses quote_size (amount of quote currency)
                     logger.info(f"Executing market_order_buy for {product_id}, quote_size={size_str}")
-                    response_obj = self.client.market_order_buy(client_order_id=effective_client_order_id, product_id=product_id, quote_size=size_str)
+                    # Await the underlying client call
+                    response_obj = await self.client.market_order_buy(client_order_id=effective_client_order_id, product_id=product_id, quote_size=size_str)
                 elif side == OrderSide.SELL:
                     # Market SELL typically uses base_size (amount of base currency)
                     logger.info(f"Executing market_order_sell for {product_id}, base_size={size_str}")
-                    response_obj = self.client.market_order_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str)
+                     # Await the underlying client call
+                    response_obj = await self.client.market_order_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str)
             
             elif order_type == OrderType.LIMIT:
                 if price is None:
@@ -170,10 +176,12 @@ class CoinbaseClient:
                     # Verify SDK method names: limit_order_gtc_buy / limit_order_gtc_sell
                     if side == OrderSide.BUY:
                         logger.info(f"Calling SDK: limit_order_gtc_buy(product_id={product_id}, base_size={size_str}, limit_price={price_str})")
-                        response_obj = self.client.limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
+                        # Await the underlying client call
+                        response_obj = await self.client.limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
                     elif side == OrderSide.SELL:
                         logger.info(f"Calling SDK: limit_order_gtc_sell(product_id={product_id}, base_size={size_str}, limit_price={price_str})")
-                        response_obj = self.client.limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
+                         # Await the underlying client call
+                        response_obj = await self.client.limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str)
                 elif time_in_force == TimeInForce.GTD: # Good Till Date/Time
                      # Requires end_time parameter - not currently supported by this wrapper
                     raise NotImplementedError("LIMIT GTD orders require end_time, which is not supported by this wrapper.")
@@ -190,10 +198,12 @@ class CoinbaseClient:
                      # Verify SDK method names: stop_limit_order_gtc_buy / stop_limit_order_gtc_sell
                      if side == OrderSide.BUY:
                          logger.info(f"Calling SDK: stop_limit_order_gtc_buy(product_id={product_id}, base_size={size_str}, limit_price={price_str}, stop_price={stop_price_str})")
-                         response_obj = self.client.stop_limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
+                          # Await the underlying client call
+                         response_obj = await self.client.stop_limit_order_gtc_buy(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
                      elif side == OrderSide.SELL:
                          logger.info(f"Calling SDK: stop_limit_order_gtc_sell(product_id={product_id}, base_size={size_str}, limit_price={price_str}, stop_price={stop_price_str})")
-                         response_obj = self.client.stop_limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
+                          # Await the underlying client call
+                         response_obj = await self.client.stop_limit_order_gtc_sell(client_order_id=effective_client_order_id, product_id=product_id, base_size=size_str, limit_price=price_str, stop_price=stop_price_str)
                  elif time_in_force == TimeInForce.GTD:
                       raise NotImplementedError("STOP_LIMIT GTD orders require end_time, which is not supported by this wrapper.")
                  else:
@@ -229,7 +239,8 @@ class CoinbaseClient:
             logger.error(f"Coinbase API error canceling order {order_id}: {e}", exc_info=True)
             raise
         
-    def get_orders(
+    # Make async
+    async def get_orders(
         self,
         product_id: Optional[str] = None,
         status: Optional[List[OrderStatus]] = None,
@@ -257,18 +268,21 @@ class CoinbaseClient:
         # Verify SDK method name: Assuming list_orders is correct (or get_orders)
         # Note: SDK might use list_orders or get_orders
         try:
-            response_obj = self.client.list_orders(**params)
+            # Await underlying call
+            response_obj = await self.client.list_orders(**params)
             orders = getattr(response_obj, 'orders', [])
             return [order.to_dict() for order in orders] if orders else []
         except Exception as e:
             logger.error(f"Coinbase API error getting orders: {e}", exc_info=True)
             raise # Or return []
         
-    def get_order(self, order_id: str) -> Dict:
+    # Make async
+    async def get_order(self, order_id: str) -> Dict:
         """Get order details by ID"""
         # Verify SDK method name: Assuming get_order is correct
         try:
-            response_obj = self.client.get_order(order_id=order_id)
+            # Await underlying call
+            response_obj = await self.client.get_order(order_id=order_id)
             order = getattr(response_obj, 'order', None)
             return order.to_dict() if order else {}
         except Exception as e:

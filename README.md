@@ -6,44 +6,50 @@ A comprehensive framework for developing, backtesting, and deploying cryptocurre
 
 This project provides a structured environment for building automated trading strategies. It includes components for:
 
-*   **Exchange Integration:** Connecting to Coinbase via REST API (JWT Auth) and WebSocket for market data and order execution.
-*   **Data Management:** Fetching, processing, storing (SQLAlchemy), and retrieving historical and real-time OHLCV data.
-*   **Trading Strategies:** Implementing custom trading logic (examples: RSI Momentum, BB Reversion).
-*   **Signal Generation & Confirmation:** Detecting supply/demand zones and using technical indicators (RSI, MACD, Volume Profile) to validate signals.
-*   **Order Execution:** Placing market, limit, and potentially bracket orders with simulated (dry-run) and live execution capabilities.
-*   **Risk Management:** Calculating position sizes, stop-losses, and implementing risk controls (e.g., drawdown limits).
-*   **Backtesting:** Evaluating strategy performance against historical data.
-*   **API Interface:** Exposing core functionalities through a FastAPI web server.
+*   **Exchange Integration:** Connecting to Coinbase via REST API (JWT Auth using `.env`) and WebSocket for market data and order execution within the main `app/`.
+*   **Data Management:** Fetching (using `coinbase` SDK directly in backtest scripts), processing, caching (`data/cache/`), storing (SQLAlchemy - planned/optional), and retrieving historical OHLCV data.
+*   **Trading Strategies:** Implementing custom trading logic. Currently focused on an RSI strategy within the advanced backtesting script.
+*   **Signal Generation & Confirmation:** Detecting supply/demand zones and using technical indicators (RSI, MACD, Volume Profile) to validate signals (core app components).
+*   **Order Execution:** Placing market, limit, and potentially bracket orders with simulated (dry-run) and live execution capabilities (core app components).
+*   **Risk Management:** Calculating position sizes, stop-losses (including ATR-based stops in backtests), and implementing risk controls.
+*   **Backtesting:** Evaluating strategy performance using `vectorbtpro`, featuring Walk-Forward Optimization (WFO) in the primary backtesting script `scripts/backtest_rsi_vbt_pro.py`.
+*   **API Interface:** Exposing core functionalities through a FastAPI web server (`app/main.py`).
+*   **Development Workflow:** Utilizes a task-driven approach managed via the `task-master` CLI tool (see `.cursor/rules/dev_workflow.mdc`).
 
 ## Project Structure
 
-*   **`app/`**: Main application source code.
+*   **`app/`**: Main application source code (FastAPI server, core logic, basic strategies).
     *   `main.py`: FastAPI application entry point.
-    *   `core/`: Core logic (API clients, data handling, execution, strategies interface, backtesting, risk).
-    *   `models/`: Pydantic and dataclass definitions (Order, Position, Zone, etc.).
-    *   `routers/`: FastAPI endpoints (orders, market, account, websocket).
-    *   `strategies/`: Specific trading strategy implementations.
+    *   `core/`: Core application logic (API clients using `.env`, data handling, basic execution, strategies interface, basic backtesting, risk).
+    *   `models/`: Pydantic and dataclass definitions.
+    *   `routers/`: FastAPI endpoints.
+    *   `strategies/`: Specific trading strategy implementations for the core app.
     *   `database/`: SQLAlchemy models and database interaction setup (within `app/core/`).
 *   **`tests/`**: Unit and integration tests (using `pytest`).
-*   **`scripts/`**: Utility scripts (e.g., log analysis).
+*   **`scripts/`**: Standalone utility and analysis scripts. Includes the primary `vectorbtpro` backtesting script (`backtest_rsi_vbt_pro.py`).
+*   **`data/cache/`**: Cached historical data fetched from Coinbase (add to `.gitignore`).
 *   **`logs/`**: Runtime application logs (add to `.gitignore`).
-*   **`reports/`**: Generated reports and images (e.g., backtest results) (add to `.gitignore`).
+*   **`reports/`**: Generated reports and images, including backtest results and WFO plots (add to `.gitignore`).
+*   **`tasks/`**: Task definitions used by `task-master` for development tracking.
+*   **`keys/`**: Contains API credentials, like `cdp_api_key.json`, used directly by some scripts (e.g., backtesting) (**DO NOT COMMIT**).
 *   **`docs/`**: Project documentation (PRDs, notes).
-*   **`.env`**: Environment variables (API keys, JWT secrets, DB connection strings - **DO NOT COMMIT**).
+*   **`.env`**: Environment variables for the main `app/` (API keys, DB strings - **DO NOT COMMIT**).
+*   **`.gitignore`**: Specifies intentionally untracked files.
 *   **`requirements.txt`**: Python dependencies.
 *   **`setup.py`**: Project installation configuration.
 
 ## Key Components
 
-*   **Coinbase Clients (`app/core/coinbase.py`, `app/core/websocket_client.py`):** Handles authenticated REST and WebSocket communication.
-*   **DataManager (`app/core/data_manager.py`)**: Manages OHLCV data fetching and storage.
-*   **DataProcessor (`app/core/data_processor.py`)**: Normalizes and cleans OHLCV data.
-*   **ZoneDetector (`app/core/zone_detector.py`)**: Identifies supply and demand zones.
-*   **SignalManager (`app/core/signal_manager.py`)**: Confirms trading signals based on zones and indicators.
-*   **OrderExecutor / DryRunExecutor (`app/core/order_executor.py`, `app/core/dry_run_executor.py`)**: Executes real or simulated trades.
-*   **RiskManager (`app/core/risk_manager.py`)**: Provides risk calculation functions.
-*   **Backtester (`app/core/backtester.py`)**: Runs strategies against historical data.
-*   **LiveTrader (`app/core/live_trader.py`)**: Orchestrates live trading logic.
+*   **Coinbase Clients (`app/core/coinbase.py`, `app/core/websocket_client.py`):** Handles authenticated REST and WebSocket communication for the FastAPI app (using `.env`).
+*   **Coinbase REST Client (`coinbase.rest.RESTClient`):** Used directly in `scripts/backtest_rsi_vbt_pro.py` for fetching historical data (using `keys/cdp_api_key.json`).
+*   **DataManager (`app/core/data_manager.py`)**: Manages OHLCV data fetching and storage for the core app.
+*   **DataProcessor (`app/core/data_processor.py`)**: Normalizes and cleans OHLCV data (core app).
+*   **ZoneDetector (`app/core/zone_detector.py`)**: Identifies supply and demand zones (core app).
+*   **SignalManager (`app/core/signal_manager.py`)**: Confirms trading signals based on zones and indicators (core app).
+*   **OrderExecutor / DryRunExecutor (`app/core/order_executor.py`, `app/core/dry_run_executor.py`)**: Executes real or simulated trades (core app).
+*   **RiskManager (`app/core/risk_manager.py`)**: Provides risk calculation functions (core app).
+*   **Backtester (`scripts/backtest_rsi_vbt_pro.py`)**: Primary script for running advanced strategy backtests using `vectorbtpro`, including parameter optimization and Walk-Forward Optimization (WFO). Implements ATR-based stops.
+*   **LiveTrader (`app/core/live_trader.py`)**: Orchestrates live trading logic (core app).
 
 ## Installation
 
@@ -61,10 +67,11 @@ This project provides a structured environment for building automated trading st
     *   **macOS:** `brew install ta-lib`
     *   **Linux (Debian/Ubuntu):** `sudo apt-get update && sudo apt-get install -y ta-lib`
     *   **Windows:** Download binaries from [Unofficial Windows Binaries](https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib) and install the appropriate `.whl` file using pip.
-4.  **Install Python dependencies:**
+4.  **Install Python dependencies:** Note: `vectorbtpro` might require a separate installation/license beyond `requirements.txt`.
     ```bash
     pip install --upgrade pip
     pip install -r requirements.txt --pre # --pre needed for pandas-ta beta
+    # If using vectorbtpro, ensure it's installed according to its documentation
     ```
 5.  **Install in Editable Mode:** This makes the `app` package importable for tests and scripts.
     ```bash
@@ -73,42 +80,64 @@ This project provides a structured environment for building automated trading st
 
 ## Configuration
 
-1.  Copy the example environment file:
-    ```bash
-    cp .env.example .env
-    ```
-2.  **Edit `.env`** and add your specific credentials and settings:
-    *   **Coinbase API Keys:** Generate JWT-based API keys from Coinbase Advanced Trade.
-        *   `COINBASE_JWT_KEY_NAME`: Your full API key name (e.g., `organizations/.../apiKeys/...`).
-        *   `COINBASE_JWT_PRIVATE_KEY`: Your API private key (PEM format, including `-----BEGIN EC PRIVATE KEY-----` and `-----END EC PRIVATE KEY-----` lines, often needs newline characters represented as `\n` within the `.env` file if stored on a single line).
-    *   `COINBASE_API_URL`: Should typically be `https://api.coinbase.com/api/v3/brokerage`.
-    *   `COINBASE_WS_URL`: Should be `wss://advanced-trade-ws.coinbase.com`.
-    *   (Optional) Database connection string if using database features.
-    *   Other settings like trading parameters.
+1.  **Main Application (`app/`)**:
+    *   Copy the example environment file: `cp .env.example .env`
+    *   Edit `.env` and add your specific credentials and settings for the FastAPI application (used by `app/core/coinbase.py`, etc.).
+        *   **Coinbase API Keys (JWT):** Generate keys from Coinbase Advanced Trade.
+            *   `COINBASE_JWT_KEY_NAME`: Your full API key name.
+            *   `COINBASE_JWT_PRIVATE_KEY`: Your API private key (PEM format, handle newlines correctly).
+        *   `COINBASE_API_URL`: e.g., `https://api.coinbase.com/api/v3/brokerage`.
+        *   `COINBASE_WS_URL`: e.g., `wss://advanced-trade-ws.coinbase.com`.
+        *   (Optional) Database connection string.
+2.  **Backtesting Script (`scripts/backtest_rsi_vbt_pro.py`)**:
+    *   This script reads Coinbase API credentials directly from a JSON file.
+    *   Create a file named `keys/cdp_api_key.json` (ensure `keys/` directory exists).
+    *   The JSON structure should be:
+        ```json
+        {
+          "name": "organizations/YOUR_ORG_ID/apiKeys/YOUR_KEY_ID",
+          "privateKey": "-----BEGIN EC PRIVATE KEY-----\\nYOUR_PRIVATE_KEY_CONTENT\\n-----END EC PRIVATE KEY-----\\n",
+          "passphrase": "YOUR_PASSPHRASE_IF_ANY"
+        }
+        ```
+        *Replace placeholders with your actual Coinbase Advanced Trade API key details.*
 
-**IMPORTANT:** Ensure `.env` is listed in your `.gitignore` file and never commit it to version control.
+**IMPORTANT:** Ensure both `.env` and the `keys/` directory are listed in your `.gitignore` file and never commit sensitive credentials to version control.
 
 ## Usage
 
-*(This section might need expansion based on how the application/scripts are intended to be run)*
-
 **Running the FastAPI Server (Example):**
 ```bash
-# Make sure your .env file is configured
+# Make sure your .env file is configured for the app
 uvicorn app.main:app --reload
 ```
 
-**Running a Backtest (Example - Actual script may vary):**
+**Running the Advanced Backtest (Example):**
 ```bash
-# Assuming a backtest script exists
-python scripts/run_backtest.py --strategy rsi_momentum --symbol BTC-USD --timeframe 1h --start 2023-01-01 --end 2023-12-31
+# Make sure keys/cdp_api_key.json is configured
+python scripts/backtest_rsi_vbt_pro.py \\
+    --symbol BTC-USD \\
+    --start_date 2023-01-01 \\
+    --end_date 2023-12-31 \\
+    --granularity 1h \\
+    --wfo_splits 8 \\
+    --wfo_in_sample_pct 0.75 \\
+    --optimize_metric "Sharpe Ratio" \\
+    --sl_atr 2.0 \\
+    --tsl_atr 1.5
+# Output: WFO summary statistics printed to console.
+# WFO plot saved to reports/vbtpro_rsi_wfo_summary_BTC_USD.html (example filename)
 ```
 
-**Running the Live Trader (Example - Actual script/entry point may vary):**
+**Running the Live Trader (Example - Conceptual):**
 ```bash
-# Assuming a live trading script or main entry point
-python app/main.py --live --strategy bb_reversion --symbol ETH-USD
+# This part likely needs further development within the app/ structure
+# python app/main.py --live --strategy bb_reversion --symbol ETH-USD
 ```
+
+## Development Workflow
+
+This project utilizes a task-driven development workflow managed by the `task-master` CLI tool. Tasks are defined in the `tasks/` directory and managed using commands like `task-master list`, `task-master next`, `task-master expand`, and `task-master set-status`. Refer to the [dev_workflow.mdc](.cursor/rules/dev_workflow.mdc) rule for detailed usage and commands.
 
 ## Testing
 

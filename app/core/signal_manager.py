@@ -13,6 +13,10 @@ from app.core.risk_manager import (
     get_zone_confidence_tier, 
     # Add other functions if needed by SignalManager later
 )
+# DB Session and Logging
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.trade_log.crud import create_log_entry
+from app.core.trade_log.models import EventType, OrderStatus, TradeSide
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,7 @@ class SignalManager:
     
     async def confirm_zone_signal(
         self,
+        db: AsyncSession, 
         zone: Zone,
         prices: List[float],
         volumes: List[float],
@@ -114,6 +119,7 @@ class SignalManager:
         Confirm a trading signal based on zone analysis and multiple indicators.
         
         Args:
+            db: Database session
             zone: The supply/demand zone to analyze
             prices: List of closing prices
             volumes: List of volume data
@@ -186,6 +192,30 @@ class SignalManager:
             zone_strength >= 0.5 and     # Strong zone
             context_score >= 0.6         # Good market alignment
         )
+        
+        # --- Log Signal Event --- 
+        signal_event_type = EventType.ENTRY_SIGNAL if zone.zone_type == 'demand' else EventType.EXIT_SIGNAL
+        signal_side = TradeSide.BUY if zone.zone_type == 'demand' else TradeSide.SELL
+        log_notes = f"Signal confirmed: {is_confirmed}. Confidence: {confidence_score:.4f}. Factors: {confirmation_factors}"
+        
+        try:
+            await create_log_entry(
+                db=db,
+                event_type=signal_event_type,
+                symbol=zone.product_id, # Assuming product_id is on zone
+                status=OrderStatus.SIGNAL, # Indicate it's a signal event
+                side=signal_side,
+                price=prices[-1], # Log current price at time of signal
+                # quantity=None, # No quantity associated with signal itself
+                # order_id=None, # No order yet
+                strategy_name="ZoneBasedStrategy", # Or get dynamically if possible
+                notes=log_notes[:1000], # Limit notes length
+                event_timestamp=datetime.utcnow()
+            )
+            logger.debug(f"Logged {signal_event_type.value} for {zone.product_id}")
+        except Exception as log_err:
+            logger.error(f"Failed to log signal event: {log_err}", exc_info=True)
+        # --- End Log Signal Event --- 
         
         return SignalConfirmation(
             is_confirmed=is_confirmed,

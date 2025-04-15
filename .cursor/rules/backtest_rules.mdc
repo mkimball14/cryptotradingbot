@@ -1,5 +1,272 @@
----
-description: Best practices for financial backtesting code to ensure reliability and reproducibility
-globs: scripts/backtest_*.py, **/backtest_*.py
----
- 
+# Backtesting Best Practices
+
+- **Data Loading and Parsing**
+  - **DO** specify date format explicitly when reading CSV files with timestamps
+    ```python
+    # ✅ DO: Explicitly specify date format
+    df = pd.read_csv(file_path, index_col=0, parse_dates=True, date_format='ISO8601')
+    
+    # ❌ DON'T: Let pandas guess the date format
+    df = pd.read_csv(file_path, index_col=0, parse_dates=True)  # May cause warnings
+    ```
+  
+  - **DO** handle string representations of JSON/dict data explicitly
+    ```python
+    # ✅ DO: Safely parse string representations of dictionaries
+    if 'data' in df.columns and isinstance(df['data'].iloc[0], str):
+        df['parsed_data'] = df['data'].apply(lambda x: eval(x) if isinstance(x, str) else x)
+        
+        # Extract columns from parsed dictionaries
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df['parsed_data'].apply(lambda x: float(x.get(col, 0)) if x else None)
+    
+    # ❌ DON'T: Assume data is already in the correct format
+    df['close'] = df['data'].apply(lambda x: x['close'])  # Will fail if x is a string
+    ```
+
+- **File and Directory Management**
+  - **DO** ensure output directories exist before saving
+    ```python
+    # ✅ DO: Create directories if they don't exist
+    reports_dir = 'reports'
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    # ❌ DON'T: Assume directories exist
+    plt.savefig('reports/my_plot.png')  # Will fail if directory doesn't exist
+    ```
+
+- **Error Handling and Logging**
+  - **DO** implement robust error handling for data fetching and processing
+    ```python
+    # ✅ DO: Use try-except with specific error handling
+    try:
+        data = fetch_data_from_api(symbol, start_date, end_date)
+    except ConnectionError:
+        logger.error("API connection failed. Trying backup source.")
+        data = fetch_from_backup_source(symbol, start_date, end_date)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        # Fall back to cached data or raise informative error
+    ```
+
+- **Vectorized Backtesting (VectorBT)**
+  - **DO** verify attribute existence before accessing
+    ```python
+    # ✅ DO: Check attribute existence
+    best_params = {}
+    if hasattr(portfolio, 'param_names') and portfolio.param_names:
+        for i, param_name in enumerate(portfolio.param_names):
+            best_params[param_name] = portfolio.optimal_idx[i]
+    else:
+        # Alternative approach when param_names is not available
+        best_params = {
+            'window': param_combinations[0][portfolio.optimal_idx],
+            'lower_threshold': param_combinations[1][portfolio.optimal_idx],
+            'upper_threshold': param_combinations[2][portfolio.optimal_idx]
+        }
+    ```
+
+- **Advanced VectorBT Pro Features**
+  - **DO** use interactive dashboards for comprehensive reporting
+    ```python
+    # ✅ DO: Create interactive dashboards for better analysis
+    from vectorbtpro.widgets.layouts import Dashboard
+    
+    # Initialize dashboard
+    dashboard = Dashboard(
+        title="RSI Strategy Performance Dashboard",
+        template="dashboard"
+    )
+    
+    # Add portfolio section
+    dashboard.add_section(
+        title="Portfolio Performance", 
+        description="Analysis of portfolio returns and drawdowns"
+    )
+    
+    # Add portfolio performance plots
+    dashboard.add_widget(
+        pf.plot_cum_returns(), 
+        row=0, col=0, title="Cumulative Returns"
+    )
+    dashboard.add_widget(
+        pf.plot_drawdowns(), 
+        row=0, col=1, title="Drawdowns"
+    )
+    
+    # Add trades section with detailed metrics
+    dashboard.add_section(
+        title="Trade Analysis", 
+        description="Detailed analysis of individual trades"
+    )
+    dashboard.add_widget(
+        pf.trades.plot(), 
+        row=1, col=0, title="Trades"
+    )
+    dashboard.add_widget(
+        pf.trades.stats(), 
+        row=1, col=1, title="Trade Statistics"
+    )
+    
+    # Save dashboard to HTML file
+    dashboard.save(os.path.join(reports_dir, f"{strategy_name}_dashboard.html"))
+    
+    # ❌ DON'T: Create isolated plots without context or interactivity
+    plt.figure()
+    pf.plot_cum_returns()
+    plt.savefig("returns.png")  # Lacks comprehensive analysis
+    ```
+  
+  - **DO** implement efficient caching for VectorBT Pro objects
+    ```python
+    # ✅ DO: Use efficient caching for vectorbtpro objects
+    import vectorbtpro as vbt
+    import os
+    from hashlib import md5
+    
+    def cached_indicator(func):
+        """Decorator for caching indicator results."""
+        def wrapper(data, *args, **kwargs):
+            # Create a cache key based on function arguments and data
+            cache_key = md5(
+                f"{func.__name__}_{str(args)}_{str(kwargs)}_{data.index[0]}_{data.index[-1]}".encode()
+            ).hexdigest()
+            
+            cache_dir = os.path.join('data', 'cache', 'vbt_objects')
+            os.makedirs(cache_dir, exist_ok=True)
+            cache_file = os.path.join(cache_dir, f"{cache_key}.pkl")
+            
+            # Try to load from cache
+            if os.path.exists(cache_file):
+                try:
+                    return vbt.load(cache_file)
+                except Exception as e:
+                    logging.warning(f"Cache load failed: {e}")
+            
+            # Calculate and cache the result
+            result = func(data, *args, **kwargs)
+            try:
+                vbt.save(result, cache_file)
+            except Exception as e:
+                logging.warning(f"Cache save failed: {e}")
+                
+            return result
+        return wrapper
+    
+    # Apply the caching decorator to computationally intensive functions
+    @cached_indicator
+    def calculate_rsi(data, window=14):
+        return vbt.RSI.run(data, window=window)
+    
+    # Usage example
+    rsi = calculate_rsi(price_data, window=14)
+    
+    # ❌ DON'T: Recalculate indicators repeatedly
+    rsi1 = vbt.RSI.run(price_data, window=14)  # First calculation
+    rsi2 = vbt.RSI.run(price_data, window=14)  # Redundant recalculation
+    ```
+  
+  - **DO** utilize parallel computing for faster optimization
+    ```python
+    # ✅ DO: Leverage vectorbtpro's parallel computing for optimization
+    import vectorbtpro as vbt
+    
+    # Configure parallel processing
+    vbt.setup_logging(verbosity=1)
+    vbt.settings.set_option('threading', True)  # Enable threading
+    vbt.settings.set_option('numba.parallel', True)  # Enable Numba parallel
+    
+    # Define a chunked function for parallel execution
+    @vbt.chunked(chunk_len=1000)
+    def optimize_strategy(price, window_range, lower_threshold_range, upper_threshold_range):
+        # Create parameter grid
+        param_product = vbt.combine_params(
+            dict(
+                window=vbt.Param(window_range),
+                lower_threshold=vbt.Param(lower_threshold_range),
+                upper_threshold=vbt.Param(upper_threshold_range)
+            )
+        )
+        
+        # Run RSI in parallel across parameter combinations
+        rsi = vbt.RSI.run(price, window=param_product['window'])
+        
+        # Generate entry/exit signals
+        entries = rsi.rsi_below(param_product['lower_threshold'])
+        exits = rsi.rsi_above(param_product['upper_threshold'])
+        
+        # Run portfolio simulation in parallel
+        pf = vbt.Portfolio.from_signals(price, entries, exits)
+        
+        return pf
+    
+    # Execute optimization
+    windows = range(7, 22, 7)  # 7, 14, 21
+    lower_thresholds = range(20, 41, 10)  # 20, 30, 40
+    upper_thresholds = range(60, 81, 10)  # 60, 70, 80
+    
+    optimized_pf = optimize_strategy(price_data, windows, lower_thresholds, upper_thresholds)
+    
+    # ❌ DON'T: Use inefficient nested loops for optimization
+    results = []
+    for window in windows:
+        for lower in lower_thresholds:
+            for upper in upper_thresholds:
+                rsi = vbt.RSI.run(price_data, window=window)
+                entries = rsi.rsi_below(lower)
+                exits = rsi.rsi_above(upper)
+                pf = vbt.Portfolio.from_signals(price_data, entries, exits)
+                results.append((window, lower, upper, pf.sharpe_ratio()))
+    ```
+  
+  - **DO** implement crypto-specific indicators and analysis
+    ```python
+    # ✅ DO: Create custom indicators for crypto markets
+    import vectorbtpro as vbt
+    import numpy as np
+    
+    # Example: Custom MVRV Ratio (Market Value to Realized Value)
+    class MVRVIndicator(vbt.indicators.base.Indicator):
+        def run(cls, close, window=30):
+            # Calculate realized value (moving average as proxy)
+            realized_value = close.vbt.rolling_mean(window=window)
+            
+            # Calculate MVRV ratio
+            mvrv_ratio = close / realized_value
+            
+            return cls(
+                close=close,
+                realized_value=realized_value,
+                mvrv_ratio=mvrv_ratio,
+                window=window,
+                index=close.index,
+                **kwargs
+            )
+        
+        # Generate signals based on MVRV ratio
+        def overvalued_signal(self, threshold=2.0):
+            return self.mvrv_ratio > threshold
+        
+        def undervalued_signal(self, threshold=1.0):
+            return self.mvrv_ratio < threshold
+    
+    # Example: Funding Rate Indicator for perpetual futures
+    def analyze_funding_rates(funding_rates, price, threshold=0.01):
+        # Calculate cumulative funding rate
+        cum_funding = funding_rates.cumsum()
+        
+        # Generate signals based on extreme funding rates
+        long_signal = funding_rates < -threshold  # Negative funding = good for longs
+        short_signal = funding_rates > threshold  # Positive funding = good for shorts
+        
+        # Combine with price action
+        entries = long_signal & (price.pct_change() > 0)
+        exits = short_signal | (price.pct_change() < -0.05)  # Exit on strong negative move
+        
+        return entries, exits
+    
+    # ❌ DON'T: Use generic indicators without adapting to crypto market dynamics
+    rsi = vbt.RSI.run(price)  # Basic RSI without considering crypto-specific factors
+    entries = rsi.rsi_below(30)  # Standard thresholds may not be optimal for crypto
+    ```
+  

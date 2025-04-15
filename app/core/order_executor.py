@@ -8,17 +8,24 @@ import statistics
 import uuid
 import time
 from enum import Enum
+# SQLAlchemy session for logging
+from sqlalchemy.ext.asyncio import AsyncSession 
 
 from app.core.coinbase import (
     CoinbaseClient,
     OrderSide,
-    OrderStatus,
-    CoinbaseError
+    # OrderStatus, # Now imported from trade_log.models
 )
+# # Import CoinbaseError directly from the library - Removed
+# from coinbase.errors import CoinbaseError 
+
 from app.models.order import TimeInForce, OrderType, OrderBase
 from app.core.signal_manager import SignalManager, SignalConfirmation
 from app.models.zone import Zone
 from app.models.position import Position
+# Import logging components
+from app.core.trade_log.crud import create_log_entry
+from app.core.trade_log.models import EventType, OrderStatus, TradeSide
 
 logger = logging.getLogger(__name__)
 
@@ -141,19 +148,23 @@ class OrderExecutor:
         
     async def execute_market_order(
         self,
+        db: AsyncSession, # Add database session parameter
         product_id: str,
         side: Union[str, OrderSide],
         size: float,
-        client_order_id: Optional[str] = None
+        client_order_id: Optional[str] = None,
+        strategy_name: Optional[str] = None # Add strategy name if available
     ) -> OrderExecutionResult:
         """
         Execute a market order.
         
         Args:
+            db: SQLAlchemy async session
             product_id: Trading pair ID (e.g., BTC-USD)
             side: Order side (BUY/SELL)
             size: Order size in base currency
             client_order_id: Client-specified order ID
+            strategy_name: Name of the strategy initiating the order
             
         Returns:
             OrderExecutionResult with execution details
@@ -161,26 +172,73 @@ class OrderExecutor:
         Raises:
             OrderExecutionError: If validation fails
         """
+        order = None # Initialize order to None
         try:
-            # Convert side to string if it's not already
-            side_str = side if isinstance(side, str) else str(side)
-            if side_str not in [OrderSide.BUY, OrderSide.SELL]:
-                raise OrderExecutionError(f"Invalid order side: {side_str}")
+            # Convert side to enum and string
+            side_enum = side if isinstance(side, TradeSide) else TradeSide(side.upper())
+            # Validate using the imported TradeSide enum
+            if side_enum not in [TradeSide.BUY, TradeSide.SELL]:
+                raise OrderExecutionError(f"Invalid order side provided: {side}")
+            side_str = side_enum.value # Use the value for API call if needed by client
             
             start_time = datetime.utcnow()
             
             if size <= 0:
                 raise OrderExecutionError(f"Invalid order size: {size}")
                 
+            # Generate a client_order_id if none provided
+            if client_order_id is None:
+                client_order_id = f"mkt_{product_id.replace('-','')}_{uuid.uuid4().hex[:8]}"
+            
             # Place market order
             order = await self.client.create_order(
                 product_id=product_id,
-                side=side_str,
+                # Pass the string value expected by the client wrapper
+                side=side_str, 
                 order_type=OrderType.MARKET.value,
                 size=size,
                 client_order_id=client_order_id,
-                time_in_force=self.default_time_in_force
+                # time_in_force=self.default_time_in_force # Market orders don't usually use TIF
             )
+            
+            # --- Check if order creation actually succeeded --- 
+            if not order or not order.get("order_id"):
+                # Log the failure
+                logger.error(f"Order creation via CoinbaseClient failed or returned invalid data for {product_id}. Response: {order}")
+                await create_log_entry(
+                    db=db,
+                    event_type=EventType.ERROR,
+                    symbol=product_id,
+                    status=OrderStatus.REJECTED, # Assume rejection if no valid order ID
+                    side=side_enum,
+                    quantity=size,
+                    strategy_name=strategy_name,
+                    client_order_id=client_order_id,
+                    notes=f"Order creation failed. API Response: {str(order)[:200]}" # Log part of the response
+                )
+                return OrderExecutionResult(
+                    success=False,
+                    error="Order creation failed or returned invalid data.",
+                    execution_time=start_time,
+                    metadata={"api_response": order}
+                )
+                
+            # --- Log Successful Order Submission --- 
+            log_event = EventType.ENTRY_ORDER if side_enum == TradeSide.BUY else EventType.EXIT_ORDER
+            await create_log_entry(
+                db=db,
+                event_type=log_event,
+                symbol=product_id,
+                status=OrderStatus.ORDER_SENT, # Log that the order was sent
+                order_id=order.order_id, # Use order_id from the response
+                client_order_id=client_order_id,
+                side=side_enum,
+                quantity=size,
+                strategy_name=strategy_name,
+                event_timestamp=start_time, # Time when we attempted to send
+                notes=f"Market order sent."
+            )
+            # --- End Log --- 
             
             return OrderExecutionResult(
                 success=True,
@@ -192,44 +250,67 @@ class OrderExecutor:
                 }
             )
             
-        except OrderExecutionError:
+        except OrderExecutionError as e:
+            logger.error(f"Validation error executing market order: {e}")
+            # Log error if validation fails before API call
+            await create_log_entry(
+                db=db,
+                event_type=EventType.ERROR,
+                symbol=product_id,
+                status=OrderStatus.ERROR,
+                side=side_enum if 'side_enum' in locals() and isinstance(side_enum, TradeSide) else None,
+                quantity=size,
+                strategy_name=strategy_name,
+                client_order_id=client_order_id,
+                notes=f"Order validation error: {e}"
+            )
             raise
-        except CoinbaseError as e:
-            logger.error(f"Coinbase API error executing market order: {str(e)}")
-            return OrderExecutionResult(
-                success=False,
-                error=f"Coinbase API error: {str(e)}",
-                execution_time=datetime.utcnow(),
-                metadata={"error_type": "api_error"}
-            )
         except Exception as e:
-            logger.error(f"Error executing market order: {str(e)}")
-            return OrderExecutionResult(
-                success=False,
-                error=f"Order execution error: {str(e)}",
-                execution_time=datetime.utcnow(),
-                metadata={"error_type": "execution_error"}
+            # Log simple message first
+            logger.error(f"Caught exception during market order execution for {product_id}")
+            # Log exception details separately
+            logger.error(f"Exception Type: {type(e).__name__}, Representation: {repr(e)}", exc_info=True) 
+            
+            # Log error if API call fails
+            await create_log_entry(
+                db=db,
+                event_type=EventType.ERROR,
+                symbol=product_id,
+                status=OrderStatus.REJECTED if getattr(e, 'status_code', 500) != 500 else OrderStatus.ERROR,
+                side=side_enum if 'side_enum' in locals() and isinstance(side_enum, TradeSide) else None,
+                quantity=size,
+                strategy_name=strategy_name,
+                client_order_id=client_order_id,
+                # Safely access order_id only if order object exists and has the attribute
+                order_id=getattr(order, 'order_id', None) if order else None,
+                notes=f"API call failed: {type(e).__name__}"
             )
+            # Re-raise the exception to see the original traceback
+            raise 
             
     async def execute_limit_order(
         self,
+        db: AsyncSession, # Add database session parameter
         product_id: str,
         side: Union[str, OrderSide],
         size: float,
         price: float,
         client_order_id: Optional[str] = None,
-        time_in_force: Optional[str] = None
+        time_in_force: Optional[str] = None,
+        strategy_name: Optional[str] = None # Add strategy name if available
     ) -> OrderExecutionResult:
         """
         Execute a limit order.
         
         Args:
+            db: SQLAlchemy async session
             product_id: Trading pair ID (e.g., BTC-USD)
             side: Order side (BUY/SELL)
             size: Order size in base currency
             price: Limit price for the order
             client_order_id: Client-specified order ID
             time_in_force: Time in force setting for the order
+            strategy_name: Name of the strategy initiating the order
             
         Returns:
             OrderExecutionResult with execution details
@@ -237,11 +318,14 @@ class OrderExecutor:
         Raises:
             OrderExecutionError: If validation fails
         """
+        order = None # Initialize order to None
         try:
-            # Convert side to string if it's not already
-            side_str = side if isinstance(side, str) else str(side)
-            if side_str not in [OrderSide.BUY, OrderSide.SELL]:
-                raise OrderExecutionError(f"Invalid order side: {side_str}")
+            # Convert side to enum and string
+            side_enum = side if isinstance(side, TradeSide) else TradeSide(side.upper())
+            # Validate using the imported TradeSide enum
+            if side_enum not in [TradeSide.BUY, TradeSide.SELL]:
+                 raise OrderExecutionError(f"Invalid order side provided: {side}")
+            side_str = side_enum.value # Use the value for API call if needed by client
             
             start_time = datetime.utcnow()
             
@@ -250,16 +334,62 @@ class OrderExecutor:
             if price <= 0:
                 raise OrderExecutionError(f"Invalid price: {price}")
                 
+            # Generate a client_order_id if none provided
+            if client_order_id is None:
+                client_order_id = f"lim_{product_id.replace('-','')}_{uuid.uuid4().hex[:8]}"
+                
             # Place limit order
             order = await self.client.create_order(
                 product_id=product_id,
-                side=side_str,
+                # Pass the string value expected by the client wrapper
+                side=side_str, 
                 order_type=OrderType.LIMIT.value,
                 size=size,
                 price=price,
                 client_order_id=client_order_id,
                 time_in_force=time_in_force or self.default_time_in_force
             )
+            
+            # --- Check if order creation actually succeeded --- 
+            if not order or not order.get("order_id"):
+                # Log the failure
+                logger.error(f"Limit order creation via CoinbaseClient failed or returned invalid data for {product_id}. Response: {order}")
+                await create_log_entry(
+                    db=db,
+                    event_type=EventType.ERROR,
+                    symbol=product_id,
+                    status=OrderStatus.REJECTED, # Assume rejection if no valid order ID
+                    side=side_enum,
+                    quantity=size,
+                    price=price,
+                    strategy_name=strategy_name,
+                    client_order_id=client_order_id,
+                    notes=f"Limit order creation failed. API Response: {str(order)[:200]}"
+                )
+                return OrderExecutionResult(
+                    success=False,
+                    error="Limit order creation failed or returned invalid data.",
+                    execution_time=start_time,
+                    metadata={"api_response": order}
+                )
+                
+            # --- Log Successful Order Submission --- 
+            log_event = EventType.ENTRY_ORDER if side_enum == TradeSide.BUY else EventType.EXIT_ORDER
+            await create_log_entry(
+                db=db,
+                event_type=log_event,
+                symbol=product_id,
+                status=OrderStatus.ORDER_SENT, # Log that the order was sent
+                order_id=order.order_id, # Use order_id from the response
+                client_order_id=client_order_id,
+                side=side_enum,
+                quantity=size,
+                price=price, # Log limit price
+                strategy_name=strategy_name,
+                event_timestamp=start_time, # Time when we attempted to send
+                notes=f"Limit order sent (TIF: {time_in_force or self.default_time_in_force})."
+            )
+            # --- End Log --- 
             
             return OrderExecutionResult(
                 success=True,
@@ -271,23 +401,45 @@ class OrderExecutor:
                 }
             )
             
-        except OrderExecutionError:
+        except OrderExecutionError as e:
+            logger.error(f"Validation error executing limit order: {e}")
+            # Log error if validation fails before API call
+            await create_log_entry(
+                db=db,
+                event_type=EventType.ERROR,
+                symbol=product_id,
+                status=OrderStatus.ERROR,
+                side=side_enum if 'side_enum' in locals() and isinstance(side_enum, TradeSide) else None,
+                quantity=size,
+                price=price,
+                strategy_name=strategy_name,
+                client_order_id=client_order_id,
+                notes=f"Order validation error: {e}"
+            )
             raise
-        except CoinbaseError as e:
+        except Exception as e:
+            # Assume exceptions here are likely API related for now.
             logger.error(f"Coinbase API error executing limit order: {str(e)}")
+            # Log error if API call fails
+            await create_log_entry(
+                db=db,
+                event_type=EventType.ERROR,
+                symbol=product_id,
+                status=OrderStatus.REJECTED if getattr(e, 'status_code', 500) != 500 else OrderStatus.ERROR,
+                side=side_enum if 'side_enum' in locals() and isinstance(side_enum, TradeSide) else None,
+                quantity=size,
+                price=price,
+                strategy_name=strategy_name,
+                client_order_id=client_order_id,
+                # Safely access order_id only if order object exists and has the attribute
+                order_id=getattr(order, 'order_id', None) if order else None,
+                notes=f"API call failed: {type(e).__name__}" 
+            )
             return OrderExecutionResult(
                 success=False,
                 error=f"Coinbase API error: {str(e)}",
                 execution_time=datetime.utcnow(),
                 metadata={"error_type": "api_error"}
-            )
-        except Exception as e:
-            logger.error(f"Error executing limit order: {str(e)}")
-            return OrderExecutionResult(
-                success=False,
-                error=f"Order execution error: {str(e)}",
-                execution_time=datetime.utcnow(),
-                metadata={"error_type": "execution_error"}
             )
             
     async def execute_bracket_order(
@@ -531,18 +683,6 @@ class OrderExecutor:
                 }
             )
 
-        except CoinbaseError as e:
-            logger.error(f"Coinbase API error executing bracket order: {str(e)}")
-            return BracketOrderResult(
-                success=False,
-                error=f"Coinbase API error: {str(e)}",
-                execution_time=datetime.utcnow(),
-                metadata={
-                    "error_type": "api_error",
-                    "entry_type": entry_type.value if isinstance(entry_type, OrderType) else str(entry_type),
-                    "execution_latency": (datetime.utcnow() - start_time).total_seconds()
-                }
-            )
         except Exception as e:
             logger.error(f"Error executing bracket order: {str(e)}")
             return BracketOrderResult(
@@ -675,14 +815,6 @@ class OrderExecutor:
                 }
             )
             
-        except CoinbaseError as e:
-            logger.error(f"Coinbase API error cancelling order: {str(e)}")
-            return OrderExecutionResult(
-                success=False,
-                error=f"Coinbase API error: {str(e)}",
-                execution_time=datetime.now(),
-                metadata={"error_type": "api_error"}
-            )
         except Exception as e:
             logger.error(f"Error cancelling order: {str(e)}")
             return OrderExecutionResult(
@@ -708,7 +840,7 @@ class OrderExecutor:
             # TODO: Update internal cache self._order_states here if needed
             # TODO: Potentially parse order_data dict into a consistent Pydantic model before returning
             return order_data # Return raw dict from client
-        except CoinbaseError as e:
+        except Exception as e:
             logger.error(f"Failed to get status for order {order_id} from API: {e}")
             if e.status_code == 404:
                 return None # Order not found
@@ -738,7 +870,7 @@ class OrderExecutor:
             orders = await self.client.get_orders(product_id=product_id, status=open_statuses)
             # TODO: Potentially parse list of dicts into consistent Pydantic models
             return orders # Return raw list of dicts
-        except CoinbaseError as e:
+        except Exception as e:
             logger.error(f"Failed to get open orders from API: {e}")
             raise OrderExecutionError(f"API error fetching open orders: {e}") from e
         except Exception as e:
@@ -747,6 +879,7 @@ class OrderExecutor:
 
     async def validate_signal(
         self,
+        db: AsyncSession, 
         product_id: str,
         zone: Zone,
         side: Union[str, OrderSide],
@@ -757,6 +890,7 @@ class OrderExecutor:
         Validate a trading signal before executing an order.
         
         Args:
+            db: Database session
             product_id: Trading pair ID (e.g., BTC-USD)
             zone: Supply/Demand zone triggering the signal
             side: Intended order side (BUY/SELL)
@@ -779,6 +913,7 @@ class OrderExecutor:
                 
             # Get signal confirmation
             confirmation = await self.signal_manager.confirm_zone_signal(
+                db=db, 
                 zone=zone,
                 ohlcv_data=ohlcv_data,
                 side=side
@@ -800,6 +935,7 @@ class OrderExecutor:
 
     async def execute_zone_order(
         self,
+        db: AsyncSession, 
         zone: 'Zone',
         size: float,
         ohlcv_data: pd.DataFrame,
@@ -816,6 +952,7 @@ class OrderExecutor:
         3. Places a bracket order with the calculated parameters
         
         Args:
+            db: Database session
             zone: The supply/demand zone to trade
             size: Order size in base currency
             ohlcv_data: OHLCV data for signal confirmation
@@ -832,7 +969,8 @@ class OrderExecutor:
         try:
             # Confirm signal if required
             if not skip_signal_confirmation:
-                confirmation = await self.validate_signal(zone.product_id, zone, zone.zone_type, ohlcv_data)
+                # Pass db session down
+                confirmation = await self.validate_signal(db=db, product_id=zone.product_id, zone=zone, side=zone.zone_type, ohlcv_data=ohlcv_data)
                 if confirmation and not confirmation.is_confirmed:
                     return BracketOrderResult(
                         success=False,
@@ -1344,7 +1482,7 @@ class OrderExecutor:
                 metadata={"modification": modification}
             )
             
-        except (OrderExecutionError, CoinbaseError) as e:
+        except (OrderExecutionError, Exception) as e:
             logger.error(f"Error modifying order {order_id}: {str(e)}")
             self._performance_metrics["modification_success_rates"].append(0.0)
             return OrderExecutionResult(

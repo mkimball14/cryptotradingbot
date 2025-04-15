@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from typing import List, Optional
-import datetime
+from datetime import datetime
 
-from app.core.coinbase import CoinbaseClient, CoinbaseError
+from app.core.coinbase import CoinbaseClient
 from app.core.deps import get_coinbase_client
 from app.models.responses import (
     ProductsResponse, ProductDetailResponse, CandlesResponse,
@@ -35,11 +35,6 @@ async def get_products(
     try:
         products = await client.get_products()
         return {"products": products}
-    except CoinbaseError as e:
-        raise HTTPException(
-            status_code=e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -71,8 +66,8 @@ async def get_product(
     try:
         product = await client.get_product(product_id)
         return {"product": product}
-    except CoinbaseError as e:
-        status_code = e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+    except Exception as e:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         if status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -80,11 +75,6 @@ async def get_product(
             )
         raise HTTPException(
             status_code=status_code,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": f"An unexpected error occurred: {str(e)}"}
         )
 
@@ -296,8 +286,6 @@ async def get_product_candles(
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except CoinbaseError as e:
-        raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
@@ -327,8 +315,8 @@ async def get_trades(
     try:
         trades = await client.get_market_trades(product_id=product_id, limit=limit)
         return {"trades": trades}
-    except CoinbaseError as e:
-        status_code = e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+    except Exception as e:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         if status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -336,11 +324,6 @@ async def get_trades(
             )
         raise HTTPException(
             status_code=status_code,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": f"An unexpected error occurred: {str(e)}"}
         )
 
@@ -372,8 +355,8 @@ async def get_order_book(
     try:
         book = await client.get_order_book(product_id=product_id, level=level)
         return book
-    except CoinbaseError as e:
-        status_code = e.status_code or status.HTTP_500_INTERNAL_SERVER_ERROR
+    except Exception as e:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         if status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -381,10 +364,5 @@ async def get_order_book(
             )
         raise HTTPException(
             status_code=status_code,
-            detail={"error": str(e), "code": e.status_code, "details": e.response}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": f"An unexpected error occurred: {str(e)}"}
         ) 
