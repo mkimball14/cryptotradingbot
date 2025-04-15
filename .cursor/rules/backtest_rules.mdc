@@ -1,0 +1,5 @@
+---
+description: Best practices for financial backtesting code to ensure reliability and reproducibility
+globs: scripts/backtest_*.py, **/backtest_*.py
+---
+ 

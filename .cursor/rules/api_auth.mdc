@@ -1,6 +1,149 @@
 ---
-description: 
-globs: 
-alwaysApply: undefined
+description: Guidelines for implementing API authentication and key handling across different services
+globs: ["**/core/*.py", "**/services/*.py", "**/auth/*.py"]
+alwaysApply: true
 ---
- 
+
+# API Authentication Best Practices
+
+- **API Key Format Verification**
+  - **DO** verify the expected format of API keys/secrets before attempting to use them
+  - **DO** document the expected format in both code comments and user documentation
+  - **DON'T** assume all API secrets are in the same format (e.g., base64, PEM, JWT)
+  
+  ```python
+  # ✅ DO: Check and document key format
+  def verify_api_secret(secret: str) -> bool:
+      """Verify API secret format.
+      Expected format:
+      - For PEM keys: Starts with '-----BEGIN EC PRIVATE KEY-----'
+      - For base64: Standard base64 string
+      - For JWT: JWT token format
+      """
+      if secret.startswith('-----BEGIN'):
+          return True  # PEM format
+      try:
+          # Try base64 decode
+          base64.b64decode(secret)
+          return True
+      except:
+          return False
+
+  # ❌ DON'T: Assume format without checking
+  def use_api_secret(secret: str):
+      key = load_pem_private_key(secret)  # Will fail if wrong format
+  ```
+
+- **Service-Specific Authentication**
+  - **DO** maintain a mapping of services to their authentication requirements
+  - **DO** document the specific requirements for each service
+  - **DON'T** reuse authentication logic across different services without verification
+
+  ```python
+  # ✅ DO: Define service-specific auth requirements
+  AUTH_REQUIREMENTS = {
+      'coinbase': {
+          'key_format': 'PEM',
+          'algorithm': 'ES256',
+          'requires_passphrase': False
+      },
+      'binance': {
+          'key_format': 'base64',
+          'algorithm': 'HS256',
+          'requires_passphrase': True
+      }
+  }
+
+  # ❌ DON'T: Use generic auth without service context
+  def generate_signature(key, message):  # Too generic!
+      return hmac.new(key, message, 'sha256').hexdigest()
+  ```
+
+- **JWT Token Generation**
+  - **DO** verify the required algorithm for each service (HMAC vs ECDSA)
+  - **DO** include all required claims as specified by the service
+  - **DON'T** assume JWT algorithms are interchangeable
+
+  ```python
+  # ✅ DO: Use service-specific JWT configuration
+  def generate_jwt(service: str, key: str, **claims):
+      config = AUTH_REQUIREMENTS[service]
+      if config['key_format'] == 'PEM':
+          key = load_pem_private_key(key)
+      return jwt.encode(
+          claims,
+          key,
+          algorithm=config['algorithm']
+      )
+
+  # ❌ DON'T: Use hardcoded JWT settings
+  def generate_token(key):  # Too inflexible!
+      return jwt.encode(payload, key, algorithm='HS256')
+  ```
+
+- **Error Handling and Logging**
+  - **DO** provide detailed error messages for authentication failures
+  - **DO** log attempted key formats and authentication steps
+  - **DON'T** expose sensitive key material in logs
+
+  ```python
+  # ✅ DO: Detailed error handling with safe logging
+  try:
+      key = load_pem_private_key(secret)
+  except Exception as e:
+      logger.error(
+          f"Failed to load key: {str(e)}. "
+          f"Expected format: PEM, "
+          f"Received format: {'PEM' if secret.startswith('-----BEGIN') else 'unknown'}"
+      )
+      raise ValueError("Invalid key format")
+
+  # ❌ DON'T: Log sensitive data
+  logger.error(f"Auth failed with key: {secret}")  # Never log full keys!
+  ```
+
+- **Testing Authentication**
+  - **DO** create test fixtures with proper key formats
+  - **DO** test authentication failure cases
+  - **DON'T** use production keys in tests
+
+  ```python
+  # ✅ DO: Use proper test fixtures
+  TEST_KEYS = {
+      'coinbase': {
+          'valid_pem': "-----BEGIN EC PRIVATE KEY-----\n...",
+          'invalid_format': "not-a-pem-key",
+      }
+  }
+
+  # ❌ DON'T: Use hardcoded real keys
+  api_key = "actual-production-key"  # Never in test code!
+  ```
+
+- **Key Management**
+  - **DO** validate keys when they're first loaded/set
+  - **DO** provide clear error messages about expected formats
+  - **DON'T** store keys in plaintext in code or logs
+
+  ```python
+  # ✅ DO: Validate on key setup
+  class APIConfig:
+      def __init__(self, service: str, key: str, secret: str):
+          if not self._validate_key_format(service, secret):
+              raise ValueError(
+                  f"Invalid {service} API secret format. "
+                  f"Expected: {AUTH_REQUIREMENTS[service]['key_format']}"
+              )
+          self.secret = secret
+
+  # ❌ DON'T: Store keys in code
+  DEFAULT_KEY = "MIIEpAIBAAK..."  # Never hardcode keys!
+  ```
+
+- **Documentation Requirements**
+  - **DO** document expected key formats in API client initialization
+  - **DO** provide examples of valid key formats (with fake keys)
+  - **DO** explain service-specific authentication requirements
+  - **DON'T** use real keys in documentation examples
+
+Follow these guidelines to ensure robust API authentication handling and prevent common authentication issues across different services. 

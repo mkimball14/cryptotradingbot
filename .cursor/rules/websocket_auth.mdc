@@ -1,6 +1,134 @@
 ---
-description: 
-globs: 
-alwaysApply: undefined
+description: Guidelines for implementing WebSocket and API authentication in the application
+globs: app/core/websocket_client.py, app/core/config.py, app/routers/websocket.py
+alwaysApply: true
 ---
- 
+
+# WebSocket and API Authentication Guidelines
+
+- **Environment Variables**
+  - ✅ DO: Keep environment variables clean and properly formatted
+    ```env
+    COINBASE_API_KEY=your_key_here
+    COINBASE_API_SECRET=your_secret_here
+    COINBASE_API_PASSPHRASE=your_passphrase_here
+    ```
+  - ❌ DON'T: Include quotes or trailing spaces in environment variables
+    ```env
+    COINBASE_API_KEY="your_key_here"  # Don't use quotes
+    COINBASE_API_SECRET="your_secret_here"  # Don't use quotes
+    ```
+
+- **Settings Configuration**
+  - ✅ DO: Use proper Pydantic settings configuration
+    ```python
+    from pydantic_settings import BaseSettings
+    from pydantic import ConfigDict
+    
+    class Settings(BaseSettings):
+        model_config = ConfigDict(
+            env_file=".env",
+            case_sensitive=True,
+            extra='allow'  # Allow extra fields from environment
+        )
+    ```
+  - ❌ DON'T: Mix configuration styles or forget to handle extra fields
+    ```python
+    class Settings(BaseSettings):
+        class Config:  # Old style configuration
+            env_file = ".env"
+    ```
+
+- **WebSocket Authentication**
+  - ✅ DO: Follow exact API specifications for authentication
+    ```python
+    auth_message = {
+        "type": "subscribe",
+        "channels": [
+            {
+                "name": "heartbeat",
+                "product_ids": ["BTC-USD"]
+            }
+        ],
+        "api_key": settings.COINBASE_API_KEY,
+        "timestamp": timestamp,
+        "signature": signature
+    }
+    ```
+  - ❌ DON'T: Modify API message structure without verification
+    ```python
+    auth_message = {
+        "type": "subscribe",
+        "channel": "heartbeat",  # Wrong format
+        "api_key": api_key
+    }
+    ```
+
+- **Application Startup**
+  - ✅ DO: Handle WebSocket initialization failures gracefully
+    ```python
+    app = FastAPI(
+        title="Crypto Trading Bot",
+        lifespan=websocket.lifespan
+    )
+    
+    @asynccontextmanager
+    async def lifespan(app):
+        try:
+            # Initialize WebSocket
+            yield
+        except Exception as e:
+            logger.error(f"WebSocket initialization error: {e}")
+            raise
+    ```
+  - ❌ DON'T: Let WebSocket failures block application startup
+    ```python
+    # Don't block app startup with WebSocket
+    app.include_router(websocket.router)  # No error handling
+    ```
+
+- **Error Handling**
+  - ✅ DO: Implement proper logging and error recovery
+    ```python
+    try:
+        await self.connect()
+        logger.info("Connection successful")
+    except Exception as e:
+        logger.error(f"Connection failed: {str(e)}")
+        self.is_connected = False
+        await self._reconnect()
+    ```
+  - ❌ DON'T: Use print statements or ignore errors
+    ```python
+    try:
+        await self.connect()
+        print("Connected")  # Don't use print
+    except Exception as e:
+        print(f"Error: {e}")  # Don't use print
+    ```
+
+- **Testing Strategy**
+  - ✅ DO: Test components independently
+    1. Test basic FastAPI endpoints without WebSocket
+    2. Test WebSocket authentication separately
+    3. Test full integration after components work
+  - ❌ DON'T: Test everything at once
+    - Avoid testing WebSocket during initial server setup
+    - Don't mix authentication testing with other features
+
+- **Debugging Approach**
+  - ✅ DO: Use systematic debugging
+    1. Check environment variables
+    2. Verify settings loading
+    3. Test basic endpoints
+    4. Add WebSocket functionality incrementally
+  - ❌ DON'T: Make multiple changes at once
+    - Avoid changing multiple components simultaneously
+    - Don't skip verification steps
+
+- **Best Practices**
+  - Always validate environment variables before using them
+  - Use proper logging instead of print statements
+  - Implement graceful degradation for WebSocket failures
+  - Keep authentication logic separate from business logic
+  - Test each component independently before integration 

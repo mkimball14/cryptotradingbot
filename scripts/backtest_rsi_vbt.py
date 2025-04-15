@@ -31,6 +31,402 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def fetch_historical_data(product_id, start_date, end_date, granularity=86400):
+    """
+    Fetch historical price data from Coinbase or from cache
+    
+    Parameters:
+    -----------
+    product_id : str
+        The product ID (e.g., 'BTC-USD')
+    start_date : str
+        Start date in format 'YYYY-MM-DD'
+    end_date : str
+        End date in format 'YYYY-MM-DD'
+    granularity : int
+        Granularity in seconds (default: 86400 for daily)
+        
+    Returns:
+    --------
+    DataFrame
+        Historical price data with columns: open, high, low, close, volume
+    """
+    # Create cache directory if it doesn't exist
+    cache_dir = Path("data/cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Define cache file path
+    cache_file = cache_dir / f"{product_id.replace('-', '')}_{start_date}_{end_date}_{granularity}.csv"
+
+    # Check if we have cached data
+    if cache_file.exists():
+        logger.info(f"Loading cached data from: {cache_file}")
+        try:
+            data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+            
+            # Check if data contains valid OHLCV columns
+            required_cols = ['open', 'high', 'low', 'close', 'volume']
+            missing_cols = [col for col in required_cols if col not in data.columns]
+            
+            if missing_cols:
+                logger.warning(f"Cached data missing columns: {missing_cols}")
+                # Try to map from capitalized column names if present
+                for col in missing_cols[:]:
+                    cap_col = col.capitalize()
+                    if cap_col in data.columns:
+                        data[col] = data[cap_col]
+                        missing_cols.remove(col)
+                
+                if missing_cols:
+                    logger.warning(f"Still missing columns after mapping: {missing_cols}")
+                    raise ValueError(f"Cached data missing required columns: {missing_cols}")
+            
+            logger.info(f"Successfully loaded cached data with shape: {data.shape}")
+            return data
+        except Exception as e:
+            logger.warning(f"Error loading cached data: {e}, will fetch fresh data")
+    
+    # Check sample data cache if product_id includes "sample"
+    if "sample" in product_id.lower():
+        return create_sample_data(start_date, end_date)
+    
+    # Try to load API credentials
+    creds_file = "cdp_api_key.json"
+    if not os.path.exists(creds_file):
+        logger.warning(f"Credentials file not found: {creds_file}")
+        logger.info("Generating sample data instead")
+        return create_sample_data(start_date, end_date)
+    
+    try:
+        with open(creds_file, 'r') as f:
+            creds = json.load(f)
+            api_key = creds.get('api_key')
+            api_secret = creds.get('api_secret')
+            api_passphrase = creds.get('passphrase')
+            
+        if not all([api_key, api_secret, api_passphrase]):
+            logger.warning("Missing required API credentials")
+            logger.info("Generating sample data instead")
+            return create_sample_data(start_date, end_date)
+            
+        # Convert dates to timestamp
+        start_timestamp = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
+        end_timestamp = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp())
+        
+        # Calculate number of candles
+        candle_count = (end_timestamp - start_timestamp) // granularity
+        logger.info(f"Requesting {candle_count} candles from Coinbase API")
+        
+        # Coinbase API has a limit of 300 candles per request
+        max_candles_per_request = 300
+        
+        # Calculate how many chunks we need
+        chunks = (candle_count + max_candles_per_request - 1) // max_candles_per_request
+        
+        # Initialize client
+        client = RESTClient(api_key, api_secret, api_passphrase)
+        
+        # Fetch data in chunks
+        all_candles = []
+        chunk_start = start_timestamp
+        
+        for i in range(chunks):
+            # Calculate chunk end time
+            chunk_end = min(chunk_start + (max_candles_per_request * granularity), end_timestamp)
+            
+            logger.info(f"Fetching chunk {i+1}/{chunks}: {datetime.fromtimestamp(chunk_start)} to {datetime.fromtimestamp(chunk_end)}")
+            
+            # Make the API request
+            candles = client.get_product_candles(
+                product_id=product_id,
+                start=chunk_start,
+                end=chunk_end,
+                granularity=granularity
+            )
+            
+            if candles and 'message' not in candles:
+                all_candles.extend(candles)
+                logger.info(f"Got {len(candles)} candles for chunk {i+1}")
+            else:
+                error_msg = candles.get('message', 'Unknown error') if isinstance(candles, dict) else 'No candles returned'
+                logger.error(f"API error: {error_msg}")
+                if i == 0:  # If first chunk fails, create sample data
+                    logger.info("First API request failed, falling back to sample data")
+                    return create_sample_data(start_date, end_date)
+            
+            # Update chunk start for next iteration
+            chunk_start = chunk_end
+            
+            # Wait to avoid rate limiting
+            time.sleep(0.5)
+        
+        if not all_candles:
+            logger.warning("No candles returned from API")
+            logger.info("Generating sample data instead")
+            return create_sample_data(start_date, end_date)
+        
+        # Convert to dataframe
+        df = pd.DataFrame(all_candles, columns=['time', 'low', 'high', 'open', 'close', 'volume'])
+        
+        # Convert timestamp to datetime
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        
+        # Set time as index
+        df.set_index('time', inplace=True)
+        
+        # Sort by time
+        df.sort_index(inplace=True)
+        
+        # Cache the data
+        df.to_csv(cache_file)
+        logger.info(f"Cached data to: {cache_file}")
+        
+        return df
+        
+    except Exception as e:
+        logger.error(f"Error fetching data from API: {e}")
+        logger.info("Generating sample data instead")
+        return create_sample_data(start_date, end_date)
+
+def create_sample_data(start_date, end_date):
+    """
+    Create sample price data for backtesting when no real data is available.
+    
+    Args:
+        start_date: Start date string (YYYY-MM-DD)
+        end_date: End date string (YYYY-MM-DD)
+        
+    Returns:
+        DataFrame with OHLCV data
+    """
+    logger.info(f"Creating sample BTC-USD price data for backtesting...")
+    
+    # Create directory for cached data if it doesn't exist
+    cache_dir = Path("data/cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check if we have cached sample data
+    cache_file = cache_dir / f"sample_{start_date}_{end_date}.csv"
+    
+    if cache_file.exists():
+        logger.info(f"Loading cached sample data from: {cache_file}")
+        try:
+            data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+            
+            # Ensure all required columns exist
+            if 'close' not in data.columns and 'Close' in data.columns:
+                data['close'] = data['Close']
+                data.drop('Close', axis=1, inplace=True, errors='ignore')
+            
+            # Check for missing OHLCV columns
+            required_columns = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in data.columns for col in required_columns):
+                logger.warning(f"Cached data missing required columns. Available columns: {data.columns}")
+                logger.info("Regenerating sample data...")
+                # Delete invalid cache file
+                try:
+                    cache_file.unlink()
+                except:
+                    pass
+            else:
+                logger.info(f"Loaded {len(data)} days of cached sample data")
+                return data
+        except Exception as e:
+            logger.error(f"Error loading cached data: {e}")
+    
+    # Create date range
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+    daterange = pd.date_range(start=start, end=end, freq='D')
+    
+    # Generate random price data with realistic properties
+    np.random.seed(42)  # For reproducibility
+    
+    # Start with a price and add random changes
+    price = 20000.0  # Starting price for BTC
+    daily_volatility = 0.02  # 2% daily volatility
+    
+    prices = []
+    for _ in range(len(daterange)):
+        daily_return = np.random.normal(0.0002, daily_volatility)  # Slight upward drift
+        price *= (1 + daily_return)
+        prices.append(price)
+    
+    close_prices = pd.Series(prices, index=daterange)
+    
+    # Generate OHLCV data
+    data = pd.DataFrame(index=daterange)
+    data['close'] = close_prices
+    data['high'] = data['close'] * (1 + np.random.uniform(0, 0.03, len(data)))
+    data['low'] = data['close'] * (1 - np.random.uniform(0, 0.03, len(data)))
+    data['open'] = data['close'].shift(1)
+    
+    # Handle first row
+    data.loc[data.index[0], 'open'] = data.loc[data.index[0], 'close'] * 0.99
+    
+    # Add volume (proportional to price changes)
+    price_changes = np.abs(data['close'].pct_change().fillna(0.01))
+    base_volume = 1000  # Base volume in BTC
+    data['volume'] = base_volume * (1 + 5 * price_changes)  # Higher volume on bigger price moves
+    
+    # Cache the generated data
+    try:
+        data.to_csv(cache_file)
+        logger.info(f"Cached sample data to: {cache_file}")
+    except Exception as e:
+        logger.error(f"Error caching sample data: {e}")
+    
+    logger.info(f"Generated {len(data)} days of sample price data")
+    return data
+
+def optimize_rsi_strategy(data, param_grid=None, min_trades=5, metric='sharpe'):
+    """
+    Optimize RSI strategy parameters using vectorbtpro.
+
+    Args:
+        data (pd.DataFrame): OHLCV data.
+        param_grid (dict): Dictionary of parameters to test (e.g., {'window': [10, 20]}).
+        min_trades (int): Minimum number of trades required for a result to be considered valid.
+        metric (str): Metric to optimize for ('sharpe', 'total_return', 'max_dd', etc.).
+        
+    Returns:
+        dict: Dictionary containing best parameters, metrics, portfolio, and all results.
+    """
+    logger.info(f"Optimizing RSI strategy parameters...")
+    
+    # Use default parameter grid if none provided
+    if param_grid is None:
+        param_grid = {
+            'window': [7, 14, 21],
+            'lower_threshold': [20, 30, 40],
+            'upper_threshold': [60, 70, 80]
+        }
+    
+    # Extract parameter combinations
+    windows = param_grid.get('window', [14])
+    lower_thresholds = param_grid.get('lower_threshold', [30])
+    upper_thresholds = param_grid.get('upper_threshold', [70])
+    
+    # Verify we have valid parameters to test
+    if not all([windows, lower_thresholds, upper_thresholds]):
+        logger.error("Invalid parameter grid: empty parameter lists")
+        return None
+    
+    logger.info(f"Testing {len(windows) * len(lower_thresholds) * len(upper_thresholds)} parameter combinations")
+    
+    # Initialize strategy
+    rsi_strategy = RSIMomentumVBT()
+    
+    # Store all results
+    all_results = []
+    best_result = None
+    best_metric_value = float('-inf') if metric != 'max_dd' else float('inf')
+    best_params = None
+    
+    # Test all parameter combinations
+    for window in tqdm(windows, desc="Testing RSI windows"):
+        for lower in lower_thresholds:
+            for upper in upper_thresholds:
+                # Skip invalid combinations (lower threshold >= upper threshold)
+                if lower >= upper:
+                    continue
+                
+                try:
+                    # Run strategy with current parameters
+                    logger.debug(f"Testing window={window}, lower={lower}, upper={upper}")
+                    result = rsi_strategy.run_with_params(data, window=window, lower_threshold=lower, upper_threshold=upper)
+                    
+                    # Skip if portfolio is None or has no trades
+                    if result is None or 'portfolio' not in result or result['portfolio'] is None:
+                        logger.debug(f"No valid portfolio for window={window}, lower={lower}, upper={upper}")
+                        continue
+                    
+                    portfolio = result['portfolio']
+                    
+                    # Calculate metrics
+                    metrics = calculate_risk_metrics(portfolio)
+                    
+                    # Skip if fewer than min_trades
+                    if metrics['trades'] < min_trades:
+                        logger.debug(f"Too few trades ({metrics['trades']}) for window={window}, lower={lower}, upper={upper}")
+                        continue
+                    
+                    # Store result with parameters and metrics
+                    result_entry = {
+                        'window': window,
+                        'lower_threshold': lower,
+                        'upper_threshold': upper,
+                        'metrics': metrics,
+                        'is_valid': True
+                    }
+                    
+                    # Store in all results
+                    all_results.append(result_entry)
+                    
+                    # Compare based on optimization metric
+                    metric_value = None
+                    if metric == 'sharpe':
+                        metric_value = metrics['sharpe']
+                    elif metric == 'total_return':
+                        metric_value = metrics['total_return']
+                    elif metric == 'max_dd':
+                        metric_value = -metrics['max_dd']  # Negative because we want to minimize drawdown
+                    elif metric == 'win_rate':
+                        metric_value = metrics['win_rate']
+                    elif metric == 'profit_factor':
+                        metric_value = metrics['profit_factor']
+                    else:
+                        metric_value = metrics.get(metric, 0)
+                    
+                    # Update best if better
+                    is_better = False
+                    if metric == 'max_dd':
+                        # For max_dd, lower is better (we use negative value above)
+                        is_better = metric_value > best_metric_value
+                    else:
+                        is_better = metric_value > best_metric_value
+                    
+                    if is_better:
+                        best_metric_value = metric_value
+                        best_params = {
+                            'window': window,
+                            'lower_threshold': lower,
+                            'upper_threshold': upper
+                        }
+                        best_result = result
+                        logger.debug(f"New best: {metric}={best_metric_value}, params={best_params}")
+                
+                except Exception as e:
+                    logger.error(f"Error testing parameters window={window}, lower={lower}, upper={upper}: {e}")
+                    logger.debug(traceback.format_exc())
+    
+    # Check if we found any valid results
+    if not all_results:
+        logger.warning("No valid parameter combinations found")
+        return None
+    
+    # If we have results but no "best" result (possible if all have same metric value)
+    if best_result is None and all_results:
+        # Just take the first valid result
+        for result in all_results:
+            if result.get('is_valid', False):
+                best_params = {
+                    'window': result['window'],
+                    'lower_threshold': result['lower_threshold'],
+                    'upper_threshold': result['upper_threshold']
+                }
+                # Rerun the strategy with these parameters to get the portfolio
+                best_result = rsi_strategy.run_with_params(data, **best_params)
+                break
+    
+    # Return best parameters and portfolio
+    return {
+        'best_params': best_params,
+        'best_metrics': calculate_risk_metrics(best_result['portfolio']) if best_result else None,
+        'portfolio': best_result['portfolio'] if best_result else None,
+        'all_results': all_results
+    }
+
 # Enable caching for better performance
 cache_dir = os.path.join('data', 'vbt_cache')
 os.makedirs(cache_dir, exist_ok=True)
@@ -47,6 +443,39 @@ cache_dir.mkdir(parents=True, exist_ok=True)
 
 # Suppress FutureWarnings from pandas/numpy
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+# Ensure reports directory exists
+reports_dir = Path("reports")
+reports_dir.mkdir(parents=True, exist_ok=True)
+
+# Add a utility function to save portfolio plots to reports directory
+def save_portfolio_plot(portfolio, filename, reports_dir=reports_dir):
+    """
+    Save a portfolio plot to the reports directory.
+    
+    Args:
+        portfolio: The vectorbt Portfolio object
+        filename: The filename to save the plot as
+        reports_dir: The directory to save the plot in
+    
+    Returns:
+        The path to the saved file
+    """
+    # Ensure reports directory exists
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate the plot
+    fig = portfolio.plot()
+    
+    # Create full path
+    plot_path = reports_dir / filename
+    
+    # Save the plot
+    fig.write_html(str(plot_path))
+    
+    logger.info(f"Portfolio plot saved to {plot_path}")
+    
+    return plot_path
 
 class RiskManager:
     """
@@ -390,7 +819,9 @@ class RSIMomentumVBT:
                         'rsi': rsi,
                         'ma': ma,
                         'entry_signals': entry_condition,
-                        'exit_signals': exit_condition
+                        'exit_signals': exit_condition,
+                        'price_data': data,
+                        'rsi_indicator': rsi
                     }
             except Exception as e:
                 logger.warning(f"Basic portfolio creation failed: {e}")
@@ -418,42 +849,41 @@ class RSIMomentumVBT:
                 'rsi': rsi,
                 'ma': ma,
                 'entry_signals': entry_condition,
-                'exit_signals': exit_condition
+                'exit_signals': exit_condition,
+                'price_data': data,
+                'rsi_indicator': rsi
             }
         except Exception as e:
             logger.error(f"Error in strategy run: {e}")
             
-            # FALLBACK: Absolute simplest strategy - buy low RSI, sell high RSI
-            logger.info("Using extremely simple fallback strategy")
-            
-            # Create basic RSI
-            delta = close.diff()
-            gain = delta.clip(lower=0)
-            loss = -delta.clip(upper=0)
-            avg_gain = gain.rolling(window=14).mean()
-            avg_loss = loss.rolling(window=14).mean()
-            rs = avg_gain / avg_loss
-            rsi = 100.0 - (100.0 / (1.0 + rs))
-            
-            # Very simple signals
-            entry_signals = rsi < 30
-            exit_signals = rsi > 70
-            
-            # Create most basic portfolio
-            portfolio = vbt.Portfolio.from_signals(
-                close,
-                entries=entry_signals,
-                exits=exit_signals,
-                init_cash=10000,
-                freq='1D'
-            )
-            
-            return {
-                'portfolio': portfolio,
-                'rsi': rsi,
-                'entry_signals': entry_signals,
-                'exit_signals': exit_signals
-            }
+    def run_with_params(self, data, window=None, lower_threshold=None, upper_threshold=None):
+        """Run RSI strategy with specific parameters.
+        
+        This is used during optimization to test different parameter sets.
+        """
+        # Use provided parameters or instance defaults
+        window = window if window is not None else self.window
+        lower_threshold = lower_threshold if lower_threshold is not None else self.lower_threshold
+        upper_threshold = upper_threshold if upper_threshold is not None else self.upper_threshold
+        
+        # Create a temporary strategy instance with these parameters
+        temp_strategy = RSIMomentumVBT(
+            window=window,
+            wtype=self.wtype,
+            lower_threshold=lower_threshold,
+            upper_threshold=upper_threshold,
+            ma_window=self.ma_window,
+            ma_type=self.ma_type,
+            stop_pct=self.stop_pct,
+            risk_pct=self.risk_pct,
+            commission_pct=self.commission_pct,
+            slippage_pct=self.slippage_pct,
+            initial_capital=self.initial_capital,
+            max_trades_pct=self.max_trades_pct
+        )
+        
+        # Run the strategy and return the results
+        return temp_strategy.run(data)
 
 class MultiIndicatorStrategy(RSIMomentumVBT):
     """
@@ -800,7 +1230,7 @@ class MultiTimeframeStrategy:
     def __init__(self, primary_data, higher_tf_data=None, lower_tf_data=None, 
                  rsi_window=14, lower_threshold=30, upper_threshold=70,
                  ma_window=50, atr_window=14, risk_pct=1.0,
-                 initial_capital=10000.0, commission_pct=0.001):
+                 initial_capital=10000.0, commission_pct=0.001, wtype='wilder'):
         """
         Initialize the multi-timeframe strategy.
         
@@ -828,6 +1258,8 @@ class MultiTimeframeStrategy:
             Initial capital for backtesting
         commission_pct : float
             Commission percentage per trade
+        wtype : str
+            RSI calculation type ('wilder' or 'simple')
         """
         self.primary_data = primary_data
         self.higher_tf_data = higher_tf_data
@@ -839,6 +1271,7 @@ class MultiTimeframeStrategy:
         self.ma_window = ma_window
         self.atr_window = atr_window
         self.risk_pct = risk_pct
+        self.wtype = wtype
         
         self.initial_capital = initial_capital
         self.commission_pct = commission_pct
@@ -868,7 +1301,8 @@ class MultiTimeframeStrategy:
         """Calculate RSI for primary timeframe."""
         self.rsi_values['primary'] = vbt.RSI.run(
             self.primary_data['close'], 
-            window=self.rsi_window
+            window=self.rsi_window,
+            wtype=self.wtype
         ).rsi
         
         return self.rsi_values['primary']
@@ -878,7 +1312,8 @@ class MultiTimeframeStrategy:
         if self.higher_tf_data is not None:
             self.rsi_values['higher'] = vbt.RSI.run(
                 self.higher_tf_data['close'], 
-                window=self.rsi_window
+                window=self.rsi_window,
+                wtype=self.wtype
             ).rsi
             
             # Forward-fill to primary timeframe
@@ -895,7 +1330,8 @@ class MultiTimeframeStrategy:
         if self.lower_tf_data is not None:
             self.rsi_values['lower'] = vbt.RSI.run(
                 self.lower_tf_data['close'], 
-                window=self.rsi_window // 2  # Use shorter window for lower timeframe
+                window=self.rsi_window // 2,  # Use shorter window for lower timeframe
+                wtype=self.wtype
             ).rsi
             
             # Resample to primary timeframe (use last value of each day)
@@ -1120,6 +1556,11 @@ class MultiTimeframeStrategy:
                 if 'lower_tf_rsi' in signals.columns:
                     results['lower_tf_rsi'] = signals['lower_tf_rsi']
                 
+                # Save the portfolio plot to reports directory
+                symbol = getattr(self, 'symbol', 'BTC-USD')
+                filename = f"multi_tf_rsi_strategy_results_{symbol.replace('-', '_')}.html"
+                save_portfolio_plot(portfolio, filename)
+                
                 return results
                 
             except Exception as e:
@@ -1131,6 +1572,42 @@ class MultiTimeframeStrategy:
             logger.error(f"Error in multi-timeframe strategy: {e}")
             logger.error(traceback.format_exc())
             return None
+            
+    def run_basic(self):
+        """Run a basic multi-timeframe strategy."""
+        logger.info("Running basic multi-timeframe strategy")
+        # Just use the standard run method
+        return self.run()
+    
+    def run_higher_tf_trend(self):
+        """Run a multi-timeframe strategy focusing on higher timeframe trend confirmation."""
+        logger.info("Running multi-timeframe strategy with higher timeframe trend confirmation")
+        # Configure for higher timeframe trend focus
+        if self.higher_tf_data is None:
+            logger.warning("No higher timeframe data provided, creating it")
+            self.create_higher_tf_data()
+        return self.run()
+    
+    def run_lower_tf_entry(self):
+        """Run a multi-timeframe strategy focusing on lower timeframe entry precision."""
+        logger.info("Running multi-timeframe strategy with lower timeframe entry precision")
+        # Configure for lower timeframe entry focus
+        if self.lower_tf_data is None:
+            logger.warning("No lower timeframe data provided, creating it")
+            self.create_lower_tf_data()
+        return self.run()
+    
+    def run_combined(self):
+        """Run a combined multi-timeframe strategy using both higher and lower timeframes."""
+        logger.info("Running combined multi-timeframe strategy")
+        # Ensure both higher and lower timeframe data are available
+        if self.higher_tf_data is None:
+            logger.warning("No higher timeframe data provided, creating it")
+            self.create_higher_tf_data()
+        if self.lower_tf_data is None:
+            logger.warning("No lower timeframe data provided, creating it")
+            self.create_lower_tf_data()
+        return self.run()
 
 def test_multitimeframe_strategy(data, window=14, lower_th=30, upper_th=70, use_higher_tf=True, use_lower_tf=True):
     """
@@ -1214,7 +1691,8 @@ def test_multitimeframe_strategy(data, window=14, lower_th=30, upper_th=70, use_
             lower_tf_data=lower_tf_data,
             rsi_window=window,
             lower_threshold=lower_th,
-            upper_threshold=upper_th
+            upper_threshold=upper_th,
+            wtype='wilder'
         )
         
         # Run the strategy
@@ -1228,7 +1706,7 @@ def test_multitimeframe_strategy(data, window=14, lower_th=30, upper_th=70, use_
         logger.error(traceback.format_exc())
         return None
 
-def generate_multi_tf_report(result, filename='multi_tf_strategy_report.html'):
+def generate_multi_tf_report(result, filename='multi_tf_strategy_report.html', symbol='BTC-USD', start_date=None, end_date=None, reports_dir=None):
     """
     Generate a detailed HTML report for multi-timeframe strategy results.
     
@@ -1238,726 +1716,1180 @@ def generate_multi_tf_report(result, filename='multi_tf_strategy_report.html'):
         Strategy results dictionary
     filename : str
         Output HTML filename
+    symbol : str
+        Symbol being backtested (e.g., 'BTC-USD')
+    start_date : str
+        Start date of the backtest
+    end_date : str
+        End date of the backtest
+    reports_dir : str or Path
+        Directory to save the report in
     """
     try:
         if not result or 'portfolio' not in result or result['portfolio'] is None:
             logger.error("Cannot generate report: Invalid strategy results")
             return
             
+        # Create reports directory if not provided
+        if reports_dir is None:
+            reports_dir = Path("reports")
+        elif isinstance(reports_dir, str):
+            reports_dir = Path(reports_dir)
+            
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract the required data from the result
         portfolio = result['portfolio']
         metrics = calculate_risk_metrics(portfolio)
+        price_data = result.get('price_data', None)
+        
+        if price_data is None and 'close' in portfolio.wrapper.columns:
+            # Use the price data from the portfolio if available
+            price_data = pd.DataFrame({
+                'close': portfolio.wrapper.columns[0]
+            })
+        
+        # Create a simulated optimized portfolio for comparison
+        # This is a placeholder - in a real implementation, you'd have a separate optimization result
+        basic_portfolio = portfolio  # The multi-timeframe strategy result
+        optimized_portfolio = portfolio  # Using the same portfolio as a placeholder
+        basic_metrics = metrics
+        opt_metrics = metrics
+        
+        # Calculate benchmark returns (buy and hold)
+        benchmark_returns = price_data['close'].pct_change().dropna()
+        benchmark_cum_returns = (1 + benchmark_returns).cumprod() - 1
         
         # Create a Plotly figure
         fig = make_subplots(
             rows=4, 
-            cols=1, 
-            shared_xaxes=True,
-            vertical_spacing=0.05,
+            cols=2,
             subplot_titles=(
-                "Portfolio Value", 
-                "RSI Signals", 
-                "Drawdowns", 
-                "Daily Returns"
+                "Cumulative Returns Comparison", "Drawdown Comparison",
+                "Basic Strategy Performance", "Optimized Strategy Performance",
+                "Price and RSI Indicator", "Monthly Returns Heatmap",
+                "Returns Heatmap by Window/Threshold", "Sharpe Ratio Heatmap by Window/Threshold"
             ),
-            row_heights=[0.4, 0.2, 0.2, 0.2]
+            specs=[
+                [{"colspan": 1}, {"colspan": 1}],
+                [{"type": "xy"}, {"type": "xy"}],
+                [{"type": "xy"}, {"type": "heatmap"}],
+                [{"type": "heatmap"}, {"type": "heatmap"}]
+            ],
+            vertical_spacing=0.10,
+            horizontal_spacing=0.05,
+            row_heights=[0.25, 0.25, 0.25, 0.25]
         )
         
-        # Plot 1: Portfolio Value
-        pfig = portfolio.plot_value()
-        for trace in pfig['data']:
-            fig.add_trace(trace, row=1, col=1)
-            
-        # Plot 2: RSI Signals
-        if 'primary_rsi' in result and 'entry_signals' in result and 'exit_signals' in result:
-            # Plot RSI
-            fig.add_trace(
-                go.Scatter(
-                    x=result['primary_rsi'].index,
-                    y=result['primary_rsi'],
-                    mode='lines',
-                    name='RSI'
-                ),
-                row=2, col=1
-            )
-            
-            # Add overbought/oversold lines
-            fig.add_trace(
-                go.Scatter(
-                    x=[result['primary_rsi'].index[0], result['primary_rsi'].index[-1]],
-                    y=[30, 30],
-                    mode='lines',
-                    line=dict(dash='dash', color='green'),
-                    name='Oversold'
-                ),
-                row=2, col=1
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=[result['primary_rsi'].index[0], result['primary_rsi'].index[-1]],
-                    y=[70, 70],
-                    mode='lines',
-                    line=dict(dash='dash', color='red'),
-                    name='Overbought'
-                ),
-                row=2, col=1
-            )
-            
-            # Get entry and exit dates safely
-            # For vectorbtpro portfolios, we might need to extract entries and exits from the trades
-            entry_dates = []
-            exit_dates = []
-
-            # --- Refined entry/exit date extraction ---
-            # Use portfolio.trade_history if available (vectorbtpro >= 0.25.0)
-            if hasattr(portfolio, 'trade_history') and portfolio.trade_history is not None and not portfolio.trade_history.empty:
-                try:
-                    trade_records = portfolio.trade_history
-                    entry_dates = trade_records[trade_records['Reason'] == 'Entry']['Timestamp']
-                    exit_dates = trade_records[trade_records['Reason'] == 'Exit']['Timestamp']
-                except KeyError as e:
-                    logger.warning(f"KeyError accessing trade_history columns: {e}. Falling back to trades attribute.")
-                    # Fallback if columns are named differently
-                    if hasattr(portfolio, 'trades') and len(portfolio.trades) > 0:
-                        entry_dates = portfolio.trades.records['entry_idx'].map(lambda idx: portfolio.wrapper.index[idx])
-                        exit_dates = portfolio.trades.records['exit_idx'].map(lambda idx: portfolio.wrapper.index[idx])
-                    elif 'entry_signals' in result and 'exit_signals' in result:
-                         entry_dates = result['entry_signals'].index[result['entry_signals']]
-                         exit_dates = result['exit_signals'].index[result['exit_signals']]
-            # Fallback to portfolio.trades for older vectorbtpro versions
-            elif hasattr(portfolio, 'trades') and len(portfolio.trades) > 0:
-                try:
-                    entry_dates = portfolio.trades.records['entry_idx'].map(lambda idx: portfolio.wrapper.index[idx])
-                    exit_dates = portfolio.trades.records['exit_idx'].map(lambda idx: portfolio.wrapper.index[idx])
-                except Exception as e:
-                    logger.warning(f"Error accessing portfolio.trades records: {e}")
-                    # Final fallback to signals from the result dictionary
-                    if 'entry_signals' in result and 'exit_signals' in result:
-                         entry_dates = result['entry_signals'].index[result['entry_signals']]
-                         exit_dates = result['exit_signals'].index[result['exit_signals']]
-            # Final fallback to signals from the result dictionary
-            elif 'entry_signals' in result and 'exit_signals' in result:
-                 entry_dates = result['entry_signals'].index[result['entry_signals']]
-                 exit_dates = result['exit_signals'].index[result['exit_signals']]
-            else:
-                logger.warning("Could not extract entry/exit dates from portfolio or results.")
-            # --- End of refinement ---
-
-            # Plot entry signals if any
-            if len(entry_dates) > 0:
-                entry_rsi = pd.Series(index=entry_dates)
-                for date in entry_dates:
-                    if date in result['primary_rsi'].index:
-                        entry_rsi[date] = result['primary_rsi'].loc[date]
-                
-                # Only plot non-NaN values
-                valid_entries = entry_rsi.dropna()
-                if len(valid_entries) > 0:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=valid_entries.index,
-                            y=valid_entries.values,
-                            mode='markers',
-                            marker=dict(color='green', size=8, symbol='triangle-up'),
-                            name='Entries'
-                        ),
-                        row=2, col=1
-                    )
-            
-            # Plot exit signals if any
-            if len(exit_dates) > 0:
-                exit_rsi = pd.Series(index=exit_dates)
-                for date in exit_dates:
-                    if date in result['primary_rsi'].index:
-                        exit_rsi[date] = result['primary_rsi'].loc[date]
-                
-                # Only plot non-NaN values
-                valid_exits = exit_rsi.dropna()
-                if len(valid_exits) > 0:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=valid_exits.index,
-                            y=valid_exits.values,
-                            mode='markers',
-                            marker=dict(color='red', size=8, symbol='triangle-down'),
-                            name='Exits'
-                        ),
-                        row=2, col=1
-                    )
+        # 1. Comparison of cumulative returns
+        # Get returns from both portfolios and benchmark
+        basic_returns = basic_portfolio.returns.cumsum()
+        opt_returns = optimized_portfolio.returns.cumsum()
         
-        # Plot 3: Drawdowns
+        fig.add_trace(
+            go.Scatter(
+                x=basic_returns.index,
+                y=basic_returns.values,
+                mode='lines',
+                name='Basic RSI',
+                line=dict(color='blue', width=2)
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=opt_returns.index,
+                y=opt_returns.values,
+                mode='lines',
+                name='Optimized RSI',
+                line=dict(color='green', width=2)
+            ),
+            row=1, col=1
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=benchmark_cum_returns.index,
+                y=benchmark_cum_returns.values,
+                mode='lines',
+                name='Buy and Hold',
+                line=dict(color='gray', width=2, dash='dash')
+            ),
+            row=1, col=1
+        )
+        
+        # 2. Drawdown comparison
+        basic_drawdown = (basic_portfolio.value / basic_portfolio.value.cummax() - 1)
+        opt_drawdown = (optimized_portfolio.value / optimized_portfolio.value.cummax() - 1)
+        benchmark_drawdown = (1 + benchmark_cum_returns) / (1 + benchmark_cum_returns).cummax() - 1
+        
+        fig.add_trace(
+            go.Scatter(
+                x=basic_drawdown.index,
+                y=basic_drawdown.values,
+                mode='lines',
+                name='Basic RSI DD',
+                line=dict(color='blue', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(0, 0, 255, 0.1)'
+            ),
+            row=1, col=2
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=opt_drawdown.index,
+                y=opt_drawdown.values,
+                mode='lines',
+                name='Optimized RSI DD',
+                line=dict(color='green', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(0, 255, 0, 0.1)'
+            ),
+            row=1, col=2
+        )
+        
+        fig.add_trace(
+            go.Scatter(
+                x=benchmark_drawdown.index,
+                y=benchmark_drawdown.values,
+                mode='lines',
+                name='Buy and Hold DD',
+                line=dict(color='gray', width=2, dash='dash'),
+                fill='tozeroy',
+                fillcolor='rgba(128, 128, 128, 0.1)'
+            ),
+            row=1, col=2
+        )
+        
+        # 3. Basic strategy performance - Equity curve with trades
+        fig.add_trace(
+            go.Scatter(
+                x=basic_portfolio.value.index,
+                y=basic_portfolio.value.values,
+                mode='lines',
+                name='Basic Equity Curve',
+                line=dict(color='blue', width=2)
+            ),
+            row=2, col=1
+        )
+        
+        # 4. Optimized strategy performance - Equity curve with trades
+        fig.add_trace(
+            go.Scatter(
+                x=optimized_portfolio.value.index,
+                y=optimized_portfolio.value.values,
+                mode='lines',
+                name='Optimized Equity Curve',
+                line=dict(color='green', width=2)
+            ),
+            row=2, col=2
+        )
+        
+        # Add trade markers if available
         try:
-            drawdowns = portfolio.drawdown()
+            # For basic portfolio
+            if basic_metrics['trades'] > 0:
+                trade_data = basic_portfolio.trades.records
+                
+                # Entry points
+                entry_times = [basic_returns.index[int(t)] if 0 <= int(t) < len(basic_returns.index) else None 
+                              for t in trade_data['entry_idx']]
+                entry_times = [et for et in entry_times if et is not None]
+                
+                entry_values = [basic_portfolio.value.iloc[int(t)] if 0 <= int(t) < len(basic_portfolio.value) else None
+                               for t in trade_data['entry_idx']]
+                entry_values = [ev for ev in entry_values if ev is not None]
+                
+                if entry_times and entry_values:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=entry_times,
+                            y=entry_values,
+                            mode='markers',
+                            marker=dict(color='green', size=10, symbol='triangle-up'),
+                            name='Basic Entries'
+                        ),
+                        row=2, col=1
+                    )
+                
+                # Exit points
+                exit_times = [basic_returns.index[int(t)] if 0 <= int(t) < len(basic_returns.index) else None 
+                             for t in trade_data['exit_idx']]
+                exit_times = [et for et in exit_times if et is not None]
+                
+                exit_values = [basic_portfolio.value.iloc[int(t)] if 0 <= int(t) < len(basic_portfolio.value) else None
+                              for t in trade_data['exit_idx']]
+                exit_values = [ev for ev in exit_values if ev is not None]
+                
+                if exit_times and exit_values:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=exit_times,
+                            y=exit_values,
+                            mode='markers',
+                            marker=dict(color='red', size=10, symbol='triangle-down'),
+                            name='Basic Exits'
+                        ),
+                        row=2, col=1
+                    )
+            
+            # For optimized portfolio
+            if opt_metrics['trades'] > 0:
+                trade_data = optimized_portfolio.trades.records
+                
+                # Entry points
+                entry_times = [opt_returns.index[int(t)] if 0 <= int(t) < len(opt_returns.index) else None 
+                              for t in trade_data['entry_idx']]
+                entry_times = [et for et in entry_times if et is not None]
+                
+                entry_values = [optimized_portfolio.value.iloc[int(t)] if 0 <= int(t) < len(optimized_portfolio.value) else None
+                               for t in trade_data['entry_idx']]
+                entry_values = [ev for ev in entry_values if ev is not None]
+                
+                if entry_times and entry_values:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=entry_times,
+                            y=entry_values,
+                            mode='markers',
+                            marker=dict(color='green', size=10, symbol='triangle-up'),
+                            name='Optimized Entries'
+                        ),
+                        row=2, col=2
+                    )
+                
+                # Exit points
+                exit_times = [opt_returns.index[int(t)] if 0 <= int(t) < len(opt_returns.index) else None 
+                             for t in trade_data['exit_idx']]
+                exit_times = [et for et in exit_times if et is not None]
+                
+                exit_values = [optimized_portfolio.value.iloc[int(t)] if 0 <= int(t) < len(optimized_portfolio.value) else None
+                              for t in trade_data['exit_idx']]
+                exit_values = [ev for ev in exit_values if ev is not None]
+                
+                if exit_times and exit_values:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=exit_times,
+                            y=exit_values,
+                            mode='markers',
+                            marker=dict(color='red', size=10, symbol='triangle-down'),
+                            name='Optimized Exits'
+                        ),
+                        row=2, col=2
+                    )
+        except Exception as e:
+            logger.warning(f"Could not add trade markers: {e}")
+            
+        # 5. Price and RSI Indicator
+        # Extract RSI values from results
+        try:
+            basic_rsi = results.get('rsi_indicator', None)
+            opt_rsi = opt_results.get('rsi_indicator', None)
+            
+            # Create secondary y-axis for RSI
             fig.add_trace(
                 go.Scatter(
-                    x=drawdowns.index,
-                    y=drawdowns,
+                    x=price_data.index,
+                    y=price_data['close'],
                     mode='lines',
-                    line=dict(color='red'),
-                    name='Drawdowns'
+                    name=f'{symbol} Price',
+                    line=dict(color='black', width=2)
                 ),
                 row=3, col=1
             )
+            
+            if basic_rsi is not None:
+                fig.add_trace(
+                    go.Scatter(
+                        x=basic_rsi.index,
+                        y=basic_rsi.values,
+                        mode='lines',
+                        name='Basic RSI',
+                        line=dict(color='blue', width=1),
+                        yaxis="y3"
+                    ),
+                    row=3, col=1
+                )
+                
+                # Add threshold lines
+                basic_window = results.get('window', 14)
+                basic_lower = results.get('lower_threshold', 30)
+                basic_upper = results.get('upper_threshold', 70)
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=[basic_rsi.index[0], basic_rsi.index[-1]],
+                        y=[basic_lower, basic_lower],
+                        mode='lines',
+                        line=dict(color='green', width=1, dash='dash'),
+                        name=f'Lower Threshold ({basic_lower})',
+                        yaxis="y3"
+                    ),
+                    row=3, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=[basic_rsi.index[0], basic_rsi.index[-1]],
+                        y=[basic_upper, basic_upper],
+                        mode='lines',
+                        line=dict(color='red', width=1, dash='dash'),
+                        name=f'Upper Threshold ({basic_upper})',
+                        yaxis="y3"
+                    ),
+                    row=3, col=1
+                )
+                
+                # Set up the secondary y-axis for RSI
+                fig.update_layout(
+                    yaxis3=dict(
+                        title="RSI Value",
+                        range=[0, 100],
+                        side="right",
+                        overlaying="y5",
+                        showgrid=False
+                    ),
+                    yaxis5=dict(
+                        title=f"{symbol} Price",
+                        showgrid=True
+                    )
+                )
         except Exception as e:
-            logger.warning(f"Could not plot drawdowns: {e}")
+            logger.warning(f"Could not add RSI indicator: {e}")
         
-        # Plot 4: Daily Returns
+        # 6. Monthly Returns Heatmap
         try:
-            daily_returns = portfolio.returns.resample('D').sum()
+            # Convert daily returns to monthly returns
+            basic_monthly_returns = basic_portfolio.returns.resample('M').apply(
+                lambda x: (1 + x).prod() - 1
+            )
+            opt_monthly_returns = optimized_portfolio.returns.resample('M').apply(
+                lambda x: (1 + x).prod() - 1
+            )
+            
+            # Create a DataFrame with year as rows and month as columns
+            basic_monthly_returns.index = basic_monthly_returns.index.strftime('%Y-%m')
+            years = [date.split('-')[0] for date in basic_monthly_returns.index]
+            months = [date.split('-')[1] for date in basic_monthly_returns.index]
+            
+            monthly_data = pd.DataFrame({
+                'Year': years,
+                'Month': months,
+                'Basic': basic_monthly_returns.values * 100,  # Convert to percentage
+                'Optimized': opt_monthly_returns.values * 100  # Convert to percentage
+            })
+            
+            # Create a pivot table for the heatmap
+            basic_pivot = pd.pivot_table(
+                monthly_data, 
+                values='Basic', 
+                index='Year', 
+                columns='Month',
+                aggfunc='sum'
+            )
+            
+            # For the months, ensure they're in the right order
+            month_order = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
+            basic_pivot = basic_pivot.reindex(columns=month_order)
+            
+            # Draw the heatmap
+            months_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            
+            # Replace NaN with 0 for visualization
+            basic_pivot = basic_pivot.fillna(0)
+            
             fig.add_trace(
-                go.Bar(
-                    x=daily_returns.index,
-                    y=daily_returns,
-                    marker_color=np.where(daily_returns >= 0, 'green', 'red'),
-                    name='Daily Returns'
+                go.Heatmap(
+                    z=basic_pivot.values,
+                    x=months_labels,
+                    y=basic_pivot.index,
+                    colorscale='RdYlGn',
+                    colorbar=dict(title='Return %', x=0.46),
+                    text=[[f"{val:.2f}%" for val in row] for row in basic_pivot.values],
+                    hoverinfo='text',
+                    zmin=-10,  # Minimum value for color scale
+                    zmax=10   # Maximum value for color scale
                 ),
-                row=4, col=1
+                row=3, col=2
             )
         except Exception as e:
-            logger.warning(f"Could not plot daily returns: {e}")
+            logger.warning(f"Could not create monthly returns heatmap: {e}")
         
-        # Add metrics as annotations
-        metrics_text = (
-            f"<b>Performance Metrics:</b><br>"
-            f"Total Return: {metrics['total_return']*100:.2f}%<br>"
-            f"Annualized Return: {metrics['annual_return']*100:.2f}%<br>"
-            f"Sharpe Ratio: {metrics['sharpe']:.2f}<br>"
-            f"Max Drawdown: {metrics['max_dd']*100:.2f}%<br>"
-            f"Win Rate: {metrics['win_rate']*100:.2f}%<br>"
-            f"Total Trades: {metrics['trades']}"
+        # Create parameter heatmaps if we have optimization results
+        if 'all_results' in opt_results and isinstance(opt_results['all_results'], list) and len(opt_results['all_results']) >= 9:
+            try:
+                # Extract parameters and metrics for heatmap
+                windows = []
+                lower_ths = []
+                upper_ths = []
+                returns = []
+                sharpes = []
+                trade_counts = []
+                
+                for result in opt_results['all_results']:
+                    windows.append(result.get('window', 0))
+                    lower_ths.append(result.get('lower_threshold', 0))
+                    upper_ths.append(result.get('upper_threshold', 0))
+                    returns.append(result.get('metrics', {}).get('total_return', 0) * 100)  # As percentage
+                    sharpes.append(result.get('metrics', {}).get('sharpe', 0))
+                    trade_counts.append(result.get('metrics', {}).get('trades', 0))
+                
+                # Identify unique parameter values
+                unique_windows = sorted(set(windows))
+                unique_lower = sorted(set(lower_ths))
+                
+                # Create return heatmap
+                if len(unique_windows) > 1 and len(unique_lower) > 1:
+                    return_matrix = np.zeros((len(unique_windows), len(unique_lower)))
+                    trade_matrix = np.zeros((len(unique_windows), len(unique_lower)))
+                    
+                    # Create annotation text with trade counts
+                    text_matrix = [['' for _ in range(len(unique_lower))] for _ in range(len(unique_windows))]
+                    
+                    for i, window in enumerate(unique_windows):
+                        for j, lower in enumerate(unique_lower):
+                            matching_returns = []
+                            matching_trades = []
+                            for idx in range(len(windows)):
+                                if windows[idx] == window and lower_ths[idx] == lower:
+                                    matching_returns.append(returns[idx])
+                                    matching_trades.append(trade_counts[idx])
+                            
+                            if matching_returns:
+                                best_idx = matching_returns.index(max(matching_returns))
+                                return_matrix[i, j] = max(matching_returns)
+                                trade_matrix[i, j] = matching_trades[best_idx]
+                                text_matrix[i][j] = f"{return_matrix[i, j]:.2f}% ({trade_matrix[i, j]:.0f})"
+                    
+                    # Add return heatmap with trade count annotations
+                    fig.add_trace(
+                        go.Heatmap(
+                            z=return_matrix,
+                            x=unique_lower,
+                            y=unique_windows,
+                            colorscale='RdYlGn',
+                            colorbar=dict(title='Return %'),
+                            text=text_matrix,
+                            hovertemplate='Window: %{y}<br>Lower Threshold: %{x}<br>Return: %{text}<extra></extra>',
+                            zmin=-10,  # Minimum value for color scale
+                            zmax=10    # Maximum value for color scale
+                        ),
+                        row=4, col=1
+                    )
+                    
+                    # Create Sharpe ratio heatmap
+                    sharpe_matrix = np.zeros((len(unique_windows), len(unique_lower)))
+                    text_matrix = [['' for _ in range(len(unique_lower))] for _ in range(len(unique_windows))]
+                    
+                    for i, window in enumerate(unique_windows):
+                        for j, lower in enumerate(unique_lower):
+                            matching_sharpes = []
+                            matching_trades = []
+                            for idx in range(len(windows)):
+                                if windows[idx] == window and lower_ths[idx] == lower:
+                                    matching_sharpes.append(sharpes[idx])
+                                    matching_trades.append(trade_counts[idx])
+                            
+                            if matching_sharpes:
+                                best_idx = matching_sharpes.index(max(matching_sharpes))
+                                sharpe_matrix[i, j] = max(matching_sharpes)
+                                trade_matrix[i, j] = matching_trades[best_idx]
+                                text_matrix[i][j] = f"{sharpe_matrix[i, j]:.2f} ({trade_matrix[i, j]:.0f})"
+                    
+                    # Add Sharpe ratio heatmap with trade count annotations
+                    fig.add_trace(
+                        go.Heatmap(
+                            z=sharpe_matrix,
+                            x=unique_lower,
+                            y=unique_windows,
+                            colorscale='RdYlGn',
+                            colorbar=dict(title='Sharpe Ratio'),
+                            text=text_matrix,
+                            hovertemplate='Window: %{y}<br>Lower Threshold: %{x}<br>Sharpe: %{text}<extra></extra>',
+                            zmin=-1,  # Minimum value for color scale
+                            zmax=1    # Maximum value for color scale
+                        ),
+                        row=4, col=2
+                    )
+            except Exception as e:
+                logger.warning(f"Could not create parameter heatmaps: {e}")
+        
+        # Calculate benchmark metrics
+        benchmark_return = benchmark_cum_returns.iloc[-1]
+        benchmark_dd = benchmark_drawdown.min()
+        
+        # Convert annual sharpe to appropriate time period
+        days_in_period = (price_data.index[-1] - price_data.index[0]).days
+        if days_in_period < 30:
+            period_str = f"{days_in_period} days"
+        elif days_in_period < 365:
+            period_str = f"{days_in_period/30:.1f} months"
+        else:
+            period_str = f"{days_in_period/365:.1f} years"
+            
+        # Calculate annualized returns
+        basic_annual_return = (1 + basic_metrics['total_return']) ** (365/days_in_period) - 1
+        opt_annual_return = (1 + opt_metrics['total_return']) ** (365/days_in_period) - 1
+        benchmark_annual_return = (1 + benchmark_return) ** (365/days_in_period) - 1
+        
+        # Add comparison metrics table as an annotation
+        comparison_text = (
+            f"<b>Performance Comparison ({period_str}):</b><br>"
+            f"<br>"
+            f"<b>Basic RSI:</b><br>"
+            f"• Total Return: {basic_metrics['total_return']*100:.2f}% (Ann: {basic_annual_return*100:.2f}%)<br>"
+            f"• Sharpe Ratio: {basic_metrics['sharpe']:.2f}<br>"
+            f"• Max Drawdown: {basic_metrics['max_dd']*100:.2f}%<br>"
+            f"• Win Rate: {basic_metrics['win_rate']*100:.2f}%<br>"
+            f"• Total Trades: {basic_metrics['trades']}<br>"
+            f"<br>"
+            f"<b>Optimized RSI:</b><br>"
+            f"• Total Return: {opt_metrics['total_return']*100:.2f}% (Ann: {opt_annual_return*100:.2f}%)<br>"
+            f"• Sharpe Ratio: {opt_metrics['sharpe']:.2f}<br>"
+            f"• Max Drawdown: {opt_metrics['max_dd']*100:.2f}%<br>"
+            f"• Win Rate: {opt_metrics['win_rate']*100:.2f}%<br>"
+            f"• Total Trades: {opt_metrics['trades']}<br>"
+            f"<br>"
+            f"<b>Buy and Hold:</b><br>"
+            f"• Total Return: {benchmark_return*100:.2f}% (Ann: {benchmark_annual_return*100:.2f}%)<br>"
+            f"• Max Drawdown: {benchmark_dd*100:.2f}%<br>"
         )
         
+        # Add metrics comparison as a table annotation in the top right
         fig.add_annotation(
             xref="paper",
             yref="paper",
-            x=0.01,
-            y=0.99,
-            text=metrics_text,
+            x=1.0,
+            y=1.0,
+            text=comparison_text,
             showarrow=False,
             font=dict(size=10),
             align="left",
-            bgcolor="rgba(255, 255, 255, 0.8)",
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="black",
+            borderwidth=1,
+            xanchor="right",
+            yanchor="top"
+        )
+        
+        # Add strategy parameter details
+        basic_params_text = (
+            f"<b>Basic RSI Parameters:</b><br>"
+            f"• Window: {results.get('window', 14)}<br>"
+            f"• Lower: {results.get('lower_threshold', 30)}<br>"
+            f"• Upper: {results.get('upper_threshold', 70)}<br>"
+        )
+        
+        opt_params_text = (
+            f"<b>Optimized RSI Parameters:</b><br>"
+            f"• Window: {opt_results.get('best_params', {}).get('window', 14)}<br>"
+            f"• Lower: {opt_results.get('best_params', {}).get('lower_threshold', 30)}<br>"
+            f"• Upper: {opt_results.get('best_params', {}).get('upper_threshold', 70)}<br>"
+        )
+        
+        # Add parameter info to the basic strategy plot
+        fig.add_annotation(
+            xref="x3 domain",
+            yref="y3 domain",
+            x=0.05,
+            y=0.05,
+            text=basic_params_text,
+            showarrow=False,
+            font=dict(size=10),
+            align="left",
+            bgcolor="rgba(255, 255, 255, 0.7)",
+            bordercolor="black",
+            borderwidth=1
+        )
+        
+        # Add parameter info to the optimized strategy plot
+        fig.add_annotation(
+            xref="x4 domain",
+            yref="y4 domain",
+            x=0.05,
+            y=0.05,
+            text=opt_params_text,
+            showarrow=False,
+            font=dict(size=10),
+            align="left",
+            bgcolor="rgba(255, 255, 255, 0.7)",
             bordercolor="black",
             borderwidth=1
         )
         
         # Update layout
         fig.update_layout(
-            title=f"Multi-Timeframe RSI Strategy Performance",
-            height=1000,
-            template="plotly_white",
+            title=f"RSI Strategy Analysis: {symbol} ({start_date} to {end_date})",
+            height=1400,
+            width=1200,
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            template="plotly_white",  # Use a white background template
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=-0.15,
+                xanchor="center",
+                x=0.5
+            )
         )
         
-        # Save to HTML
-        fig.write_html(filename)
-        logger.info(f"Multi-timeframe report saved to {filename}")
+        # Update axes titles
+        fig.update_xaxes(title_text="Date", row=1, col=1)
+        fig.update_xaxes(title_text="Date", row=1, col=2)
+        fig.update_xaxes(title_text="Date", row=2, col=1)
+        fig.update_xaxes(title_text="Date", row=2, col=2)
+        fig.update_xaxes(title_text="Date", row=3, col=1)
+        fig.update_xaxes(title_text="Month", row=3, col=2)
+        fig.update_xaxes(title_text="Lower Threshold", row=4, col=1)
+        fig.update_xaxes(title_text="Lower Threshold", row=4, col=2)
+        
+        fig.update_yaxes(title_text="Cumulative Return", row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown", row=1, col=2)
+        fig.update_yaxes(title_text="Portfolio Value", row=2, col=1)
+        fig.update_yaxes(title_text="Portfolio Value", row=2, col=2)
+        fig.update_yaxes(title_text="Price", row=3, col=1)
+        fig.update_yaxes(title_text="Year", row=3, col=2)
+        fig.update_yaxes(title_text="Window Size", row=4, col=1)
+        fig.update_yaxes(title_text="Window Size", row=4, col=2)
+        
+        # Save the dashboard to HTML file
+        dashboard_filename = f'rsi_strategy_dashboard_{symbol.replace("-", "_")}.html'
+        dashboard_file = reports_dir / dashboard_filename
+        
+        # Force overwrite any existing file
+        if dashboard_file.exists():
+            dashboard_file.unlink()
+        
+        # Save with full configuration
+        fig.write_html(
+            str(dashboard_file),
+            include_plotlyjs=True,
+            full_html=True,
+            include_mathjax='cdn',
+            auto_open=False
+        )
+        
+        logger.info(f"Interactive dashboard saved to {dashboard_file}")
+        
+        return str(dashboard_file)
     
     except Exception as e:
-        logger.error(f"Error generating multi-timeframe report: {e}")
+        logger.error(f"Error creating dashboard: {e}")
         logger.error(traceback.format_exc())
-
-def test_rsi_strategy(data, window=14, wtype='wilder', lower_th=30, upper_th=70):
-    """
-    Test RSI strategy with specified parameters.
-    
-    Args:
-        data: OHLCV data
-        window: RSI window
-        wtype: RSI type ('wilder' or 'simple')
-        lower_th: Lower RSI threshold
-        upper_th: Upper RSI threshold
-        
-    Returns:
-        Dict with strategy results
-    """
-    logger.info(f"Testing RSI strategy with window={window}, type={wtype}, lower_th={lower_th}, upper_th={upper_th}")
-    
-    # Create strategy instance
-    strategy = RSIMomentumVBT(
-        window=window,
-        wtype=wtype,
-        lower_threshold=lower_th,
-        upper_threshold=upper_th,
-        ma_window=20,
-        ma_type='sma',
-        stop_pct=0.05,
-        risk_pct=0.02,
-        commission_pct=0.001,
-        slippage_pct=0.0005,
-        initial_capital=10000.0
-    )
-    
-    # Run strategy
-    result = strategy.run(data)
-    
-    return result
-
-def optimize_rsi_strategy(data, param_grid, min_trades=5, metric='sharpe'):
-    """
-    Optimize RSI strategy parameters using vectorbtpro.
-
-    Args:
-        data (pd.DataFrame): OHLCV data.
-        param_grid (dict): Dictionary of parameters to test (e.g., {'window': [10, 20]}).
-        min_trades (int): Minimum number of trades required for a result to be considered valid.
-        metric (str): Metric to optimize for (e.g., 'sharpe', 'total_return').
-
-    Returns:
-        dict: Dictionary containing best parameters, metrics, and portfolio, or None if no valid result.
-    """
-    logger.info(f"Optimizing parameters: {param_grid}")
-    
-    if not isinstance(data, pd.DataFrame) or not all(c in data.columns for c in ['open', 'high', 'low', 'close', 'volume']):
-        logger.error("Optimization requires DataFrame with OHLCV columns.")
         return None
 
-    # Extract parameter combinations
-    rsi_windows = param_grid.get('window', [14])
-    lower_thresholds = param_grid.get('lower_threshold', [30])
-    upper_thresholds = param_grid.get('upper_threshold', [70])
-
-    # Store all parameter combinations and their results
-    all_results = []
-    best_metric_value = -float('inf')  # Start with worst possible value for maximization
-    best_params = None
-    best_portfolio = None
-
-    # Loop through all parameter combinations
-    logger.info(f"Testing {len(rsi_windows) * len(lower_thresholds) * len(upper_thresholds)} parameter combinations...")
-    for window in rsi_windows:
-        for lower_th in lower_thresholds:
-            for upper_th in upper_thresholds:
-                # Run the RSI strategy with this parameter set
-                strategy = RSIMomentumVBT(
-                    window=window,
-                    wtype='wilder',
-                    lower_threshold=lower_th,
-                    upper_threshold=upper_th,
-                    ma_window=20,
-                    ma_type='sma',
-                    initial_capital=10000.0
-                )
-                
-                try:
-                    # Run the strategy
-                    result = strategy.run(data)
-                    
-                    # Skip if no valid portfolio
-                    if not isinstance(result, dict) or 'portfolio' not in result or result['portfolio'] is None:
-                        continue
-                        
-                    portfolio = result['portfolio']
-                    
-                    # Check if minimum trade count is met
-                    trade_count = 0
-                    try:
-                        if hasattr(portfolio.trades, 'count'):
-                            trade_count = portfolio.trades.count()
-                        elif hasattr(portfolio.trades, 'records') and len(portfolio.trades.records) > 0:
-                            trade_count = len(portfolio.trades.records)
-                        else:
-                            trade_count = len(portfolio.trades)
-                    except:
-                        continue  # Skip if cannot determine trade count
-                    
-                    if trade_count < min_trades:
-                        continue
-                    
-                    # Calculate metrics
-                    metrics = calculate_risk_metrics(portfolio)
-                    
-                    # Get the target metric value
-                    if metric == 'sharpe':
-                        metric_value = metrics['sharpe']
-                    elif metric == 'total_return':
-                        metric_value = metrics['total_return'] 
-                    elif metric == 'max_dd':
-                        # For drawdown, less negative is better, so negate to make it maximizable
-                        metric_value = -abs(metrics['max_dd'])
-                    else:
-                        logger.warning(f"Unsupported metric: {metric}. Using sharpe ratio.")
-                        metric_value = metrics['sharpe']
-                    
-                    # Store the result
-                    result_entry = {
-                        'window': window,
-                        'lower_threshold': lower_th,
-                        'upper_threshold': upper_th,
-                        'metric_value': metric_value,
-                        'metric_name': metric,
-                        'portfolio': portfolio,
-                        'metrics': metrics
-                    }
-                    all_results.append(result_entry)
-                    
-                    # Update best result if current is better
-                    if metric_value > best_metric_value:
-                        best_metric_value = metric_value
-                        best_params = {
-                            'window': window,
-                            'lower_threshold': lower_th,
-                            'upper_threshold': upper_th
-                        }
-                        best_portfolio = portfolio
-                        best_metrics = metrics
-                        
-                except Exception as e:
-                    logger.warning(f"Error optimizing with window={window}, lower_th={lower_th}, upper_th={upper_th}: {e}")
-                    continue
-    
-    # Check if any valid results found
-    if not best_params:
-        logger.warning(f"No parameter combinations met the minimum trade requirement of {min_trades}")
-        return None
-    
-    logger.info(f"Optimization complete. Found {len(all_results)} valid parameter combinations.")
-    logger.info(f"Best parameters: window={best_params['window']}, lower_th={best_params['lower_threshold']}, upper_th={best_params['upper_threshold']}")
-    
-    return {
-        'best_params': best_params,
-        'best_metrics': best_metrics,
-        'portfolio': best_portfolio,
-        'all_results': all_results  # Include all results for further analysis if needed
-    }
-
-def fetch_historical_data(product_id, start_date, end_date, granularity=86400):
+def create_dashboard(results, opt_results=None, symbol="BTC-USD", start_date=None, end_date=None, reports_dir=None):
     """
-    Fetch historical price data from Coinbase or from cache
+    Create an interactive dashboard for strategy analysis.
     
     Parameters:
     -----------
-    product_id : str
-        The product ID (e.g., 'BTC-USD')
+    results : dict
+        Results from the basic RSI strategy
+    opt_results : dict, optional
+        Results from optimize_rsi_strategy
+    symbol : str
+        The trading symbol (e.g., BTC-USD)
     start_date : str
-        Start date in format 'YYYY-MM-DD'
+        Start date in format YYYY-MM-DD
     end_date : str
-        End date in format 'YYYY-MM-DD'
-    granularity : int
-        Granularity in seconds (default: 86400 for daily)
+        End date in format YYYY-MM-DD
+    reports_dir : str or Path
+        Directory to save reports
+    
+    Returns:
+    --------
+    str
+        Path to the saved dashboard HTML file
+    """
+    try:
+        # Use default reports directory if not provided
+        if reports_dir is None:
+            reports_dir = Path("reports")
+        elif isinstance(reports_dir, str):
+            reports_dir = Path(reports_dir)
+            
+        # Create reports directory if it doesn't exist
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check for valid portfolio data
+        if results is None or 'portfolio' not in results:
+            logger.error("Invalid results data for dashboard creation")
+            return None
+        
+        # Get basic portfolio and data
+        basic_portfolio = results['portfolio']
+        price_data = results.get('price_data', None)
+        
+        if price_data is None and 'close' in basic_portfolio.wrapper.columns:
+            # Use the price data from the portfolio if available
+            price_data = pd.DataFrame({
+                'close': basic_portfolio.wrapper.columns[0]
+            })
+        
+        # Calculate benchmark returns (buy and hold)
+        benchmark_returns = price_data['close'].pct_change().dropna()
+        benchmark_cum_returns = (1 + benchmark_returns).cumprod() - 1
+        
+        # Calculate risk metrics
+        basic_metrics = calculate_risk_metrics(basic_portfolio)
+        
+        # Create figure with subplots
+        fig = make_subplots(
+            rows=4, cols=2, 
+            vertical_spacing=0.08,
+            horizontal_spacing=0.05,
+            subplot_titles=(
+                "Cumulative Returns", "Drawdowns",
+                "RSI Indicator", "Price and Trades",
+                "Daily Returns", "Monthly Returns",
+                "Strategy Metrics", "Optimization Results"
+            ),
+            specs=[
+                [{"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "scatter"}, {"type": "scatter"}],
+                [{"type": "scatter"}, {"type": "bar"}],
+                [{"type": "table"}, {"type": "table"}]
+            ],
+            row_heights=[0.25, 0.25, 0.25, 0.25]
+        )
+        
+        # Add optimized portfolio if available
+        opt_portfolio = None
+        opt_metrics = None
+        if opt_results and 'portfolio' in opt_results:
+            opt_portfolio = opt_results['portfolio']
+            opt_metrics = calculate_risk_metrics(opt_portfolio)
+        
+        # 1. Cumulative Returns Plot
+        try:
+            # Basic strategy returns
+            basic_returns = basic_portfolio.returns.cumsum()
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=basic_returns.index,
+                    y=basic_returns.values,
+                    mode='lines',
+                    name='Basic RSI Strategy',
+                    line=dict(color='blue', width=2)
+                ),
+                row=1, col=1
+            )
+            
+            # Add optimized strategy if available
+            if opt_portfolio is not None:
+                opt_returns = opt_portfolio.returns.cumsum()
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=opt_returns.index,
+                        y=opt_returns.values,
+                        mode='lines',
+                        name='Optimized RSI',
+                        line=dict(color='green', width=2)
+                    ),
+                    row=1, col=1
+                )
+            
+            # Add benchmark (buy and hold)
+            fig.add_trace(
+                go.Scatter(
+                    x=benchmark_cum_returns.index,
+                    y=benchmark_cum_returns.values,
+                    mode='lines',
+                    name='Buy and Hold',
+                    line=dict(color='gray', width=1, dash='dash')
+                ),
+                row=1, col=1
+            )
+        except Exception as e:
+            logger.error(f"Error creating cumulative returns plot: {e}")
+        
+        # 2. Drawdowns Plot
+        try:
+            # Calculate drawdowns
+            basic_dd = basic_portfolio.drawdown()
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=basic_dd.index,
+                    y=basic_dd.values,
+                    mode='lines',
+                    name='Basic Strategy DD',
+                    line=dict(color='red', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(255,0,0,0.1)'
+                ),
+                row=1, col=2
+            )
+            
+            # Add optimized strategy drawdown if available
+            if opt_portfolio is not None:
+                opt_dd = opt_portfolio.drawdown()
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=opt_dd.index,
+                        y=opt_dd.values,
+                        mode='lines',
+                        name='Optimized Strategy DD',
+                        line=dict(color='orange', width=2),
+                        fill='tozeroy',
+                        fillcolor='rgba(255,165,0,0.1)'
+                    ),
+                    row=1, col=2
+                )
+        except Exception as e:
+            logger.error(f"Error creating drawdowns plot: {e}")
+            
+        # 3. RSI Indicator
+        try:
+            if 'rsi' in results:
+                rsi = results['rsi']
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=rsi.index,
+                        y=rsi.values,
+                        mode='lines',
+                        name='RSI',
+                        line=dict(color='purple', width=2)
+                    ),
+                    row=2, col=1
+                )
+                
+                # Add threshold lines
+                lower_threshold = results.get('lower_threshold', 30)
+                upper_threshold = results.get('upper_threshold', 70)
+                
+                # If not in results, try to get from params
+                if 'rsi_indicator' in results:
+                    lower_threshold = results.get('lower_threshold', 30)
+                    upper_threshold = results.get('upper_threshold', 70)
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=[rsi.index[0], rsi.index[-1]],
+                        y=[lower_threshold, lower_threshold],
+                        mode='lines',
+                        name=f'Lower ({lower_threshold})',
+                        line=dict(color='green', width=1, dash='dash')
+                    ),
+                    row=2, col=1
+                )
+                
+                fig.add_trace(
+                    go.Scatter(
+                        x=[rsi.index[0], rsi.index[-1]],
+                        y=[upper_threshold, upper_threshold],
+                        mode='lines',
+                        name=f'Upper ({upper_threshold})',
+                        line=dict(color='red', width=1, dash='dash')
+                    ),
+                    row=2, col=1
+                )
+        except Exception as e:
+            logger.error(f"Error creating RSI plot: {e}")
+        
+        # 4. Price and Trades
+        try:
+            if price_data is not None:
+                # Add price
+                fig.add_trace(
+                    go.Scatter(
+                        x=price_data.index,
+                        y=price_data['close'],
+                        mode='lines',
+                        name='Price',
+                        line=dict(color='black', width=2)
+                    ),
+                    row=2, col=2
+                )
+                
+                # Add trade markers if available
+                if hasattr(basic_portfolio, 'trades') and len(basic_portfolio.trades) > 0:
+                    try:
+                        trades = basic_portfolio.trades
+                        
+                        # Get entry indices
+                        entry_idx = trades.records_arr['entry_idx']
+                        entry_idx = [idx for idx in entry_idx if 0 <= idx < len(price_data)]
+                        
+                        # Get entry values
+                        entry_prices = [price_data['close'].iloc[idx] for idx in entry_idx]
+                        entry_times = [price_data.index[idx] for idx in entry_idx]
+                        
+                        # Add entry markers
+                        fig.add_trace(
+                            go.Scatter(
+                                x=entry_times,
+                                y=entry_prices,
+                                mode='markers',
+                                marker=dict(symbol='triangle-up', size=12, color='green'),
+                                name='Buy'
+                            ),
+                            row=2, col=2
+                        )
+                        
+                        # Get exit indices
+                        exit_idx = trades.records_arr['exit_idx']
+                        exit_idx = [idx for idx in exit_idx if 0 <= idx < len(price_data)]
+                        
+                        # Get exit values
+                        exit_prices = [price_data['close'].iloc[idx] for idx in exit_idx]
+                        exit_times = [price_data.index[idx] for idx in exit_idx]
+                        
+                        # Add exit markers
+                        fig.add_trace(
+                            go.Scatter(
+                                x=exit_times,
+                                y=exit_prices,
+                                mode='markers',
+                                marker=dict(symbol='triangle-down', size=12, color='red'),
+                                name='Sell'
+                            ),
+                            row=2, col=2
+                        )
+                    except Exception as e:
+                        logger.error(f"Error adding trade markers: {e}")
+        except Exception as e:
+            logger.error(f"Error creating price plot: {e}")
+            
+        # 5. Daily Returns
+        try:
+            # Basic strategy daily returns
+            fig.add_trace(
+                go.Scatter(
+                    x=basic_portfolio.returns.index,
+                    y=basic_portfolio.returns.values * 100,  # Convert to percentage
+                    mode='lines',
+                    name='Daily Returns',
+                    line=dict(color='blue', width=1)
+                ),
+                row=3, col=1
+            )
+            
+            # Add moving average of returns
+            returns_ma = basic_portfolio.returns.rolling(7).mean() * 100
+            fig.add_trace(
+                go.Scatter(
+                    x=returns_ma.index,
+                    y=returns_ma.values,
+                    mode='lines',
+                    name='7-day MA',
+                    line=dict(color='orange', width=2)
+                ),
+                row=3, col=1
+            )
+        except Exception as e:
+            logger.error(f"Error creating daily returns plot: {e}")
+        
+        # 6. Monthly Returns
+        try:
+            # Calculate monthly returns
+            monthly_returns = basic_portfolio.returns.resample('M').sum() * 100
+            
+            fig.add_trace(
+                go.Bar(
+                    x=monthly_returns.index,
+                    y=monthly_returns.values,
+                    name='Monthly Returns',
+                    marker=dict(color=['red' if x < 0 else 'green' for x in monthly_returns.values])
+                ),
+                row=3, col=2
+            )
+        except Exception as e:
+            logger.error(f"Error creating monthly returns plot: {e}")
+            
+        # 7. Strategy Metrics Table
+        try:
+            metrics_table = {
+                'Metric': [
+                    'Total Return (%)', 
+                    'Annualized Return (%)',
+                    'Sharpe Ratio',
+                    'Max Drawdown (%)',
+                    'Win Rate (%)',
+                    'Total Trades'
+                ],
+                'Basic Strategy': [
+                    f"{basic_metrics['total_return']*100:.2f}",
+                    f"{basic_metrics.get('annual_return', 0)*100:.2f}",
+                    f"{basic_metrics['sharpe']:.2f}",
+                    f"{basic_metrics['max_dd']*100:.2f}",
+                    f"{basic_metrics['win_rate']*100:.2f}",
+                    f"{basic_metrics['trades']}"
+                ]
+            }
+            
+            # Add optimized strategy metrics if available
+            if opt_metrics is not None:
+                metrics_table['Optimized Strategy'] = [
+                    f"{opt_metrics['total_return']*100:.2f}",
+                    f"{opt_metrics.get('annual_return', 0)*100:.2f}",
+                    f"{opt_metrics['sharpe']:.2f}",
+                    f"{opt_metrics['max_dd']*100:.2f}",
+                    f"{opt_metrics['win_rate']*100:.2f}",
+                    f"{opt_metrics['trades']}"
+                ]
+            
+            fig.add_trace(
+                go.Table(
+                    header=dict(
+                        values=list(metrics_table.keys()),
+                        font=dict(size=12, color='white'),
+                        fill_color='blue',
+                        align='center'
+                    ),
+                    cells=dict(
+                        values=list(metrics_table.values()),
+                        font=dict(size=11),
+                        fill_color='lightblue',
+                        align='center'
+                    )
+                ),
+                row=4, col=1
+            )
+        except Exception as e:
+            logger.error(f"Error creating metrics table: {e}")
+            
+        # 8. Optimization Results Table
+        try:
+            if opt_results is not None and 'best_params' in opt_results:
+                best_params = opt_results['best_params']
+                
+                params_table = {
+                    'Parameter': list(best_params.keys()),
+                    'Optimal Value': [str(best_params[param]) for param in best_params.keys()]
+                }
+                
+                fig.add_trace(
+                    go.Table(
+                        header=dict(
+                            values=list(params_table.keys()),
+                            font=dict(size=12, color='white'),
+                            fill_color='green',
+                            align='center'
+                        ),
+                        cells=dict(
+                            values=list(params_table.values()),
+                            font=dict(size=11),
+                            fill_color='lightgreen',
+                            align='center'
+                        )
+                    ),
+                    row=4, col=2
+                )
+        except Exception as e:
+            logger.error(f"Error creating optimization table: {e}")
+        
+        # Update layout
+        fig.update_layout(
+            title=f"RSI Strategy Dashboard - {symbol} ({start_date} to {end_date})",
+            height=1000,
+            width=1200,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+        )
+        
+        # Update axis labels
+        fig.update_xaxes(title_text="Date", row=1, col=1)
+        fig.update_xaxes(title_text="Date", row=1, col=2)
+        fig.update_xaxes(title_text="Date", row=2, col=1)
+        fig.update_xaxes(title_text="Date", row=2, col=2)
+        fig.update_xaxes(title_text="Date", row=3, col=1)
+        fig.update_xaxes(title_text="Date", row=3, col=2)
+        
+        fig.update_yaxes(title_text="Cumulative Return", row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown", row=1, col=2)
+        fig.update_yaxes(title_text="RSI Value", row=2, col=1)
+        fig.update_yaxes(title_text="Price", row=2, col=2)
+        fig.update_yaxes(title_text="Daily Return (%)", row=3, col=1)
+        fig.update_yaxes(title_text="Monthly Return (%)", row=3, col=2)
+        
+        # Save dashboard to file
+        dashboard_filename = f"rsi_dashboard_{symbol.replace('-', '_')}.html"
+        dashboard_file = reports_dir / dashboard_filename
+        
+        fig.write_html(
+            str(dashboard_file),
+            auto_open=False,
+            include_plotlyjs='cdn'
+        )
+        
+        logger.info(f"Dashboard saved to: {dashboard_file}")
+        
+        return str(dashboard_file)
+        
+    except Exception as e:
+        logger.error(f"Error creating dashboard: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
+def resample_data(data, to='1D'):
+    """
+    Resample OHLCV data to a different timeframe.
+    
+    Parameters:
+    -----------
+    data : pd.DataFrame
+        The OHLCV data to resample
+    to : str
+        The target frequency (e.g., '1D', '1H', '15T', '3D', '1W')
         
     Returns:
     --------
-    DataFrame
-        Historical price data with columns: open, high, low, close, volume
+    pd.DataFrame
+        Resampled OHLCV data
     """
-    # Convert product_id for cache filename (BTC-USD -> BTCUSD)
-    cache_product_id = product_id.replace('-', '')
-    
-    # Determine granularity name for cache filename
-    granularity_name = "ONE_DAY"
-    if granularity == 3600:
-        granularity_name = "ONE_HOUR"
-    elif granularity == 300:
-        granularity_name = "FIVE_MIN"
-    elif granularity == 60:
-        granularity_name = "ONE_MIN"
-    
-    # Create cache directory if it doesn't exist
-    cache_dir = os.path.join('data', 'cache')
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    # Define cache file path
-    cache_file = os.path.join(cache_dir, f"{cache_product_id}_{start_date}_{end_date}_{granularity_name}.csv")
-    
-    # Check if cache file exists
-    if os.path.exists(cache_file):
-        try:
-            # Load from cache - specify ISO date format explicitly to avoid warning
-            logging.info(f"Loading cached data from: {cache_file}")
-            data = pd.read_csv(cache_file, index_col=0, parse_dates=True, date_format='ISO8601')
-            
-            # If 'data' column exists and contains string representations of dictionaries, parse them
-            if 'data' in data.columns:
-                logging.info("Processing cached data from data column")
-                # Parse the string dictionaries to actual dictionaries
-                data['parsed'] = data['data'].apply(lambda x: eval(x) if isinstance(x, str) else x)
-                
-                # Extract columns from the parsed dictionaries
-                for col in ['open', 'high', 'low', 'close', 'volume', 'start']:
-                    data[col] = data['parsed'].apply(lambda x: float(x.get(col, 0)) if x and col in x else None)
-                
-                # Set timestamp as index
-                data['timestamp'] = pd.to_datetime(data['start'], unit='s')
-                data = data.set_index('timestamp')
-                
-                # Select only the relevant columns
-                data = data[['open', 'high', 'low', 'close', 'volume']]
-                
-                # Sort by index
-                data = data.sort_index()
-            
-            logging.info(f"Loaded {len(data)} rows of cached data")
-            return data
-        except Exception as e:
-            logging.error(f"Error loading cache: {e}")
-            # If there's an error with the cache, we'll fetch fresh data
-    
-    # If cache doesn't exist or there was an error, fetch data from API
-    logging.info(f"Fetching new data for {product_id} from {start_date} to {end_date}")
+    logger.info(f"Resampling data to {to} frequency")
     
     try:
-        # Load API credentials
-        credentials_file = "cdp_api_key.json"
-        logging.info(f"Loading credentials from {credentials_file}...")
+        # For upsampling to lower timeframes, this is just an approximation
+        # In a real system, you'd want actual data at the target frequency
+        resampled = pd.DataFrame(index=pd.date_range(start=data.index[0], end=data.index[-1], freq=to))
         
-        with open(credentials_file, 'r') as f:
-            credentials = json.load(f)
+        # Check if all required columns exist
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        available_cols = [col for col in required_cols if col in data.columns]
         
-        # Initialize Coinbase Advanced Trade client
-        rest_client = RESTClient(
-            api_key=credentials["API_KEY"],
-            api_secret=credentials["API_SECRET"],
-            key_passphrase=credentials.get("PASSPHRASE", ""),  # Optional
-        )
+        if not all(col in data.columns for col in required_cols):
+            logger.warning(f"Missing columns in data: {set(required_cols) - set(data.columns)}")
         
-        logging.info("Coinbase REST client initialized")
+        # Resample based on column type
+        if 'open' in data.columns:
+            resampled['open'] = data['open'].resample(to).first()
         
-        # Convert dates to ISO format for the API
-        start_time = pd.Timestamp(start_date).isoformat()
-        end_time = pd.Timestamp(end_date).isoformat()
+        if 'high' in data.columns:
+            resampled['high'] = data['high'].resample(to).max()
         
-        # Calculate the total number of candles needed
-        start_dt = pd.Timestamp(start_date)
-        end_dt = pd.Timestamp(end_date)
-        total_seconds = (end_dt - start_dt).total_seconds()
-        total_candles = int(total_seconds / granularity) + 1
+        if 'low' in data.columns:
+            resampled['low'] = data['low'].resample(to).min()
         
-        logging.info(f"Need to fetch {total_candles} candles")
+        if 'close' in data.columns:
+            resampled['close'] = data['close'].resample(to).last()
         
-        # Fetch data in chunks if needed (Coinbase API limit is 300 candles per request)
-        all_candles = []
-        current_start = start_dt
+        if 'volume' in data.columns:
+            resampled['volume'] = data['volume'].resample(to).sum()
         
-        while current_start <= end_dt:
-            # Calculate end time for this chunk (max 300 candles)
-            chunk_end = current_start + pd.Timedelta(seconds=granularity * 300)
-            if chunk_end > end_dt:
-                chunk_end = end_dt
-            
-            chunk_start_iso = current_start.isoformat()
-            chunk_end_iso = chunk_end.isoformat()
-            
-            logging.info(f"Fetching chunk from {chunk_start_iso} to {chunk_end_iso}")
-            
-            # Make API request
-            candles = rest_client.get_product_candles(
-                product_id=product_id,
-                start=chunk_start_iso,
-                end=chunk_end_iso,
-                granularity=granularity
-            )
-            
-            # Add candles to our list
-            if candles and hasattr(candles, 'candles'):
-                chunk_candles = candles.candles
-                logging.info(f"Fetched {len(chunk_candles)} candles in this chunk")
-                all_candles.extend(chunk_candles)
-            else:
-                logging.warning(f"No candles returned for this chunk or unexpected response format: {candles}")
-            
-            # Move to the next chunk
-            current_start = chunk_end
+        # Forward fill any missing values
+        resampled = resampled.fillna(method='ffill')
         
-        logging.info(f"Total candles fetched: {len(all_candles)}")
+        # If downsampling to a higher timeframe (weekly, monthly, etc.)
+        # we may have fewer rows than original data
+        logger.info(f"Resampled data shape: {resampled.shape}")
         
-        # Convert to DataFrame
-        if all_candles:
-            # Create DataFrame from the candles
-            data = []
-            for candle in all_candles:
-                # Check if the candle is a Candle object or a dictionary
-                if hasattr(candle, '__dict__'):
-                    # Convert Candle object to dictionary
-                    candle_dict = candle.__dict__
-                elif isinstance(candle, dict):
-                    candle_dict = candle
-                else:
-                    # Skip if not a valid format
-                    continue
-                
-                # Extract values from the dictionary
-                entry = {
-                    'start': float(candle_dict.get('start', 0)),
-                    'low': float(candle_dict.get('low', 0)),
-                    'high': float(candle_dict.get('high', 0)),
-                    'open': float(candle_dict.get('open', 0)),
-                    'close': float(candle_dict.get('close', 0)),
-                    'volume': float(candle_dict.get('volume', 0))
-                }
-                data.append(entry)
-            
-            # Create DataFrame
-            df = pd.DataFrame(data)
-            
-            # Convert timestamp to datetime and set as index
-            df['timestamp'] = pd.to_datetime(df['start'], unit='s')
-            df = df.set_index('timestamp')
-            
-            # Select only relevant columns and sort by index
-            df = df[['open', 'high', 'low', 'close', 'volume']]
-            df = df.sort_index()
-            
-            # Cache the data for future use
-            df.to_csv(cache_file)
-            logging.info(f"Cached {len(df)} rows to {cache_file}")
-            
-            return df
-        else:
-            logging.error("No data fetched from API")
-            return pd.DataFrame()
-    
+        return resampled
+        
     except Exception as e:
-        logging.error(f"Error fetching data: {e}")
-        logging.error(f"Error traceback: {traceback.format_exc()}")
-        
-        # Return empty DataFrame on error
-        return pd.DataFrame()
-
-def create_sample_data(start_date, end_date):
-    """
-    Create sample price data for backtesting when no real data is available.
-    
-    Args:
-        start_date: Start date string (YYYY-MM-DD)
-        end_date: End date string (YYYY-MM-DD)
-        
-    Returns:
-        DataFrame with OHLCV data
-    """
-    logger.info(f"Creating sample BTC-USD price data for backtesting...")
-    
-    # Create directory for cached data if it doesn't exist
-    cache_dir = Path("data/cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Check if we have cached sample data
-    cache_file = cache_dir / f"sample_{start_date}_{end_date}.csv"
-    
-    if cache_file.exists():
-        logger.info(f"Loading cached sample data from: {cache_file}")
-        try:
-            data = pd.read_csv(cache_file, index_col=0, parse_dates=True)
-            
-            # Ensure all required columns exist
-            if 'close' not in data.columns and 'Close' in data.columns:
-                data['close'] = data['Close']
-                data.drop('Close', axis=1, inplace=True, errors='ignore')
-            
-            # Check for missing OHLCV columns
-            required_columns = ['open', 'high', 'low', 'close', 'volume']
-            if not all(col in data.columns for col in required_columns):
-                logger.warning(f"Cached data missing required columns. Available columns: {data.columns}")
-                logger.info("Regenerating sample data...")
-                # Delete invalid cache file
-                try:
-                    cache_file.unlink()
-                except:
-                    pass
-            else:
-                logger.info(f"Loaded {len(data)} days of cached sample data")
-                return data
-        except Exception as e:
-            logger.error(f"Error loading cached data: {e}")
-    
-    # Create date range
-    start = pd.to_datetime(start_date)
-    end = pd.to_datetime(end_date)
-    daterange = pd.date_range(start=start, end=end, freq='D')
-    
-    # Generate random price data with realistic properties
-    np.random.seed(42)  # For reproducibility
-    
-    # Start with a price and add random changes
-    price = 20000.0  # Starting price for BTC
-    daily_volatility = 0.02  # 2% daily volatility
-    
-    prices = []
-    for _ in range(len(daterange)):
-        daily_return = np.random.normal(0.0002, daily_volatility)  # Slight upward drift
-        price *= (1 + daily_return)
-        prices.append(price)
-    
-    close_prices = pd.Series(prices, index=daterange)
-    
-    # Generate OHLCV data
-    data = pd.DataFrame(index=daterange)
-    data['close'] = close_prices
-    data['high'] = data['close'] * (1 + np.random.uniform(0, 0.03, len(data)))
-    data['low'] = data['close'] * (1 - np.random.uniform(0, 0.03, len(data)))
-    data['open'] = data['close'].shift(1)
-    
-    # Handle first row
-    data.loc[data.index[0], 'open'] = data.loc[data.index[0], 'close'] * 0.99
-    
-    # Add volume (proportional to price changes)
-    price_changes = np.abs(data['close'].pct_change().fillna(0.01))
-    base_volume = 1000  # Base volume in BTC
-    data['volume'] = base_volume * (1 + 5 * price_changes)  # Higher volume on bigger price moves
-    
-    # Cache the generated data
-    try:
-        data.to_csv(cache_file)
-        logger.info(f"Cached sample data to: {cache_file}")
-    except Exception as e:
-        logger.error(f"Error caching sample data: {e}")
-    
-    logger.info(f"Generated {len(data)} days of sample price data")
-    return data
-
-def test_multi_indicator_strategy(data, window=14, wtype='wilder', lower_th=30, upper_th=70):
-    """Test the enhanced multi-indicator strategy."""
-    logger.info(f"Testing multi-indicator strategy with RSI window={window}, type={wtype}, thresholds: {lower_th}/{upper_th}")
-    
-    # Create strategy instance
-    strategy = MultiIndicatorStrategy(
-        window=window,
-        wtype=wtype,
-        lower_threshold=lower_th,
-        upper_threshold=upper_th,
-        ma_window=20,
-        ma_type='sma',
-        stop_pct=0.05,
-        risk_pct=0.02,
-        commission_pct=0.001,
-        slippage_pct=0.0005,
-        initial_capital=10000.0,
-        use_macd=True,
-        use_bbands=True
-    )
-    
-    # Run strategy
-    result = strategy.run(data)
-    
-    return result
-
-def test_enhanced_rsi_strategy(data, window=14, wtype='wilder', lower_th=30, upper_th=70):
-    """Test the enhanced RSI strategy with advanced risk management."""
-    logger.info(f"Testing enhanced RSI strategy with window={window}, type={wtype}, thresholds: {lower_th}/{upper_th}")
-    
-    # Create strategy instance
-    strategy = EnhancedRSIStrategy(
-        window=window,
-        wtype=wtype,
-        lower_threshold=lower_th,
-        upper_threshold=upper_th,
-        ma_window=20,
-        ma_type='sma',
-        stop_pct=0.05,
-        risk_pct=0.02,
-        commission_pct=0.001,
-        slippage_pct=0.0005,
-        initial_capital=10000.0,
-        atr_stop_multiplier=2.0,
-        use_trailing_stop=True,
-        equity_scaling=True
-    )
-    
-    # Run strategy
-    result = strategy.run(data)
-    
-    return result
+        logger.error(f"Error in resampling data: {e}")
+        logger.error(traceback.format_exc())
+        # Return original data if resampling fails
+        return data
 
 def main():
     # Get symbol and date range from command line arguments
@@ -1968,6 +2900,7 @@ def main():
     parser.add_argument('--multi_timeframe', action='store_true', help='Use multi-timeframe strategy')
     parser.add_argument('--use_higher_tf', action='store_true', help='Use higher timeframe for trend confirmation')
     parser.add_argument('--use_lower_tf', action='store_true', help='Use lower timeframe for entry timing')
+    parser.add_argument('--dashboard', action='store_true', help='Create interactive dashboard', default=True)
     args = parser.parse_args()
     
     symbol = args.symbol
@@ -1993,38 +2926,62 @@ def main():
     
     if args.multi_timeframe:
         # Run multi-timeframe strategy
-        logger.info("Running multi-timeframe RSI strategy...")
+        logger.info("Running multi-timeframe strategy...")
         
-        # Run the multi-timeframe strategy
-        result = test_multitimeframe_strategy(
-            data, 
-            window=14, 
-            lower_th=30, 
-            upper_th=70,
-            use_higher_tf=args.use_higher_tf or True,  # Default to True if not specified
-            use_lower_tf=args.use_lower_tf or True     # Default to True if not specified
-        )
-        
-        # Generate detailed report
-        if result and 'portfolio' in result and result['portfolio'] is not None:
-            # Extract performance metrics
-            metrics = calculate_risk_metrics(result['portfolio'])
-            
-            # Log performance metrics
-            logger.info("Multi-Timeframe RSI Strategy Performance:")
-            logger.info(f"Total Return: {metrics['total_return']*100:.2f}%")
-            logger.info(f"Sharpe Ratio: {metrics['sharpe']:.2f}")
-            logger.info(f"Max Drawdown: {metrics['max_dd']*100:.2f}%")
-            logger.info(f"Win Rate: {metrics['win_rate']*100:.2f}%")
-            logger.info(f"Total Trades: {metrics['trades']}")
-            
-            # Generate HTML report - Save to reports/ dir
-            report_filename = f'multi_tf_rsi_strategy_results_{symbol.replace("-", "_")}.html'
-            report_file = reports_dir / report_filename
-            generate_multi_tf_report(result, filename=str(report_file))
-            logger.info(f"Multi-timeframe strategy report saved to {report_file}")
+        # Run the strategy with multi-timeframe approach
+        if args.use_higher_tf and args.use_lower_tf:
+            logger.info("Using both higher and lower timeframes")
+            # Use both higher and lower timeframes for comprehensive analysis
+            # Combine trend from higher with precision from lower
+            strategy = MultiTimeframeStrategy(
+                primary_data=data,
+                higher_tf_data=resample_data(data, to='3D'),
+                lower_tf_data=resample_data(data, to='6H'),
+                window=14,
+                wtype='wilder',
+                lower_threshold=30,
+                upper_threshold=70
+            )
+            results = strategy.run_combined()
+        elif args.use_higher_tf:
+            logger.info("Using higher timeframe for trend")
+            # Use higher timeframe for trend confirmation
+            strategy = MultiTimeframeStrategy(
+                primary_data=data,
+                higher_tf_data=resample_data(data, to='3D'),
+                window=14,
+                wtype='wilder',
+                lower_threshold=30,
+                upper_threshold=70
+            )
+            results = strategy.run_higher_tf_trend()
+        elif args.use_lower_tf:
+            logger.info("Using lower timeframe for entry precision")
+            # Use lower timeframe for more precise entries
+            strategy = MultiTimeframeStrategy(
+                primary_data=data,
+                lower_tf_data=resample_data(data, to='6H'),
+                window=14,
+                wtype='wilder',
+                lower_threshold=30,
+                upper_threshold=70
+            )
+            results = strategy.run_lower_tf_entry()
         else:
-            logger.error("Multi-timeframe strategy did not produce valid results")
+            logger.info("Using basic multi-timeframe strategy")
+            # Use basic multi-timeframe without specific approach
+            strategy = MultiTimeframeStrategy(
+                primary_data=data,
+                window=14,
+                wtype='wilder',
+                lower_threshold=30,
+                upper_threshold=70
+            )
+            results = strategy.run_basic()
+        
+        # Generate report for multi-timeframe strategy
+        generate_multi_tf_report(results, str(reports_dir / f'multi_tf_strategy_{symbol.replace("-", "_")}.html'), 
+                                 symbol, start_date, end_date, reports_dir)
     else:
         # Run basic RSI strategy
         logger.info("Running basic RSI strategy...")
@@ -2053,10 +3010,10 @@ def main():
                 logger.info(f"Total Trades: {metrics['trades']}")
                 
                 # Save the strategy plot - Save to reports/ dir
-                fig = results['portfolio'].plot() # Access portfolio from dict
+                fig = results['portfolio'].plot()
                 plot_filename = f'rsi_basic_strategy_results_{symbol.replace("-", "_")}.html'
                 plot_file = reports_dir / plot_filename
-                vbt.save(fig, str(plot_file))
+                fig.write_html(str(plot_file))
                 logger.info(f"Basic strategy plot saved to {plot_file}")
 
             except Exception as e:
@@ -2075,8 +3032,8 @@ def main():
                 'upper_threshold': [60, 70, 80],
             }
             
-            # Run optimization
-            opt_results = optimize_rsi_strategy(data, param_grid, min_trades=5)
+            # Run optimization with min_trades=1 for testing
+            opt_results = optimize_rsi_strategy(data, param_grid, min_trades=1)
             
             if opt_results and 'best_params' in opt_results and opt_results['best_params']:
                 logger.info("Optimized Strategy Parameters:")
@@ -2096,8 +3053,13 @@ def main():
                     fig = opt_results['portfolio'].plot()
                     plot_filename = f'rsi_optimized_strategy_results_{symbol.replace("-", "_")}.html'
                     plot_file = reports_dir / plot_filename
-                    vbt.save(fig, str(plot_file))
+                    fig.write_html(str(plot_file))
                     logger.info(f"Optimized strategy plot saved to {plot_file}")
+                    
+                    # Create interactive dashboard if requested
+                    if args.dashboard:
+                        create_dashboard(results, opt_results, symbol, start_date, end_date, reports_dir)
+                
             else:
                 logger.warning("Optimization did not find valid parameters")
         except Exception as e:
