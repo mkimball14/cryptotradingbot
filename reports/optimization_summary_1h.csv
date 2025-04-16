@@ -1,3 +1,5 @@
 strategy,metric,best_score,total_return_pct,max_drawdown_pct,win_rate_pct,num_trades,best_params,error
 StochSMA,,,,,,,,Metric 'Sharpe Ratio' not found in stats
 RSIMomentum,,,,,,,,Metric 'Sharpe Ratio' not found in stats
+MACrossover,,,,,,,,name 'get_vbt_freq_str' is not defined
+RsiBB,,,,,,,,Metric 'Sharpe Ratio' not found in stats

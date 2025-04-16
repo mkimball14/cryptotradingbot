@@ -187,6 +187,7 @@ def get_granularity_str(granularity_seconds: int) -> Optional[str]:
     gran_map = {
         60: "ONE_MINUTE", 300: "FIVE_MINUTES", 900: "FIFTEEN_MINUTES",
         1800: "THIRTY_MINUTES", 3600: "ONE_HOUR", 7200: "TWO_HOURS",
+        14400: "FOUR_HOURS",
         21600: "SIX_HOURS", 86400: "ONE_DAY"
     }
     return gran_map.get(granularity_seconds)
@@ -331,52 +332,58 @@ class StochSMAStrategy:
 
         logger.info(f"Running StochSMA optimization with grid (manual iteration): {param_grid}")
 
+        # Initialize variables outside the main try block
+        sl_stop_pct = None
+        tsl_stop_pct = None
+        local_use_stops = self.use_stops
+        trend_filter_active = False
+        trend_filter_sma = None
+
         try:
-            # --- 1. Calculate Base Indicators (Stops, Trend Filter) ---
-            sl_stop_pct = None
-            tsl_stop_pct = None
-            local_use_stops = self.use_stops
+            # --- 1. Calculate Base Indicators (Stops, Trend Filter) --- 
             if local_use_stops:
                 try:
                     atr = vbt.ATR.run(high, low, close, window=14).atr # Default ATR period
                     if atr is not None and not atr.isnull().all():
                         if self.sl_atr_multiplier > 0:
                             sl_stop_pct = (atr * self.sl_atr_multiplier) / close
-                            sl_stop_pct = sl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill() # Use ffill/bfill
+                            sl_stop_pct = sl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill()
                         if self.tsl_atr_multiplier > 0:
                             tsl_stop_pct = (atr * self.tsl_atr_multiplier) / close
-                            tsl_stop_pct = tsl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill() # Use ffill/bfill
+                            tsl_stop_pct = tsl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill()
                         if (sl_stop_pct is not None and sl_stop_pct.isnull().all()) or \
                            (tsl_stop_pct is not None and tsl_stop_pct.isnull().all()):
                             logger.warning("Stop calculation resulted in all NaNs, disabling stops.")
-                            local_use_stops = False; sl_stop_pct = None; tsl_stop_pct = None
+                            local_use_stops = False
+                            sl_stop_pct = None
+                            tsl_stop_pct = None
                     else:
                         logger.warning("ATR calculation failed, disabling stops.")
                         local_use_stops = False
                 except Exception as atr_err:
-                    logger.warning(f"ATR error: {atr_err}, disabling stops."); local_use_stops = False
+                    logger.warning(f"ATR error: {atr_err}, disabling stops.")
+                    local_use_stops = False
 
-            trend_filter_active = False
-            trend_filter_sma = None
             if self.trend_filter_window > 0:
                 if self.trend_filter_window < 1 or self.trend_filter_window >= len(close):
-                     logger.warning(f"Trend SMA window {self.trend_filter_window} invalid for data len {len(close)}. Filter disabled.")
+                    logger.warning(f"Trend SMA window {self.trend_filter_window} invalid for data len {len(close)}. Filter disabled.")
                 else:
-                     try:
-                         trend_filter_sma = vbt.MA.run(close, window=self.trend_filter_window).ma
-                         trend_filter_active = trend_filter_sma is not None and not trend_filter_sma.isnull().all()
-                     except Exception as sma_err:
-                         logger.error(f"Trend SMA calculation error: {sma_err}"); trend_filter_active = False
-
+                    try:
+                        trend_filter_sma = vbt.MA.run(close, window=self.trend_filter_window).ma
+                        trend_filter_active = trend_filter_sma is not None and not trend_filter_sma.isnull().all()
+                    except Exception as sma_err:
+                        logger.error(f"Trend SMA calculation error: {sma_err}")
+                        trend_filter_active = False
 
             # --- 2. Generate Parameter Combinations ---
-            param_names = ['stoch_k', 'stoch_d', 'stoch_lower_th', 'stoch_upper_th'] # Order matters
-            param_arrays = [
-                param_grid['stoch_k'],
-                param_grid['stoch_d'],
-                param_grid['stoch_lower_th'],
-                param_grid['stoch_upper_th']
-            ]
+            # Ensure correct keys are present in param_grid
+            required_keys = ['stoch_k', 'stoch_d', 'stoch_lower_th', 'stoch_upper_th']
+            if not all(key in param_grid for key in required_keys):
+                logger.error(f"Missing required keys in param_grid for StochSMA: {required_keys}")
+                return None
+                
+            param_names = required_keys # Use defined order
+            param_arrays = [param_grid[key] for key in param_names]
             param_combinations = list(product(*param_arrays))
             logger.info(f"Generated {len(param_combinations)} parameter combinations manually.")
 
@@ -388,51 +395,51 @@ class StochSMAStrategy:
                 try:
                     # Calculate indicator for this specific combination
                     stoch_k = vbt.STOCH.run(
-                        high, low, close, k_w, d_w
+                        high, low, close, k_w, d_w # Use positional args k_w, d_w
                     ).slow_k
 
                     if stoch_k.isnull().all():
-                        # Append False series if indicator fails
                         all_entries.append(pd.Series(False, index=close.index))
                         all_exits.append(pd.Series(False, index=close.index))
                         continue
-
+                
                     # Generate signals
                     entry_signal = stoch_k.vbt.crossed_above(lower_th)
                     exit_signal = stoch_k.vbt.crossed_below(upper_th)
 
                     # Apply trend filter
                     if trend_filter_active:
-                         # Ensure trend_filter_sma is aligned with close index before comparison
-                         # This should handle potential NaNs at the start of trend_filter_sma
-                         close_filtered = close[trend_filter_sma.notna()]
-                         entry_signal_filtered = entry_signal[trend_filter_sma.notna()]
-                         trend_filter_sma_filtered = trend_filter_sma.dropna()
-                         
-                         trend_condition = (close_filtered > trend_filter_sma_filtered)
-                         # Reindex trend condition back to the original index, filling missing with False
-                         trend_condition_aligned = trend_condition.reindex(entry_signal.index, fill_value=False)
-                         
-                         entry_signal = entry_signal & trend_condition_aligned
+                        # Ensure trend_filter_sma is aligned with close index before comparison
+                        # Handle potential leading NaNs in SMA
+                        valid_trend_idx = trend_filter_sma.dropna().index
+                        temp_entry = entry_signal.copy()
+                        temp_entry.loc[:] = False # Default to False
+                        
+                        # Only compare where both signals and trend are valid
+                        common_idx = valid_trend_idx.intersection(entry_signal.index)
+                        if not common_idx.empty:
+                            trend_condition = (close.loc[common_idx] > trend_filter_sma.loc[common_idx])
+                            # Apply trend condition only where signals were originally True
+                            temp_entry.loc[common_idx] = entry_signal.loc[common_idx] & trend_condition
+                            
+                        entry_signal = temp_entry
 
                     all_entries.append(entry_signal)
                     all_exits.append(exit_signal)
 
                 except Exception as loop_err:
-                     logger.warning(f"Error in loop for params ({k_w},{d_w},{lower_th},{upper_th}): {loop_err}. Appending False signals.")
-                     all_entries.append(pd.Series(False, index=close.index))
-                     all_exits.append(pd.Series(False, index=close.index))
-
+                    logger.warning(f"Error in loop for params ({k_w},{d_w},{lower_th},{upper_th}): {loop_err}. Appending False signals.")
+                    all_entries.append(pd.Series(False, index=close.index))
+                    all_exits.append(pd.Series(False, index=close.index))
 
             if not all_entries:
-                 logger.error("No signals generated for any parameter combination.")
-                 return None
-
+                logger.error("No signals generated for any parameter combination.")
+                return None
+                
             # --- 4. Combine Signals ---
             param_multi_index = pd.MultiIndex.from_tuples(param_combinations, names=param_names)
             entries_output = pd.concat(all_entries, axis=1, keys=param_multi_index)
             exits_output = pd.concat(all_exits, axis=1, keys=param_multi_index)
-
 
             # --- 5. Run Portfolio Simulation ---
             pf_kwargs = {
@@ -443,14 +450,14 @@ class StochSMAStrategy:
                 'init_cash': self.initial_capital,
                 'fees': self.commission_pct,
                 'slippage': self.slippage_pct,
+                # No 'metrics' argument here
             }
 
             if local_use_stops:
-                 # Pass stops as Series; vectorbt applies them correctly across columns
                 if sl_stop_pct is not None and sl_stop_pct.notna().any():
-                     pf_kwargs['sl_stop'] = sl_stop_pct
+                    pf_kwargs['sl_stop'] = sl_stop_pct
                 if tsl_stop_pct is not None and tsl_stop_pct.notna().any():
-                     pf_kwargs['tsl_stop'] = tsl_stop_pct
+                    pf_kwargs['tsl_stop'] = tsl_stop_pct
 
             logger.info(f"Running Portfolio.from_signals with {entries_output.shape[1]} parameter combinations (manual loop).")
             pf = vbt.Portfolio.from_signals(**pf_kwargs)
@@ -462,7 +469,7 @@ class StochSMAStrategy:
         except Exception as e:
             logger.error(f"Error during StochSMA optimization (manual iteration): {e}", exc_info=True)
             return None
-
+            
 # --- Removed old simulation functions: ---
 # - simulate_all_params_single_split_direct
 # - simulate_best_params_single_split_direct
@@ -512,7 +519,7 @@ def main():
     parser.add_argument('--reports_dir', type=str, default='reports', help='Directory to save reports')
     parser.add_argument('--plot', action='store_true', help='Generate and show plot')
 
-    args = parser.parse_args()
+    args = parser.parse_args() 
     
     granularity_map = {
         '1m': 60, '5m': 300, '15m': 900, '30m': 1800,
@@ -544,8 +551,8 @@ def main():
     
     strategy = StochSMAStrategy(
         initial_capital=args.initial_capital,
-        commission_pct=args.commission,
-        slippage_pct=args.slippage,
+        commission_pct=args.commission, 
+        slippage_pct=args.slippage, 
         use_stops=(not args.no_stops),
         sl_atr_multiplier=args.sl_atr,
         tsl_atr_multiplier=args.tsl_atr,
@@ -556,29 +563,32 @@ def main():
     portfolio = strategy.optimize(
         data=price_data, 
         param_grid=single_param_grid, 
-        optimize_metric=args.optimize_metric, # Metric needed for reporting
+        optimize_metric='sharpe_ratio', # Use a default or get from args if added back
         granularity_seconds=granularity_seconds
     )
 
     if portfolio is not None:
         logger.info("\n--- Single Run Results ---")
-        stats = portfolio.stats()
-        print(stats)
-        
-        # Optional: Save stats or plot
-        report_file = reports_path / f"stochsma_single_{args.symbol}_{args.granularity}.txt"
-        with open(report_file, 'w') as f:
-             f.write(str(stats))
-        logger.info(f"Saved single run stats to {report_file}")
+        try:
+            stats = portfolio.stats()
+            print(stats)
+            
+            # Optional: Save stats or plot
+            report_file = reports_path / f"stochsma_single_{args.symbol}_{args.granularity}.txt"
+            with open(report_file, 'w') as f:
+                f.write(str(stats))
+            logger.info(f"Saved single run stats to {report_file}")
 
-        if args.plot:
-            try:
-                fig = portfolio.plot()
-                fig.show()
-            except Exception as plot_err:
-                 logger.error(f"Failed to generate plot: {plot_err}")
-    else:
-        logger.error("Single backtest run failed to produce a portfolio.")
+            if args.plot:
+                try:
+                    fig = portfolio.plot()
+                    fig.show()
+                except Exception as plot_err:
+                    logger.error(f"Failed to generate plot: {plot_err}")
+        except Exception as stats_err:
+            logger.error(f"Error getting/processing stats for single run: {stats_err}")
+        else:
+            logger.error("Single backtest run failed to produce a portfolio.")
 
 if __name__ == "__main__":
     main() 

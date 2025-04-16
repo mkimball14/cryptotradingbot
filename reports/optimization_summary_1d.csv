@@ -1,3 +1,2 @@
-strategy,metric,best_score,total_return_pct,max_drawdown_pct,win_rate_pct,num_trades,best_params,error
-StochSMA,,,,,,,,Metric 'sharpe_ratio' not found in stats
-RSIMomentum,,,,,,,,Metric 'sharpe_ratio' not found in stats
+strategy,metric,best_score,total_return_pct,max_drawdown_pct,win_rate_pct,num_trades,sharpe_ratio,sortino_ratio,best_params,error
+StochSMA,Sharpe Ratio,1.2504,148.2469,17.6662,52.0000,25,1.2504,2.3510,"{""stoch_k"": 5, ""stoch_d"": 4, ""stoch_lower_th"": 35, ""stoch_upper_th"": 65}",

@@ -55,6 +55,15 @@ logger = logging.getLogger(__name__)
 
 # --- Utility Functions (Copied from backtest_rsi_bb_vbt_pro.py) ---
 
+# Helper function to map seconds to vectorbt frequency strings (Needed by optimize method)
+def get_vbt_freq_str(granularity_seconds: int) -> Optional[str]:
+    # Map seconds to pandas frequency strings suitable for vectorbt
+    vbt_freq_map = {
+        60: "1T", 300: "5T", 900: "15T", 1800: "30T",
+        3600: "1H", 7200: "2H", 14400: "4H", 21600: "6H", 86400: "1D"
+    }
+    return vbt_freq_map.get(granularity_seconds)
+
 def fetch_historical_data(product_id, start_date, end_date, granularity=86400):
     """
     Fetch historical price data from Coinbase or from cache.
@@ -275,447 +284,191 @@ def calculate_risk_metrics(portfolio):
         logger.error(f"Error calculating risk metrics: {e}", exc_info=True)
     return metrics
 
-# --- Strategy Definition (No longer using IndicatorFactory) ---
-# The logic is embedded in the simulation functions.
+# --- Strategy Class Definition (Replaces simulation functions) ---
+class MACrossoverStrategy:
+    def __init__(self, 
+                 initial_capital=10000, 
+                 commission_pct=0.001, 
+                 slippage_pct=0.0005,
+                 use_stops=True, 
+                 sl_atr_multiplier=1.5, 
+                 tsl_atr_multiplier=2.0,
+                 trend_filter_window=200,
+                 **kwargs): # Absorb unused params from optimizer
+        """Initialize strategy with fixed parameters."""
+        self.initial_capital = initial_capital
+        self.commission_pct = commission_pct
+        self.slippage_pct = slippage_pct
+        self.use_stops = use_stops
+        self.sl_atr_multiplier = sl_atr_multiplier
+        self.tsl_atr_multiplier = tsl_atr_multiplier
+        self.trend_filter_window = trend_filter_window
+        logger.info(f"Initialized MACrossoverStrategy: Trend={self.trend_filter_window}, Stops={self.use_stops}, SL={self.sl_atr_multiplier}, TSL={self.tsl_atr_multiplier}")
 
-# --- Main Execution Logic ---
+    def optimize(self, data: pd.DataFrame, param_grid: Dict, optimize_metric: str, granularity_seconds: int = 86400):
+        """
+        Run vectorized backtest optimization for MA Crossover.
+        (Manual parameter iteration approach)
+        """
+        freq_str = get_vbt_freq_str(granularity_seconds) # Assumes get_vbt_freq_str is available
+        if not freq_str:
+            logger.error(f"Invalid granularity seconds ({granularity_seconds}) for freq string. Cannot optimize MA Crossover.")
+            return None
 
-def run_backtest(
-    symbol, start_date, end_date, granularity=86400,
-    initial_capital=10000, commission_pct=0.001, slippage_pct=0.0005,
-    param_grid=None, optimize_metric='sharpe_ratio',
-    use_stops=True, sl_atr_multiplier=1.0, tsl_atr_multiplier=1.0,
-    trend_filter_window=200,
-    wfo_test_days=180, wfo_window_years=2
-):
-    """
-    Manual WFO: Optimizes MA Crossover params IS, tests OOS using FIXED stops and FIXED trend filter.
-    (Calculates indicators directly).
-    """
-    logger.info(f"--- Running Manual WFO (MA Crossover + Fixed SMA{trend_filter_window} Filter - Fixed Stops) for {symbol} ---")
-    logger.info(f"Period: {start_date} to {end_date} | Granularity: {granularity}s")
-    logger.info(f"Portfolio Settings: IC={initial_capital}, Comm={commission_pct*100:.3f}%, Slip={slippage_pct*100:.3f}% | Stops Enabled={use_stops}")
-    if use_stops:
-        logger.info(f"Fixed Stop Params: SL ATR Mult={sl_atr_multiplier}, TSL ATR Mult={tsl_atr_multiplier}")
-    logger.info(f"Trend Filter: Fixed Long SMA Window={trend_filter_window}")
-    logger.info(f"WFO Params: Test Days={wfo_test_days}, Window Years={wfo_window_years}")
+        close = data['close']
+        high = data['high']
+        low = data['low']
 
-    full_price_data = fetch_historical_data(symbol, start_date, end_date, granularity)
-    if full_price_data is None or full_price_data.empty: return None, None, None
+        logger.info(f"Running MA Crossover optimization with grid (manual iteration): {param_grid}")
 
-    # --- Define Parameter Grid (MA Crossover Only) ---
-    if param_grid is None:
-        param_grid = {
-            'short_ma_window': np.arange(10, 41, 10),  # 10, 20, 30, 40
-            'long_ma_window': np.arange(50, 151, 25)  # 50, 75, 100, 125, 150
-        }
-    logger.info(f"Optimization Parameter Grid: {param_grid}") 
-    param_names_ordered = list(param_grid.keys())
-    logger.info(f"Parameter Order for Optimization: {param_names_ordered}")
-
-    metric_map = {'sharpe ratio': 'sharpe_ratio', 'total return': 'total_return', 'max drawdown': 'max_drawdown'}
-    vbt_metric = metric_map.get(optimize_metric.lower(), 'sharpe_ratio')
-    higher_better = vbt_metric not in ['max_drawdown']
-    logger.info(f"Using '{vbt_metric}' as optimization metric (higher_better={higher_better}).")
-
-    logger.info("Manually calculating split indices...")
-    n_total = len(full_price_data); window_len = int(wfo_window_years * 365.25)
-    test_len = wfo_test_days; train_len = window_len - test_len
-    if train_len <= 0 or window_len > n_total: return None, None, full_price_data
-    split_indices = []
-    current_start = 0
-    while current_start + window_len <= n_total:
-        train_start = current_start; train_end = current_start + train_len
-        test_start = train_end; test_end = min(current_start + window_len, n_total)
-        if test_start >= test_end: break
-        split_indices.append((np.arange(train_start, train_end), np.arange(test_start, test_end)))
-        current_start += test_len
-    n_splits = len(split_indices)
-    if n_splits == 0: return None, None, full_price_data
-    logger.info(f"Manual calculation generated {n_splits} splits.")
-    
-    oos_results_sharpe = {}; oos_results_return = {}; oos_results_drawdown = {}
-    best_params_history = {}
-
-    logger.info("Starting Walk-Forward Iteration (Manual Indices)...")
-    for i, (train_idx, test_idx) in enumerate(tqdm(split_indices, total=n_splits, desc="WFO Splits")):
-        in_price_split = full_price_data.iloc[train_idx]
-        out_price_split = full_price_data.iloc[test_idx]
-        if in_price_split.empty or out_price_split.empty: continue
-
-        # 1. Optimize on In-Sample Data (Pass trend window)
-        in_performance = simulate_all_params_single_split_direct(
-            in_price_split, param_grid, 
-            initial_capital, commission_pct, slippage_pct,
-            use_stops, sl_atr_multiplier, tsl_atr_multiplier,
-            vbt_metric,
-            trend_filter_window=trend_filter_window
-        )
-        if in_performance is None or in_performance.empty:
-             logger.warning(f"Split {i}: In-sample simulation returned no performance data.")
-             continue
-
-        # 2. Find Best Parameters Index (tuple)
-        best_index_split = get_best_index(in_performance, higher_better=higher_better)
-        if best_index_split is None:
-             logger.warning(f"Split {i}: Could not find best index from in-sample performance.")
-             continue
-
-        # 3. Create Best Parameters Dict
-        if isinstance(best_index_split, tuple) and len(best_index_split) == len(param_names_ordered):
-            best_params_split = dict(zip(param_names_ordered, best_index_split))
-        else:
-            logger.warning(f"Split {i}: Best index {best_index_split} length mismatch with params {param_names_ordered}. Skipping.")
-            continue
-        best_params_history[i] = best_params_split
-
-        # 4. Test Best Parameters on Out-of-Sample Data (Pass trend window)
-        oos_metrics_dict = simulate_best_params_single_split_direct(
-            out_price_split, best_params_split, 
-            initial_capital, commission_pct, slippage_pct,
-            use_stops, sl_atr_multiplier, tsl_atr_multiplier,
-            trend_filter_window=trend_filter_window
-        )
-        oos_results_sharpe[i] = oos_metrics_dict.get('sharpe_ratio', np.nan)
-        oos_results_return[i] = oos_metrics_dict.get('total_return', np.nan)
-        oos_results_drawdown[i] = oos_metrics_dict.get('max_drawdown', np.nan)
-
-    logger.info("Walk-Forward Iteration Complete.")
-    if not best_params_history: return None, None, full_price_data
-
-    # --- Aggregate and Prepare Final Results ---
-    oos_sharpe_series = pd.Series(oos_results_sharpe).sort_index()
-    oos_return_series = pd.Series(oos_results_return).sort_index()
-    oos_drawdown_series = pd.Series(oos_results_drawdown).sort_index()
-    oos_mean_sharpe = oos_sharpe_series.mean(); oos_std_sharpe = oos_sharpe_series.std()
-    oos_mean_return = oos_return_series.mean(); oos_std_return = oos_return_series.std()
-    oos_mean_drawdown = oos_drawdown_series.mean(); oos_std_drawdown = oos_drawdown_series.std()
-
-    logger.info("--- Final Aggregated OOS Performance (MA Crossover + Fixed SMA Filter - Fixed Stops) ---")
-    if use_stops:
-        logger.info(f"Fixed Stop Params: SL={sl_atr_multiplier}, TSL={tsl_atr_multiplier}")
-    else:
-        logger.info("Stops Disabled.")
-    logger.info(f"Chosen Optimization Metric: {vbt_metric}")
-    logger.info(f"Sharpe Ratio  : Mean={oos_mean_sharpe:.4f}, Std={oos_std_sharpe:.4f}")
-    logger.info(f"Total Return  : Mean={oos_mean_return:.4f}, Std={oos_std_return:.4f}")
-    logger.info(f"Max Drawdown  : Mean={oos_mean_drawdown:.4f}, Std={oos_std_drawdown:.4f}")
-    logger.info(f"Trend Filter SMA: {trend_filter_window}")
-
-    wfo_results_dict = {
-        'strategy_name': f'MA Crossover + Fixed SMA{trend_filter_window} Filter',
-        'trend_filter_window': trend_filter_window,
-        'optimized_metric': vbt_metric,
-        'stops_enabled': use_stops,
-        'fixed_sl_atr_multiplier': sl_atr_multiplier if use_stops else None,
-        'fixed_tsl_atr_multiplier': tsl_atr_multiplier if use_stops else None,
-        'best_params_per_split': best_params_history,
-        'oos_sharpe': oos_sharpe_series.to_dict(),
-        'oos_return': oos_return_series.to_dict(),
-        'oos_drawdown': oos_drawdown_series.to_dict(),
-        'oos_mean_sharpe': oos_mean_sharpe, 'oos_std_sharpe': oos_std_sharpe,
-        'oos_mean_return': oos_mean_return, 'oos_std_return': oos_std_return,
-        'oos_mean_drawdown': oos_mean_drawdown, 'oos_std_drawdown': oos_std_drawdown,
-    }
-    return None, wfo_results_dict, full_price_data 
-
-# --- WFO Helper Function: Simulate All Parameters (Direct Calculation - MA Crossover) ---
-def simulate_all_params_single_split_direct(price_data, param_grid, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, metric='sharpe_ratio', trend_filter_window=200):
-    """ Simulates MA Crossover param combinations on a SINGLE split using direct indicator calculation and fixed trend filter. """
-    logger.debug(f"Simulating MA Crossover + SMA{trend_filter_window} params (fixed stops) on single split data shape: {price_data.shape}")
-    close = price_data['close']; high = price_data['high']; low = price_data['low']
-
-    # --- Calculate Stops Once --- 
-    sl_stop_pct = None; tsl_stop_pct = None
-    local_use_stops = use_stops 
-    if local_use_stops:
+        # Initialize base indicators
+        sl_stop_pct = None
+        tsl_stop_pct = None
+        local_use_stops = self.use_stops
+        trend_filter_active = False
+        trend_filter_sma = None
+        
         try:
-            atr = vbt.ATR.run(high, low, close, window=14).atr
-            if atr is not None and not atr.isnull().all():
-                if sl_atr_multiplier > 0:
-                    sl_stop_pct = (atr * sl_atr_multiplier) / close
-                    sl_stop_pct = sl_stop_pct.replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
-                if tsl_atr_multiplier > 0:
-                    tsl_stop_pct = (atr * tsl_atr_multiplier) / close
-                    tsl_stop_pct = tsl_stop_pct.replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
-                if (sl_stop_pct is not None and sl_stop_pct.isnull().all()) or \
-                   (tsl_stop_pct is not None and tsl_stop_pct.isnull().all()):
-                    logger.warning("Stop loss calculation resulted in all NaNs, disabling stops for split.")
+            # --- 1. Calculate Base Indicators (Stops, Trend Filter) ---
+            if local_use_stops:
+                try:
+                    atr = vbt.ATR.run(high, low, close, window=14).atr
+                    if atr is not None and not atr.isnull().all():
+                        if self.sl_atr_multiplier > 0:
+                            sl_stop_pct = (atr * self.sl_atr_multiplier) / close
+                            sl_stop_pct = sl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+                        if self.tsl_atr_multiplier > 0:
+                            tsl_stop_pct = (atr * self.tsl_atr_multiplier) / close
+                            tsl_stop_pct = tsl_stop_pct.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+                        if (sl_stop_pct is not None and sl_stop_pct.isnull().all()) or \
+                           (tsl_stop_pct is not None and tsl_stop_pct.isnull().all()):
+                            local_use_stops = False
+                            sl_stop_pct = None
+                            tsl_stop_pct = None
+                    else:
+                        local_use_stops = False
+                except Exception as atr_err:
+                    logger.warning(f"ATR error: {atr_err}, disabling stops.")
                     local_use_stops = False
-                    sl_stop_pct = None
-                    tsl_stop_pct = None
-            else:
-                logger.warning("ATR calculation yielded NaNs or was None, disabling stops for split.")
-                local_use_stops = False
-        except Exception as atr_err:
-            logger.warning(f"Could not calculate ATR for split: {atr_err}, disabling stops for split.");
-            local_use_stops = False
 
-    # --- Pre-Calculate ALL Indicator Variations ONCE --- 
-    short_ma_indicators = {}
-    long_ma_indicators = {}
-    
-    try:
-        # Pre-calculate all unique MA windows needed
-        all_windows = sorted(list(set(param_grid['short_ma_window']) | set(param_grid['long_ma_window'])))
-        ma_all = vbt.MA.run(close, window=all_windows, short_name='ma')
-        
-        # Calculate Trend Filter SMA ONCE
-        trend_filter_active = False
-        trend_filter_sma = None
-        if trend_filter_window > 0: 
-            if trend_filter_window < 1 or trend_filter_window >= len(close):
-                 logger.warning(f"Trend SMA window {trend_filter_window} invalid for data length {len(close)}. Trend filter disabled for split.")
-            else:
-                 try:
-                     trend_filter_sma = vbt.MA.run(close, window=trend_filter_window).ma
-                     trend_filter_active = trend_filter_sma is not None and not trend_filter_sma.isnull().all()
-                 except Exception as sma_err:
-                     logger.error(f"Error calculating Trend SMA for window={trend_filter_window}: {sma_err}")
-                     trend_filter_active = False
-
-        if ma_all is None or (trend_filter_active and trend_filter_sma is None):
-             raise ValueError("Indicator pre-calculation failed.")
-
-    except Exception as ind_err:
-        logger.error(f"Simulate_all_direct: Error during pre-calculation of MAs: {ind_err}", exc_info=True)
-        return None
-
-    # --- Generate Signals by Selecting Pre-Calculated Indicators --- 
-    all_entries = []
-    all_exits = []
-    all_params_tuples = []
-    param_names_ordered = list(param_grid.keys())
-    param_combinations = list(product(*param_grid.values()))
-    valid_combinations_count = 0
-
-    try:
-        for params_tuple in param_combinations:
-            current_params = dict(zip(param_names_ordered, params_tuple))
-            all_params_tuples.append(params_tuple)
-
-            # Extract parameters
-            short_w = current_params['short_ma_window']
-            long_w = current_params['long_ma_window']
-
-            # Skip invalid combinations (short window >= long window)
-            if short_w >= long_w:
-                all_entries.append(pd.Series(False, index=close.index))
-                all_exits.append(pd.Series(False, index=close.index))
-                continue 
+            if self.trend_filter_window > 0:
+                if self.trend_filter_window < 2 or self.trend_filter_window >= len(close):
+                    logger.warning(f"Trend SMA window {self.trend_filter_window} invalid. Filter disabled.")
+                else:
+                    try:
+                        trend_filter_sma = vbt.MA.run(close, window=self.trend_filter_window).ma
+                        trend_filter_active = trend_filter_sma is not None and not trend_filter_sma.isnull().all()
+                    except Exception as sma_err:
+                        logger.error(f"Trend SMA calculation error: {sma_err}")
+                        trend_filter_active = False
             
-            # Select the correct pre-calculated series
-            current_short_ma = ma_all.ma.loc[:, short_w]
-            current_long_ma = ma_all.ma.loc[:, long_w]
+            # --- 2. Pre-Calculate All Unique MAs Needed --- 
+            required_ma_keys = ['short_ma_window', 'long_ma_window']
+            if not all(key in param_grid for key in required_ma_keys):
+                 logger.error(f"Missing required MA keys in param_grid: {required_ma_keys}")
+                 return None
+                 
+            all_ma_windows = sorted(list(set(param_grid['short_ma_window']) | set(param_grid['long_ma_window'])))
+            # Filter out invalid windows
+            all_ma_windows = [w for w in all_ma_windows if w >= 2 and w < len(close)]
+            if not all_ma_windows:
+                 logger.error("No valid MA windows found after length check.")
+                 return None
 
-            # Skip if any required indicator failed calculation or is unavailable
-            if current_short_ma is None or current_long_ma is None or \
-               current_short_ma.isnull().all() or current_long_ma.isnull().all() or \
-               (trend_filter_active and (trend_filter_sma is None or trend_filter_sma.isnull().all())):
-                 all_entries.append(pd.Series(False, index=close.index))
-                 all_exits.append(pd.Series(False, index=close.index))
-                 continue
+            ma_indicator = vbt.MA.run(close, window=all_ma_windows, short_name='ma')
+            if ma_indicator is None or ma_indicator.ma is None:
+                 logger.error("Failed to pre-calculate moving averages.")
+                 return None
+            precalculated_mas = ma_indicator.ma # DataFrame with columns named by window size
             
-            # Generate signals for this combination (MA Crossover + Trend Filter)
-            entries = current_short_ma.vbt.crossed_above(current_long_ma)
-            if trend_filter_active:
-                 entries = entries & (close > trend_filter_sma)
-            
-            exits = current_short_ma.vbt.crossed_below(current_long_ma)
+            # --- 3. Generate Parameter Combinations for MA Crossover ---
+            param_names = required_ma_keys # Order matters
+            param_arrays = [param_grid[key] for key in param_names]
+            param_combinations = list(product(*param_arrays))
+            logger.info(f"Generated {len(param_combinations)} MA Crossover parameter combinations.")
 
-            all_entries.append(entries)
-            all_exits.append(exits)
-            valid_combinations_count += 1
-            
-        if valid_combinations_count == 0:
-             logger.warning("No valid signals generated across all parameter combinations.")
-             return None
+            all_entries = []
+            all_exits = []
+            valid_combinations = [] # Store valid tuples
+
+            # --- 4. Loop Through Combinations and Generate Signals ---
+            for short_w, long_w in tqdm(param_combinations, desc="Simulating MA Crossover"):
+                # Skip invalid combinations
+                if short_w >= long_w or short_w not in precalculated_mas.columns or long_w not in precalculated_mas.columns:
+                    continue
+                
+                valid_combinations.append((short_w, long_w))
+                
+                try:
+                    current_short_ma = precalculated_mas[short_w]
+                    current_long_ma = precalculated_mas[long_w]
+                    
+                    # Generate signals
+                    entry_signal = current_short_ma.vbt.crossed_above(current_long_ma)
+                    exit_signal = current_short_ma.vbt.crossed_below(current_long_ma)
+                    
+                    # Apply trend filter
+                    if trend_filter_active:
+                        valid_trend_idx = trend_filter_sma.dropna().index
+                        temp_entry = entry_signal.copy()
+                        temp_entry.loc[:] = False
+                        common_idx = valid_trend_idx.intersection(entry_signal.index)
+                        if not common_idx.empty:
+                             trend_condition = (close.loc[common_idx] > trend_filter_sma.loc[common_idx])
+                             temp_entry.loc[common_idx] = entry_signal.loc[common_idx] & trend_condition
+                        entry_signal = temp_entry
+
+                    all_entries.append(entry_signal)
+                    all_exits.append(exit_signal)
+
+                except Exception as loop_err:
+                    logger.warning(f"Error in loop for MA params ({short_w},{long_w}): {loop_err}. Appending False signals.")
+                    # Need to append False signals with the same length as others for concat
+                    all_entries.append(pd.Series(False, index=close.index))
+                    all_exits.append(pd.Series(False, index=close.index))
+
+            if not all_entries:
+                logger.error("No signals generated for any valid MA Crossover parameter combination.")
+                return None
              
-        # Combine signals into DataFrames with parameter multi-index
-        # Need to filter the index to only include valid combinations
-        valid_params_tuples = [t for t in all_params_tuples if t[param_names_ordered.index('short_ma_window')] < t[param_names_ordered.index('long_ma_window')]]
-        if not valid_params_tuples:
-            logger.warning("No valid parameter combinations found (short_ma < long_ma).")
-            return None
-        param_multi_index = pd.MultiIndex.from_tuples(valid_params_tuples, names=param_names_ordered)
-        
-        # Filter entries/exits before concatenating
-        valid_entries = [all_entries[i] for i, t in enumerate(all_params_tuples) if t in valid_params_tuples]
-        valid_exits = [all_exits[i] for i, t in enumerate(all_params_tuples) if t in valid_params_tuples]
-        
-        entries_output = pd.concat(valid_entries, axis=1, keys=param_multi_index)
-        exits_output = pd.concat(valid_exits, axis=1, keys=param_multi_index)
+            # --- 5. Combine Signals --- 
+            param_multi_index = pd.MultiIndex.from_tuples(valid_combinations, names=param_names)
+            entries_output = pd.concat(all_entries, axis=1, keys=param_multi_index)
+            exits_output = pd.concat(all_exits, axis=1, keys=param_multi_index)
 
-    except Exception as signal_err:
-         logger.error(f"Simulate_all_direct: Error during signal generation/combination: {signal_err}", exc_info=True)
-         return None
-        
-    # --- Run Portfolio Simulation --- 
-    try:
-        pf_kwargs = {
-            'close': close,
-            'entries': entries_output,
-            'exits': exits_output,
-            'freq': '1D',
-            'init_cash': initial_capital,
-            'fees': commission_pct,
-            'slippage': slippage_pct,
-            'group_by': True # Group results by parameters
-        }
-        if local_use_stops:
-            if sl_stop_pct is not None and sl_stop_pct.notna().any():
-                 pf_kwargs['sl_stop'] = sl_stop_pct
-            if tsl_stop_pct is not None and tsl_stop_pct.notna().any():
-                 pf_kwargs['tsl_stop'] = tsl_stop_pct
+            # --- 6. Run Portfolio Simulation --- 
+            pf_kwargs = {
+                'close': close,
+                'entries': entries_output,
+                'exits': exits_output,
+                'freq': freq_str,
+                'init_cash': self.initial_capital,
+                'fees': self.commission_pct,
+                'slippage': self.slippage_pct,
+            }
 
-        pf = vbt.Portfolio.from_signals(**pf_kwargs)
+            if local_use_stops:
+                if sl_stop_pct is not None and sl_stop_pct.notna().any():
+                    pf_kwargs['sl_stop'] = sl_stop_pct
+                if tsl_stop_pct is not None and tsl_stop_pct.notna().any():
+                    pf_kwargs['tsl_stop'] = tsl_stop_pct
 
-        # Get the desired performance metric
-        perf = getattr(pf, metric, None)
+            logger.info(f"Running Portfolio.from_signals with {entries_output.shape[1]} parameter combinations.")
+            pf = vbt.Portfolio.from_signals(**pf_kwargs)
+            logger.info("Portfolio simulation complete.")
 
-        if perf is None:
-            logger.warning(f"Metric '{metric}' not found in portfolio stats for split.")
-            return None 
-        
-        # ---- Start: Handle unexpected scalar output ----
-        if isinstance(perf, (int, float, np.number)):
-            logger.warning(f"Performance metric '{metric}' was a scalar ({type(perf)}), expected Series. Reconstructing Series.")
-            # Reconstruct the expected index using only valid tuples
-            expected_index = pd.MultiIndex.from_tuples(valid_params_tuples, names=param_names_ordered) 
-            # Create a Series filled with the scalar value
-            perf = pd.Series(perf, index=expected_index)
-        elif not isinstance(perf, pd.Series):
-             logger.warning(f"Performance metric '{metric}' was not a Series or scalar. Type: {type(perf)}")
-             return None # Unknown type, cannot proceed
-        # ---- End: Handle unexpected scalar output ----
-             
-        # Ensure the index matches the valid combinations, fill missing with NaN
-        expected_index = pd.MultiIndex.from_tuples(valid_params_tuples, names=param_names_ordered) # Use valid tuples
-        if not perf.index.equals(expected_index):
-            logger.debug("Reindexing performance series to match expected parameter index.")
-            perf = perf.reindex(expected_index)
+            return pf
 
-        # Check for all NaNs after potential reindexing or reconstruction
-        if perf.isnull().all():
-            logger.warning(f"Performance metric '{metric}' contains only NaNs after processing.")
+        except Exception as e:
+            logger.error(f"Error during MA Crossover optimization: {e}", exc_info=True)
             return None
             
-        return perf
+# --- Removed old simulation functions: ---
+# - simulate_all_params_single_split_direct
+# - simulate_best_params_single_split_direct
+# - run_backtest
 
-    except Exception as pf_err:
-        logger.error(f"Simulate_all_direct: Error during portfolio simulation: {pf_err}", exc_info=True)
-        return None
-
-# --- WFO Helper Function: Simulate Best Parameters (Direct Calculation - MA Crossover) ---
-def simulate_best_params_single_split_direct(price_data, best_params_dict, initial_capital, commission_pct, slippage_pct, use_stops, sl_atr_multiplier, tsl_atr_multiplier, trend_filter_window=200):
-    """ Simulates the single best MA Crossover param set on a SINGLE split using direct calculation and fixed trend filter."""
-    logger.debug(f"Simulating best MA Crossover + SMA{trend_filter_window} params (fixed stops) on OOS data shape: {price_data.shape}")
-    close = price_data['close']; high = price_data['high']; low = price_data['low']
-
-    try:
-        short_w = int(best_params_dict['short_ma_window'])
-        long_w = int(best_params_dict['long_ma_window'])
-        
-        # Basic validation
-        if short_w >= long_w:
-             logger.error(f"Invalid best params: short_ma_window {short_w} >= long_ma_window {long_w}")
-             return {'sharpe_ratio': np.nan, 'total_return': np.nan, 'max_drawdown': np.nan}
-             
-    except KeyError as ke:
-        logger.error(f"Missing key in best_params_dict: {ke}. Params: {best_params_dict}")
-        return {'sharpe_ratio': np.nan, 'total_return': np.nan, 'max_drawdown': np.nan}
-
-    # --- Calculate Indicators for the specific best parameters --- 
-    try:
-        if short_w < 1 or short_w >= len(close) or long_w < 1 or long_w >= len(close):
-            raise ValueError(f"MA window invalid for data length {len(close)}")
-            
-        short_ma = vbt.MA.run(close, window=short_w).ma
-        long_ma = vbt.MA.run(close, window=long_w).ma
-        
-        if short_ma.isnull().all() or long_ma.isnull().all():
-            raise ValueError("MA calculation resulted in all NaNs")
-
-        # Calculate Trend Filter SMA
-        trend_filter_active = False
-        trend_filter_sma = None
-        if trend_filter_window > 0:
-            if trend_filter_window < 1 or trend_filter_window >= len(close):
-                 logger.warning(f"Trend SMA window {trend_filter_window} invalid for OOS data length {len(close)}. Disabling filter.")
-            else:
-                 try:
-                     trend_filter_sma = vbt.MA.run(close, window=trend_filter_window).ma
-                     trend_filter_active = trend_filter_sma is not None and not trend_filter_sma.isnull().all()
-                 except Exception as sma_err:
-                     logger.error(f"Error calculating Trend SMA {trend_filter_window} for OOS split: {sma_err}")
-                     trend_filter_active = False
-        
-        # Generate signals
-        entries = short_ma.vbt.crossed_above(long_ma)
-        if trend_filter_active:
-            entries = entries & (close > trend_filter_sma)
-            
-        exits = short_ma.vbt.crossed_below(long_ma)
-        
-        # Check validity 
-        if short_ma.isnull().all() or long_ma.isnull().all() or (trend_filter_active and (trend_filter_sma is None or trend_filter_sma.isnull().all())):
-            raise ValueError("Indicator calculation resulted in all NaNs or invalid filter")
-        
-    except Exception as ind_err:
-        logger.error(f"Indicator calculation error for best params {best_params_dict}: {ind_err}")
-        return {'sharpe_ratio': np.nan, 'total_return': np.nan, 'max_drawdown': np.nan}
-
-    # --- Calculate Stops --- 
-    sl_stop_pct = None; tsl_stop_pct = None
-    local_use_stops = use_stops
-    if local_use_stops:
-        try:
-             atr = vbt.ATR.run(high, low, close, window=14).atr
-             if atr is not None and not atr.isnull().all():
-                 if sl_atr_multiplier > 0:
-                      sl_stop_pct = (atr * sl_atr_multiplier) / close
-                      sl_stop_pct = sl_stop_pct.replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
-                 if tsl_atr_multiplier > 0:
-                      tsl_stop_pct = (atr * tsl_atr_multiplier) / close
-                      tsl_stop_pct = tsl_stop_pct.replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
-                 # Final check if stops are still valid
-                 if (sl_stop_pct is not None and sl_stop_pct.isnull().all()) or \
-                    (tsl_stop_pct is not None and tsl_stop_pct.isnull().all()):
-                     logger.warning("Stop loss calculation resulted in all NaNs for OOS split.")
-                     local_use_stops = False
-                     sl_stop_pct = None
-                     tsl_stop_pct = None
-             else:
-                 logger.warning("ATR calculation yielded NaNs or was None for OOS split.")
-                 local_use_stops = False
-        except Exception as atr_err: logger.warning(f"Could not calc ATR for OOS split: {atr_err}"); local_use_stops = False
-
-    # --- Run Portfolio --- 
-    try:
-        pf_kwargs = {
-            'close': close, 'entries': entries, 'exits': exits,
-            'freq': '1D', 'init_cash': initial_capital, 'fees': commission_pct, 'slippage': slippage_pct
-        }
-        if local_use_stops:
-             if sl_stop_pct is not None and sl_stop_pct.notna().any():
-                 pf_kwargs['sl_stop'] = sl_stop_pct
-             if tsl_stop_pct is not None and tsl_stop_pct.notna().any():
-                 pf_kwargs['tsl_stop'] = tsl_stop_pct
-
-        pf = vbt.Portfolio.from_signals(**pf_kwargs)
-        stats = pf.stats()
-        metrics_dict = {
-            'sharpe_ratio': stats.get('Sharpe Ratio', np.nan),
-            'total_return': stats.get('Total Return [%]', np.nan) / 100.0,
-            'max_drawdown': stats.get('Max Drawdown [%]', np.nan) / 100.0
-        }
-        logger.debug(f"Finished simulate_best_direct (MA Crossover + SMA{trend_filter_window}). Metrics: {metrics_dict}")
-        return metrics_dict
-    except Exception as pf_err:
-        logger.error(f"Simulate_best_direct (MA Crossover + SMA{trend_filter_window}): Error during portfolio sim: {pf_err}", exc_info=True);
-        return {'sharpe_ratio': np.nan, 'total_return': np.nan, 'max_drawdown': np.nan}
-
-# --- WFO Helper Functions: Get Best Index (No changes needed here) ---
+# --- WFO Helper Functions: Get Best Index (Keep for potential future WFO use) ---
 def get_best_index(performance, higher_better=True):
     """Finds index of best performing parameters for a single split's performance Series."""
     if performance is None or performance.empty:
