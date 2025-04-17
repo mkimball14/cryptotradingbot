@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 import itertools
 import logging
 from typing import Dict, Any, List, Tuple, Optional
-# Import tqdm
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm # Use tqdm for progress bars
+import json
 
 # --- Setup Paths ---
 # Add project root to sys.path
@@ -17,618 +17,839 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-# Add the directory *containing* the 'strategies' module
-# which is the parent of the 'scripts' directory (i.e., the ROOT_DIR)
-# No need for SCRIPTS_DIR here if imports are relative to ROOT_DIR
+# Define output directory relative to this script
+OUTPUT_DIR = Path(__file__).resolve().parent / 'wfo_results'
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True) # Create if it doesn't exist
 
 # --- Setup Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Define a unique logger for this script to avoid conflicts
+wfo_logger = logging.getLogger('wfo_edge_strategy')
+wfo_logger.setLevel(logging.DEBUG)  # Change to DEBUG level
+# Prevent logging propagation to root logger if already configured
+wfo_logger.propagate = False 
+# Add handler if not already added (basic console handler)
+if not wfo_logger.handlers:
+    ch = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    wfo_logger.addHandler(ch)
+# Optionally, add a file handler
+# log_file_path = OUTPUT_DIR / f"wfo_edge_strategy_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+# fh = logging.FileHandler(log_file_path)
+# fh.setFormatter(formatter)
+# wfo_logger.addHandler(fh)
 
 # --- Import Strategy and Data Fetcher ---
 try:
+    # Use the correct relative path based on standard project structure
     from scripts.strategies.edge_multi_factor import EdgeMultiFactorStrategy
-    logger.info("Successfully imported refactored EdgeMultiFactorStrategy.")
+    wfo_logger.info("Successfully imported refactored EdgeMultiFactorStrategy.")
 except ImportError as e:
-    logger.error(f"Could not import EdgeMultiFactorStrategy: {e}")
-    sys.exit(1)
-
-try:
-    from data.data_fetcher import fetch_historical_data, get_granularity_str, get_vbt_freq_str, GRANULARITY_MAP_SECONDS
-    logger.info("Using data_fetcher from data module.")
-except ImportError:
+    wfo_logger.error(f"Could not import EdgeMultiFactorStrategy: {e}")
+    # Attempt fallback if path structure is different
     try:
-        from scripts.backtest_stoch_sma_vbt_pro import fetch_historical_data, get_vbt_freq_str, GRANULARITY_MAP_SECONDS
-        logger.info("Using functions from scripts.backtest_stoch_sma_vbt_pro.")
-    except ImportError as e:
-        logger.error(f"ERROR: Could not import data fetching functions: {e}")
+        from edge_multi_factor import EdgeMultiFactorStrategy
+        wfo_logger.info("Imported EdgeMultiFactorStrategy from current directory.")
+    except ImportError:
+        wfo_logger.critical("Failed to import EdgeMultiFactorStrategy from both locations. Exiting.")
         sys.exit(1)
 
-# Remove incorrect/unused optimizer import
-# from vectorbtpro.portfolio.pfopt.base import PortfolioOptimizer
-# from vectorbtpro.generic import WFOOptimizer # Previous attempt
-# from vectorbtpro.portfolio.pfopt import WFOOptimizer # Previous attempt
+try:
+    from data.data_fetcher import fetch_historical_data, get_vbt_freq_str, GRANULARITY_MAP_SECONDS
+    wfo_logger.info("Using data_fetcher from data module.")
+except ImportError as e:
+    wfo_logger.error(f"Could not import data_fetcher: {e}. Functionality may be limited.")
+    # Define dummy functions if data_fetcher is critical and missing
+    def fetch_historical_data(*args, **kwargs): return None
+    def get_vbt_freq_str(*args, **kwargs): return "1h"
+    GRANULARITY_MAP_SECONDS = {'1h': 3600}
 
-# --- Configuration ---
-# WFO Parameters
-IN_SAMPLE_DAYS = 365
-OUT_SAMPLE_DAYS = 90
-STEP_DAYS = 90 # How much the window slides forward
-# WFOOptimizer requires window lengths, not start/end dates directly
-IN_SAMPLE_LEN = pd.Timedelta(days=IN_SAMPLE_DAYS)
-OUT_SAMPLE_LEN = pd.Timedelta(days=OUT_SAMPLE_DAYS)
-STEP_LEN = pd.Timedelta(days=STEP_DAYS)
+# --- VectorBT Pro Chat Model Integration ---
+def initialize_chat_model():
+    """Initialize the chat model for debugging assistance."""
+    try:
+        # Check if the knowledge.chatting module is available and has ChatModel
+        if hasattr(vbt, 'utils') and hasattr(vbt.utils, 'knowledge') and hasattr(vbt.utils.knowledge, 'chatting') and hasattr(vbt.utils.knowledge.chatting, 'ChatModel'):
+            return vbt.utils.knowledge.chatting.ChatModel()
+        else:
+            wfo_logger.warning("ChatModel not found in vectorbtpro.utils.knowledge.chatting. Using fallback debugging approach.")
+            return None
+    except Exception as e:
+        wfo_logger.error(f"Could not initialize chat model: {e}")
+        return None
 
-# Data Parameters
-# Fetch slightly more data initially to accommodate the first IS window
-WFO_START_DATE = (datetime.now() - timedelta(days=IN_SAMPLE_DAYS + OUT_SAMPLE_DAYS * 6)).strftime('%Y-%m-%d')
-# WFO_START_DATE = "2020-01-01" # Or set a fixed earlier date
+def get_chat_model():
+    """Get an instance of the chat model or return None if not available."""
+    try:
+        return initialize_chat_model()
+    except Exception as e:
+        wfo_logger.error(f"Could not initialize chat model: {e}")
+        return None
+
+def ask_chat_model(chat_model, query, context=None):
+    """Query the chat model with the given question and context."""
+    if chat_model is None:
+        return "Chat model not available for debugging assistance."
+    
+    try:
+        # Call the chat model with the query and context
+        # This is a placeholder implementation based on typical NLP model interfaces
+        if context:
+            context_str = "\n".join([f"{k}: {v}" for k, v in context.items()])
+            response = chat_model.query(f"{query}\n\nContext:\n{context_str}")
+        else:
+            response = chat_model.query(query)
+        return response
+    except Exception as e:
+        return f"Error querying chat model: {e}"
+
+def debug_with_chat(error: Exception, context: Dict[str, Any]) -> str:
+    """
+    Use VectorBT Pro's chat model to analyze and suggest fixes for errors.
+    
+    Args:
+        error: The exception that occurred
+        context: Dictionary with relevant context (params, data info, etc.)
+        
+    Returns:
+        str: Debugging suggestions from the chat model
+    """
+    chat_model = get_chat_model()
+    if chat_model is None:
+        return "Chat model not available for debugging assistance."
+        
+    error_msg = f"Error Type: {type(error).__name__}\nError Message: {str(error)}"
+    question = f"""
+    Please analyze this error and suggest potential fixes:
+    
+    {error_msg}
+    
+    The error occurred in the WFO Edge Strategy implementation.
+    Please consider the context provided and suggest specific fixes.
+    """
+    
+    return ask_chat_model(chat_model, question, context)
+
+# --- Error Handling with Chat Model ---
+def handle_portfolio_error(error: Exception, params: Dict[str, Any], data_info: Dict[str, Any]) -> str:
+    """
+    Handle portfolio creation/simulation errors with chat model assistance.
+    
+    Args:
+        error: The exception that occurred
+        params: Dictionary of strategy and trading parameters
+        data_info: Dictionary with information about the data being used
+        
+    Returns:
+        str: Debugging suggestions from the chat model
+    """
+    context = {
+        "parameters": params,
+        "data_info": {
+            "shape": data_info.get("shape"),
+            "date_range": data_info.get("date_range"),
+            "has_nulls": data_info.get("has_nulls", False),
+            "frequency": data_info.get("frequency")
+        }
+    }
+    
+    return debug_with_chat(error, context)
+
+# =============================================================================
+# Configuration Constants
+# =============================================================================
+
+# --- WFO Parameters ---
+# Use reasonably short periods for quicker testing based on notes
+IN_SAMPLE_DAYS = 180      # Length of the training period
+OUT_SAMPLE_DAYS = 60      # Length of the testing period
+STEP_DAYS = 60            # How much to shift the window each step
+# Ensure step is not larger than OOS period to avoid gaps, unless intended
+if STEP_DAYS > OUT_SAMPLE_DAYS:
+    wfo_logger.warning(f"STEP_DAYS ({STEP_DAYS}) > OUT_SAMPLE_DAYS ({OUT_SAMPLE_DAYS}). OOS periods will overlap.")
+
+# --- Data Parameters ---
+# Use a longer period to ensure enough data for signal generation
+TOTAL_HISTORY_DAYS = 365 # Full year of data
 WFO_END_DATE = datetime.now().strftime('%Y-%m-%d')
+WFO_START_DATE = (datetime.now() - timedelta(days=TOTAL_HISTORY_DAYS)).strftime('%Y-%m-%d')
 SYMBOL = "BTC-USD"
-GRANULARITY_STR = "1h"
-GRANULARITY_SECONDS = 3600
+GRANULARITY_STR = "1h" # Ensure this matches strategy needs
+try:
+    GRANULARITY_SECONDS = GRANULARITY_MAP_SECONDS[GRANULARITY_STR]
+except KeyError:
+    wfo_logger.error(f"Invalid GRANULARITY_STR: {GRANULARITY_STR}. Defaulting to 1h (3600s).")
+    GRANULARITY_SECONDS = 3600
+BENCHMARK_SYMBOL = "BTC-USD" # Or None
+
+# --- Trading Parameters ---
 INITIAL_CAPITAL = 3000
 COMMISSION_PCT = 0.001
 SLIPPAGE_PCT = 0.0005
-BENCHMARK_SYMBOL = "BTC-USD" # For benchmark comparison
+RISK_FRACTION = 0.01      # Fraction of capital to risk per trade for sizing
+ATR_WINDOW_SIZING = 14    # ATR period used in sizing calculation
 
-# Trading Parameters
-SIZE_GRANULARITY = 0.00001
-RISK_FRACTION = 0.01
-ATR_WINDOW_SIZING = 14
-# ATR_MULTIPLE_SIZING is now implicitly handled via atr_multiple_sl in the sizing % calculation
-
-# Optimization Parameters
-OPTIMIZATION_METRIC = 'sharpe_ratio'
-WEIGHT_OPT_STEPS = 3
+# --- Optimization Parameters ---
+OPTIMIZATION_METRIC = 'sharpe_ratio' # e.g., 'sharpe_ratio', 'total_return', 'max_drawdown'
+# Expand parameter space for better optimization chances
 PARAM_GRID = {
-    'lookback_window': [15, 25, 35],
-    'volatility_threshold': [0.3, 0.5, 0.7],
-    'tsl_stop': [0.05, 0.07, 0.10],
-    'tp_stop': [0.05, 0.10, 0.15],
-    'atr_multiple_sl': [1.5, 2.0, 2.5], # This now also influences target % size
-    # 'factor_weights': 'auto' # Handle weight generation separately before passing to decorator
+    'lookback_window': [14, 20, 30, 40], # Expanded options
+    'volatility_threshold': [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], # More options, especially lower values
+    'tsl_stop': [0.03, 0.05, 0.07, 0.1], # Trailing Stop Loss % (0 to disable)
+    'tp_stop': [0.08, 0.10, 0.15, 0], # Take Profit % (0 to disable)
+    'atr_multiple_sl': [1.0, 1.5, 2.0, 2.5], # ATR multiple for initial stop distance
+    'vol_filter_window': [50, 100, 150] # Add vol_filter_window parameter
 }
-# Get factor names for weight generation
 FACTOR_NAMES = ['volatility_regime', 'consolidation_breakout', 'volume_divergence', 'market_microstructure']
+# Generate multiple weight combinations instead of just equal weights
+weight_options = [
+    # Equal weights
+    {'volatility_regime': 0.25, 'consolidation_breakout': 0.25, 'volume_divergence': 0.25, 'market_microstructure': 0.25},
+    # Emphasis on volatility and consolidation
+    {'volatility_regime': 0.4, 'consolidation_breakout': 0.4, 'volume_divergence': 0.1, 'market_microstructure': 0.1},
+    # Emphasis on volatility regime
+    {'volatility_regime': 0.6, 'consolidation_breakout': 0.2, 'volume_divergence': 0.1, 'market_microstructure': 0.1}, 
+    # Emphasis on consolidation breakout
+    {'volatility_regime': 0.2, 'consolidation_breakout': 0.6, 'volume_divergence': 0.1, 'market_microstructure': 0.1}
+]
+WEIGHT_COMBINATIONS = weight_options
+# To optimize weights:
+# WEIGHT_OPT_STEPS = 1 # Set > 0 to generate combinations
+# WEIGHT_COMBINATIONS = generate_weight_combinations(FACTOR_NAMES, WEIGHT_OPT_STEPS)
 
-def generate_weight_combinations(factors, num_steps):
-    """
-    Generate valid factor weight combinations that sum to 1.0.
-    """
-    if not factors:
-        return []
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Function to generate weight combinations (if optimizing weights)
+def generate_weight_combinations(factors: List[str], num_steps: int) -> List[Dict[str, float]]:
+    """Generates valid factor weight combinations that sum to 1.0."""
+    if not factors or num_steps <= 0:
+        # Return default equal weights if no steps or factors
+        return [{factor: 1.0/len(factors) for factor in factors}] if factors else []
+
     step = 1.0 / num_steps
-    points = [i * step for i in range(num_steps + 1)]
+    points = [round(i * step, 8) for i in range(num_steps + 1)] # Use round for precision
     valid_combinations = []
-    # Use combinations_with_replacement for efficiency if needed, but product is clearer here
+
     for combo in itertools.product(points, repeat=len(factors)):
         if np.isclose(sum(combo), 1.0):
             valid_combinations.append(dict(zip(factors, combo)))
 
-    # Add default equal weights if not already present and valid
-    default_weights_dict = {factor: 1.0/len(factors) for factor in factors}
-    is_default_present = any(
-        all(np.isclose(combo.get(factor, 0), weight) for factor, weight in default_weights_dict.items())
-        for combo in valid_combinations
-    )
-    if np.isclose(sum(default_weights_dict.values()), 1.0) and not is_default_present:
-         # Ensure keys match exactly for comparison
-         valid_combinations.append({factor: default_weights_dict.get(factor, 0) for factor in factors})
-
-    # Deduplicate just in case float precision caused issues
-    unique_combos = []
-    seen_tuples = set()
+    # Deduplicate (necessary due to potential float precision issues)
+    unique_combos_dict = {}
     for combo_dict in valid_combinations:
-        # Create a sorted tuple of (key, value) pairs for reliable hashing/comparison
         combo_tuple = tuple(sorted(combo_dict.items()))
-        if combo_tuple not in seen_tuples:
-            unique_combos.append(combo_dict)
-            seen_tuples.add(combo_tuple)
+        if combo_tuple not in unique_combos_dict:
+             unique_combos_dict[combo_tuple] = combo_dict
 
-    return unique_combos
+    # Ensure default equal weights are included if valid
+    default_weights = {factor: 1.0 / len(factors) for factor in factors}
+    default_tuple = tuple(sorted(default_weights.items()))
+    if np.isclose(sum(default_weights.values()), 1.0) and default_tuple not in unique_combos_dict:
+        unique_combos_dict[default_tuple] = default_weights
 
-# --- Refactored WFO Function using @vbt.cv_split ---
+    return list(unique_combos_dict.values())
 
-def setup_wfo_splitter(index):
+
+def create_pf_for_params(
+    data: pd.DataFrame,
+    strategy_params: Dict[str, Any],
+    trade_params: Dict[str, Any]
+    ) -> Optional[vbt.Portfolio]:
     """
-    Create a simple time-based split for walk-forward optimization.
-    
-    Instead of using splitter, we'll manually implement a custom walk-forward optimizer
-    that works with time-series data with DatetimeIndex.
+    Helper function to create and run a vectorbt Portfolio for a given set of parameters.
+
+    Args:
+        data: DataFrame with OHLCV data for the current period (train or test).
+        strategy_params: Dictionary containing parameters for EdgeMultiFactorStrategy
+                         (lookback_window, volatility_threshold, factor_weights).
+        trade_params: Dictionary containing parameters for portfolio execution
+                      (tsl_stop, tp_stop, atr_multiple_sl, risk_fraction, atr_window).
+
+    Returns:
+        A vectorbt Portfolio object, or None if an error occurs or no trades are generated.
     """
     try:
-        logging.info(f"Original index type: {type(index)}")
-        logging.info(f"Original index dtype: {index.dtype}")
-        logging.info(f"First few original values: {index[:5]}")
-        
-        # First, ensure the index is a DatetimeIndex with correct timezone
-        if not isinstance(index, pd.DatetimeIndex):
-            index = pd.DatetimeIndex(index)
-            
-        # Preserve the timezone information
-        timezone_info = getattr(index, 'tz', None)
-        logging.info(f"Index timezone info: {timezone_info}")
-        
-        # Define time windows
-        train_days = 365
-        test_days = 90
-        step_days = 90
-        
-        # Create a manual splitter class that imitates what we need
-        class CustomSplitter:
-            def __init__(self, ts_index, train_days, test_days, step_days):
-                self.ts_index = ts_index
-                self.train_days = train_days
-                self.test_days = test_days
-                self.step_days = step_days
-                
-                # Calculate the splits in advance
-                self.splits = []
-                start_time = ts_index[0]
-                
-                for i in range(20):  # Maximum 20 splits to prevent infinite loops
-                    # Create timedelta with timezone preservation
-                    train_start_time = start_time + pd.Timedelta(days=(i * step_days))
-                    train_end_time = train_start_time + pd.Timedelta(days=train_days)
-                    test_end_time = train_end_time + pd.Timedelta(days=test_days)
-                    
-                    # Skip if we're past the end of the data
-                    if test_end_time > ts_index[-1]:
-                        break
-                    
-                    self.splits.append({
-                        "split_idx": i,
-                        "train_start": train_start_time,
-                        "train_end": train_end_time,
-                        "test_start": train_end_time,
-                        "test_end": test_end_time
-                    })
-                
-                logging.info(f"Created {len(self.splits)} splits")
-            
-            def get_indices(self, split_idx=None, set_label=None):
-                """Get indices for a specific split and set (train/test)"""
-                if split_idx is None or set_label is None:
-                    return None
-                
-                if split_idx < 0 or split_idx >= len(self.splits):
-                    return None
-                
-                split = self.splits[split_idx]
-                
-                if set_label == "train":
-                    # Use np.where to get integer indices
-                    train_mask = (self.ts_index >= split["train_start"]) & (self.ts_index < split["train_end"])
-                    return np.where(train_mask)[0]
-                elif set_label == "test":
-                    # Use np.where to get integer indices
-                    test_mask = (self.ts_index >= split["test_start"]) & (self.ts_index < split["test_end"])
-                    return np.where(test_mask)[0]
-                else:
-                    return None
-            
-            def get_split_idxs(self):
-                """Get all split indices"""
-                return list(range(len(self.splits)))
-                
-        # Create our custom splitter
-        splitter = CustomSplitter(index, train_days, test_days, step_days)
-        
-        return splitter
-        
-    except Exception as e:
-        logging.error(f"Failed to create splitter: {str(e)}")
-        raise
-
-def create_pf_for_params(data, lookback_window, volatility_threshold, tsl_stop, tp_stop, atr_multiple_sl, factor_weights, **kwargs):
-    """Helper to create portfolio for one parameter set."""
-    try:
-        # 1. Initialize strategy with current parameters
+        # 1. Initialize strategy with current strategy parameters
         strategy = EdgeMultiFactorStrategy(
-            lookback_window=lookback_window,
-            volatility_threshold=volatility_threshold,
-            initial_capital=INITIAL_CAPITAL,
-            default_factor_weights=factor_weights,
+            lookback_window=int(strategy_params['lookback_window']),
+            volatility_threshold=float(strategy_params['volatility_threshold']),
+            default_factor_weights=strategy_params['factor_weights'], # Pass weights
+            vol_filter_window=int(strategy_params.get('vol_filter_window', 100)), # Use get() with default
+            initial_capital=INITIAL_CAPITAL, # Needed for sizing calc
             commission_pct=COMMISSION_PCT,
             slippage_pct=SLIPPAGE_PCT
         )
 
-        # 2. Generate signals for the current data slice
+        # 2. Generate signals using the strategy's method (no factory)
+        # Ensure data covers the lookback period needed by generate_signals internal calls
+        if len(data) < strategy.lookback_window + 2: # Add buffer
+             wfo_logger.warning(f"Data length ({len(data)}) insufficient for lookback ({strategy.lookback_window}). Skipping PF creation.")
+             return None
+             
         long_entries, short_entries = strategy.generate_signals(data)
 
-        # Skip if no signals to avoid errors
-        if long_entries.sum() + short_entries.sum() == 0:
-            return None # Indicate no portfolio was generated
+        # Enhanced signal tracking for debugging
+        signal_count = long_entries.sum() + short_entries.sum()
+        if signal_count == 0:
+            wfo_logger.debug(f"No entry signals generated with params: lookback={strategy_params['lookback_window']}, " +
+                           f"vol_thresh={strategy_params['volatility_threshold']}, " +
+                           f"vol_filter={strategy_params.get('vol_filter_window', 100)}")
+            return None
+        else:
+            wfo_logger.debug(f"Generated {long_entries.sum()} long and {short_entries.sum()} short signals with params: " +
+                           f"lookback={strategy_params['lookback_window']}, vol_thresh={strategy_params['volatility_threshold']}")
 
-        # 3. Calculate sizing and stops
+        # Skip if no entry signals
+        if long_entries.sum() + short_entries.sum() == 0:
+            # wfo_logger.debug("No entry signals generated for this parameter set.")
+            return None
+
+        # 3. Calculate sizing ('Amount') and SL % (for sl_stop param)
         target_amount = strategy.calculate_target_amount(
             data,
-            risk_fraction=RISK_FRACTION,
-            atr_window=ATR_WINDOW_SIZING,
-            atr_multiple_stop=atr_multiple_sl
+            risk_fraction=float(trade_params['risk_fraction']),
+            atr_window=int(trade_params['atr_window']),
+            atr_multiple_stop=float(trade_params['atr_multiple_sl'])
         )
-        
-        # Keep SL % calculation for the sl_stop parameter
-        atr = vbt.ATR.run(data['high'], data['low'], data['close'], window=ATR_WINDOW_SIZING, wtype='wilder').atr.bfill().ffill()
-        sl_stop_dist = (atr * atr_multiple_sl)
-        sl_stop_pct = (sl_stop_dist / data['close']).replace([np.inf, -np.inf], np.nan).ffill().fillna(0)
-        sl_stop_pct = np.clip(sl_stop_pct, 0.001, 0.5) 
+
+        # Calculate SL % based on ATR for the sl_stop parameter
+        atr = vbt.ATR.run(
+            data['high'], data['low'], data['close'],
+            window=int(trade_params['atr_window']), wtype='wilder'
+            ).atr.bfill().ffill()
+        sl_stop_dist = (atr * float(trade_params['atr_multiple_sl']))
+        # Use .replace before division, handle potential NaNs/Infs after division
+        close_safe = data['close'].replace(0, np.nan)
+        sl_stop_pct = (sl_stop_dist / close_safe).replace([np.inf, -np.inf], np.nan).ffill().fillna(0)
+        sl_stop_pct = np.clip(sl_stop_pct, 0.001, 0.5) # Apply bounds
 
         # 4. Run Portfolio Simulation
-        vbt_freq = pd.infer_freq(data.index) # Infer freq from data slice
-        if not vbt_freq: vbt_freq = get_vbt_freq_str(GRANULARITY_SECONDS) # Fallback
+        vbt_freq = pd.infer_freq(data.index)
+        if not vbt_freq:
+            try:
+                # Attempt to get freq from GRANULARITY_SECONDS if index freq fails
+                vbt_freq = get_vbt_freq_str(GRANULARITY_SECONDS)
+            except NameError: # Fallback if get_vbt_freq_str is not available
+                 vbt_freq = "1h" # Default fallback
+            wfo_logger.debug(f"Could not infer frequency for portfolio, using '{vbt_freq}'.")
+
+        # Prepare TSL and TP stops (use None if 0)
+        tsl_stop_val = float(trade_params['tsl_stop']) if float(trade_params['tsl_stop']) > 0 else None
+        tp_stop_val = float(trade_params['tp_stop']) if float(trade_params['tp_stop']) > 0 else None
 
         pf = vbt.Portfolio.from_signals(
-            data['close'], # Use close price from the data slice
+            data['close'],
             entries=long_entries,
             short_entries=short_entries,
-            sl_stop=sl_stop_pct, # Pass SL as percentage
-            tsl_stop=tsl_stop if tsl_stop > 0 else None,
-            tp_stop=tp_stop if tp_stop > 0 else None,
-            size=target_amount, # Pass target dollar amount
-            size_type='Amount',   # Use Amount sizing
+            sl_stop=sl_stop_pct,
+            tsl_stop=tsl_stop_val,
+            tp_stop=tp_stop_val,
+            size=target_amount,
+            size_type='Amount',
             init_cash=INITIAL_CAPITAL,
             fees=COMMISSION_PCT,
             slippage=SLIPPAGE_PCT,
             freq=vbt_freq,
-            # Comment out size_granularity as it might not apply to Amount
-            # size_granularity=SIZE_GRANULARITY,
-            stop_exit_type='close',
-            accumulate=False,
             call_seq='auto',
+            accumulate=False,
+            stop_exit_type='close',
+            save_state=True,
+            save_returns=True,
+            fillna_close=True,
+            seed=42
         )
         return pf
+
     except Exception as e:
-        # Log the error with parameters for debugging
-        logger.error(f"Error in create_pf_for_params with params: lw={lookback_window}, vt={volatility_threshold}, tsl={tsl_stop}, tp={tp_stop}, atr_sl={atr_multiple_sl}, weights={factor_weights}. Error: {e}", exc_info=False) # Set exc_info=True for full traceback if needed
+        # Enhanced error handling with chat model
+        data_info = {
+            "shape": data.shape if isinstance(data, pd.DataFrame) else None,
+            "date_range": f"{data.index[0]} to {data.index[-1]}" if len(data.index) > 0 else None,
+            "has_nulls": data.isnull().any().any() if isinstance(data, pd.DataFrame) else None,
+            "frequency": vbt_freq if 'vbt_freq' in locals() else None
+        }
+        
+        debug_suggestions = handle_portfolio_error(e, 
+            params={**strategy_params, **trade_params},
+            data_info=data_info
+        )
+        
+        # Log the error with parameters and chat model suggestions
+        wfo_logger.error(
+            f"Error in create_pf_for_params:\n"
+            f"Parameters: StrategyP:{strategy_params}, TradeP:{trade_params}\n"
+            f"Error: {e}\n"
+            f"Debug Suggestions:\n{debug_suggestions}",
+            exc_info=True
+        )
         return None # Return None on error
 
-# Define the main WFO function decorated with @vbt.cv_split
-@vbt.cv_split(
-    # splitter is defined dynamically based on data below
-    takeable_args=["data"],         # Which arguments should be split
-    param_product=True,             # Test all combinations of params passed below
-    merge_func="concat",            # Combine results into one Series/DataFrame
-    # Add chunking/parallel options if needed: engine='ray', chunk_len=...
-)
-def run_wfo_split(data, lookback_window, volatility_threshold, tsl_stop, tp_stop, atr_multiple_sl, factor_weights, metric_to_return):
+
+# =============================================================================
+# Main WFO Function
+# =============================================================================
+
+def run_walk_forward_optimization():
     """
-    Function for each parameter combination on each train/test slice.
-    It calls create_pf_for_params and then extracts the desired metric.
-    Used by the original CV split approach.
+    Performs the Walk-Forward Optimization process.
+    1. Fetches data.
+    2. Splits data into training and testing sets according to WFO parameters.
+    3. Optimizes strategy parameters on each training set.
+    4. Evaluates the best parameters on the corresponding testing set.
+    5. Combines out-of-sample results and evaluates the final portfolio.
+    6. Saves results.
     """
-    pf = create_pf_for_params(
-        data=data, 
-        lookback_window=lookback_window, 
-        volatility_threshold=volatility_threshold, 
-        tsl_stop=tsl_stop, 
-        tp_stop=tp_stop, 
-        atr_multiple_sl=atr_multiple_sl, 
-        factor_weights=factor_weights
-    )
-
-    if pf is None:
-        return np.nan # Return NaN if portfolio creation failed
-
-    # Evaluate portfolio using the specified metric
     try:
-        stats = pf.stats()
-        metric_value = stats.get(metric_to_return)
+        wfo_logger.info("--- Starting Walk-Forward Optimization ---")
+        wfo_logger.info(f"Symbol: {SYMBOL}, Granularity: {GRANULARITY_STR}")
+        wfo_logger.info(f"Date Range: {WFO_START_DATE} to {WFO_END_DATE}")
+        wfo_logger.info(f"WFO Config: IS={IN_SAMPLE_DAYS}d, OOS={OUT_SAMPLE_DAYS}d, Step={STEP_DAYS}d")
+        wfo_logger.info(f"Optimization Metric: {OPTIMIZATION_METRIC}")
+        wfo_logger.info(f"Output Directory: {OUTPUT_DIR}")
 
-        if metric_value is None and metric_to_return != 'Sharpe Ratio':
-            logger.warning(f"Metric '{metric_to_return}' not found, falling back to Sharpe Ratio")
-            metric_value = stats.get('Sharpe Ratio')
-
-        if metric_value is None or not np.isfinite(metric_value):
-            metric_value = np.nan # Use NaN for invalid scores
-
-        # Handle drawdown metric (less negative is better)
-        if metric_to_return == 'max_drawdown':
-             metric_value = -abs(metric_value)
-
-        return metric_value
-    except Exception as e:
-        logger.error(f"Error evaluating portfolio for metric '{metric_to_return}': {e}", exc_info=False)
-        return np.nan
-
-
-def run_wfo_refactored():
-    """Run the Walk-Forward Optimization process with manual splitting."""
-    try:
-        logger.info("--- Starting Manual WFO Process ---")
-        logger.info(f"Symbol: {SYMBOL}, Granularity: {GRANULARITY_STR}")
-        logger.info(f"Date Range: {WFO_START_DATE} to {WFO_END_DATE}")
-        logger.info(f"IS: {IN_SAMPLE_LEN}, OOS: {OUT_SAMPLE_LEN}, Step: {STEP_LEN}")
-        logger.info(f"Benchmark Symbol: {BENCHMARK_SYMBOL}")
-        logger.info(f"Optimization Metric: {OPTIMIZATION_METRIC}")
+        # Initialize chat model for the optimization process
+        chat_model = get_chat_model()
+        if chat_model:
+            wfo_logger.info("VectorBT Pro chat model initialized for optimization assistance.")
+        else:
+            wfo_logger.warning("Chat model not available. Proceeding without optimization assistance.")
 
         # 1. Fetch Data
-        logger.info("\nFetching historical data...")
+        wfo_logger.info("Fetching historical data...")
         price_data = fetch_historical_data(SYMBOL, WFO_START_DATE, WFO_END_DATE, GRANULARITY_SECONDS)
         if price_data is None or price_data.empty:
-            logger.error("Failed to fetch data. Exiting.")
+            if chat_model:
+                suggestions = ask_chat_model(chat_model, 
+                    "Failed to fetch price data. What could be the potential issues?",
+                    {"symbol": SYMBOL, "dates": f"{WFO_START_DATE} to {WFO_END_DATE}"}
+                )
+                wfo_logger.error(f"Failed to fetch price data. Chat model suggestions:\n{suggestions}")
+            wfo_logger.critical("Failed to fetch price data. Exiting.")
             return
-        logger.info(f"Data fetched successfully. Shape: {price_data.shape}")
-        
-        # Ensure index is properly formatted
-        price_data.index = pd.DatetimeIndex(pd.to_datetime(price_data.index, utc=True))
-        price_data = price_data.sort_index()  # Ensure data is sorted
+        # Basic data cleaning and validation
+        price_data = price_data[['open', 'high', 'low', 'close', 'volume']].copy()
+        price_data.index = pd.to_datetime(price_data.index, utc=True)
+        price_data = price_data.sort_index()
+        price_data.dropna(inplace=True) # Drop rows with any NaNs
+        wfo_logger.info(f"Price data fetched and cleaned. Shape: {price_data.shape}")
+        if price_data.empty:
+             wfo_logger.critical("Price data is empty after cleaning. Exiting.")
+             return
 
-        # Fetch Benchmark Data
-        logger.info(f"Fetching benchmark data for {BENCHMARK_SYMBOL}...")
-        benchmark_data = fetch_historical_data(BENCHMARK_SYMBOL, WFO_START_DATE, WFO_END_DATE, GRANULARITY_SECONDS)
+        # Fetch Benchmark Data (Optional)
         benchmark_rets = None
-        if benchmark_data is not None and not benchmark_data.empty:
-            benchmark_data.index = pd.DatetimeIndex(pd.to_datetime(benchmark_data.index, utc=True))
-            benchmark_data = benchmark_data.sort_index()  # Ensure data is sorted
-            benchmark_close = benchmark_data['close'].reindex(price_data.index, method='ffill')
-            benchmark_rets = benchmark_close.pct_change().fillna(0)
-            logger.info(f"Benchmark data fetched. Shape: {benchmark_data.shape}")
-        else:
-            logger.warning("Could not fetch benchmark data. Proceeding without benchmark.")
+        if BENCHMARK_SYMBOL:
+            wfo_logger.info(f"Fetching benchmark data for {BENCHMARK_SYMBOL}...")
+            benchmark_data = fetch_historical_data(BENCHMARK_SYMBOL, WFO_START_DATE, WFO_END_DATE, GRANULARITY_SECONDS)
+            if benchmark_data is not None and not benchmark_data.empty:
+                benchmark_data.index = pd.to_datetime(benchmark_data.index, utc=True)
+                benchmark_data = benchmark_data.sort_index()
+                benchmark_close = benchmark_data['close'].reindex(price_data.index).ffill().bfill()
+                benchmark_rets = benchmark_close.pct_change().fillna(0)
+                wfo_logger.info(f"Benchmark data fetched. Shape: {benchmark_data.shape}")
+            else:
+                wfo_logger.warning("Could not fetch benchmark data. Proceeding without benchmark.")
 
-        # Create our custom splitter
-        logging.info(f"Price data index type: {type(price_data.index)}")
-        logging.info(f"Price data index dtype: {price_data.index.dtype}")
-        logging.info(f"First few price data index values: {price_data.index[:5]}")
-        
-        splitter = setup_wfo_splitter(price_data.index)
-        
-        # 2. Generate Weight Combinations
-        weight_combinations = generate_weight_combinations(FACTOR_NAMES, WEIGHT_OPT_STEPS)
-        logger.info(f"Generated {len(weight_combinations)} factor weight combinations.")
-        if not weight_combinations:
-            logger.warning("No valid weight combinations generated, using default equal weights.")
-            weight_combinations = [{factor: 1.0/len(FACTOR_NAMES) for factor in FACTOR_NAMES}]
+        # 2. Setup WFO Splitter
+        # Use vbt.rolling_split for standard WFO
+        # Ensure offset parameters are Timedeltas
+        in_sample_len = pd.Timedelta(days=IN_SAMPLE_DAYS)
+        out_sample_len = pd.Timedelta(days=OUT_SAMPLE_DAYS)
+        step_len = pd.Timedelta(days=STEP_DAYS)
 
-        # 3. Manual WFO process
-        logger.info("Running manual WFO process...")
-        
-        # Create a DataFrame to store results
-        all_train_results = []
-        all_test_results = []
-        best_params_per_split = pd.DataFrame()
-        
-        # Get all parameter combinations
-        param_combinations = []
-        for lw in PARAM_GRID['lookback_window']:
-            for vt in PARAM_GRID['volatility_threshold']:
-                for tsl in PARAM_GRID['tsl_stop']:
-                    for tp in PARAM_GRID['tp_stop']:
-                        for atr_sl in PARAM_GRID['atr_multiple_sl']:
-                            for weights in weight_combinations:
-                                param_combinations.append({
-                                    'lookback_window': lw,
-                                    'volatility_threshold': vt,
-                                    'tsl_stop': tsl,
-                                    'tp_stop': tp,
-                                    'atr_multiple_sl': atr_sl,
-                                    'factor_weights': weights
-                                })
-        
-        logger.info(f"Created {len(param_combinations)} parameter combinations")
-        
-        # Run optimization for each split
-        split_indices = splitter.get_split_idxs()
-        
-        for split_idx in split_indices:
-            logger.info(f"\nProcessing split {split_idx}...")
+        # Calculate n based on available data and step size (approximate)
+        total_duration_available = price_data.index[-1] - price_data.index[0]
+        num_steps_possible = max(0, (total_duration_available - in_sample_len - out_sample_len) // step_len) + 1
+        n_splits = int(num_steps_possible)
+        wfo_logger.info(f"Calculated number of WFO splits: {n_splits}")
+        if n_splits <= 0:
+            wfo_logger.error("Not enough data for the specified WFO parameters. Exiting.")
+            return
             
-            # Get training and test indices
-            train_indices = splitter.get_indices(split_idx=split_idx, set_label="train")
-            test_indices = splitter.get_indices(split_idx=split_idx, set_label="test")
+        # Create the splitter
+        try:
+            # Convert time-based parameters to number of rows
+            rows_per_day = 24  # Since we're using hourly data
+            in_sample_rows = IN_SAMPLE_DAYS * rows_per_day
+            out_sample_rows = OUT_SAMPLE_DAYS * rows_per_day
+            step_rows = STEP_DAYS * rows_per_day
             
-            # Skip if either is empty
-            if train_indices is None or len(train_indices) == 0 or test_indices is None or len(test_indices) == 0:
-                logger.warning(f"Split {split_idx} has empty train or test set. Skipping.")
-                continue
+            # Create splits manually using simple lists
+            splits = []
+            total_rows = len(price_data)
+            start_idx = 0
+            
+            while start_idx + in_sample_rows + out_sample_rows <= total_rows:
+                train_end = start_idx + in_sample_rows
+                test_end = min(train_end + out_sample_rows, total_rows)
                 
-            # Slice the data
+                # Create lists of indices for train and test sets
+                train_indices = list(range(start_idx, train_end))
+                test_indices = list(range(train_end, test_end))
+                
+                # Create split using simple lists
+                splits.append([train_indices, test_indices])
+                start_idx += step_rows
+            
+            if not splits:
+                wfo_logger.error("No valid splits could be created with the given parameters.")
+                return
+            
+            # Create splitter using only supported parameters
+            splitter = vbt.Splitter.from_splits(
+                price_data.index,
+                splits=splits
+            )
+            
+            # Log split information
+            wfo_logger.info(f"Created splitter with {len(splits)} splits.")
+            
+            # Verify splits with chat model assistance
+            if chat_model:
+                splits_info = {
+                    "total_splits": len(splits),
+                    "first_split": {
+                        "train": f"{price_data.index[splits[0][0][0]]} to {price_data.index[splits[0][0][-1]]}",
+                        "test": f"{price_data.index[splits[0][1][0]]} to {price_data.index[splits[0][1][-1]]}"
+                    } if splits else None
+                }
+                validation = ask_chat_model(chat_model,
+                    "Please validate these WFO splits. Are they reasonable?",
+                    splits_info
+                )
+                wfo_logger.info(f"Split Validation:\n{validation}")
+                
+        except Exception as split_err:
+            if chat_model:
+                suggestions = ask_chat_model(chat_model,
+                    f"Error creating splits: {split_err}. What might be wrong?",
+                    {"data_length": len(price_data), "wfo_params": {
+                        "in_sample_days": IN_SAMPLE_DAYS,
+                        "out_sample_days": OUT_SAMPLE_DAYS,
+                        "step_days": STEP_DAYS
+                    }}
+                )
+                wfo_logger.error(f"Split creation error. Chat model suggestions:\n{suggestions}")
+            wfo_logger.error(f"Error creating vbt.Splitter: {split_err}. Check WFO parameters and data length.", exc_info=True)
+            return
+            
+        # 3. Prepare Parameter Combinations
+        param_combinations = []
+        param_keys = list(PARAM_GRID.keys())
+        # Use product to generate all combinations from the grid values
+        for combo_values in itertools.product(*[PARAM_GRID[key] for key in param_keys]):
+            param_set = dict(zip(param_keys, combo_values))
+            # Add the fixed factor weights to each parameter set
+            param_set['factor_weights'] = WEIGHT_COMBINATIONS[0] # Assuming fixed weights for now
+            param_combinations.append(param_set)
+
+        # Add trade parameters needed by create_pf_for_params
+        trade_param_template = {
+            'risk_fraction': RISK_FRACTION,
+            'atr_window': ATR_WINDOW_SIZING
+        }
+        wfo_logger.info(f"Generated {len(param_combinations)} parameter combinations to test per split.")
+
+        # 4. Run WFO Loop with chat model assistance
+        all_oos_portfolios = []
+        best_params_per_split = []
+        
+        for split_idx, (train_indices, test_indices) in enumerate(splits):
+            wfo_logger.info(f"--- Processing Split {split_idx + 1}/{len(splits)} ---")
+            
             train_data = price_data.iloc[train_indices]
             test_data = price_data.iloc[test_indices]
             
-            logger.info(f"Train data: {train_data.shape}, Test data: {test_data.shape}")
-            
-            # Initialize variables to track best parameters
-            best_metric_value = float('-inf')
-            best_params = None
-            
-            train_results = []
-            
-            # Wrap param_combinations with tqdm for progress bar
-            param_iterator = tqdm(param_combinations, desc=f"Split {split_idx} Train", leave=False, unit="combo")
-            # Run all parameter combinations on training data
-            # Use the tqdm iterator
-            for params in param_iterator:
-                pf = create_pf_for_params(
-                    data=train_data,
-                    lookback_window=params['lookback_window'],
-                    volatility_threshold=params['volatility_threshold'],
-                    tsl_stop=params['tsl_stop'],
-                    tp_stop=params['tp_stop'],
-                    atr_multiple_sl=params['atr_multiple_sl'],
-                    factor_weights=params['factor_weights']
+            if chat_model and (split_idx == 0 or split_idx == len(splits) - 1):  # Check first and last splits
+                period_check = ask_chat_model(chat_model,
+                    "Please validate these training and testing periods:",
+                    {
+                        "split": split_idx + 1,
+                        "train_period": f"{train_data.index[0]} to {train_data.index[-1]}",
+                        "test_period": f"{test_data.index[0]} to {test_data.index[-1]}",
+                        "train_rows": len(train_data),
+                        "test_rows": len(test_data)
+                    }
                 )
-                
-                if pf is None:
-                    continue
-                    
-                # Evaluate portfolio
+                wfo_logger.info(f"Period Validation (Split {split_idx + 1}):\n{period_check}")
+
+            # --- In-Sample Optimization ---
+            best_split_metric = -np.inf
+            best_split_params = None
+            valid_params_count = 0
+            param_iterator = tqdm(param_combinations, desc=f"Split {split_idx + 1} Train Opt", leave=False, unit="combo")
+
+            for params in param_iterator:
+                # Separate strategy params from trade params based on PARAM_GRID keys
+                current_strategy_params = {k: v for k, v in params.items() if k in ['lookback_window', 'volatility_threshold', 'factor_weights', 'vol_filter_window']}
+                current_trade_params = {k: v for k, v in params.items() if k in ['tsl_stop', 'tp_stop', 'atr_multiple_sl']}
+                # Add fixed trade params
+                current_trade_params.update(trade_param_template)
+
+                # Create portfolio for this param set on training data
+                train_pf = create_pf_for_params(train_data, current_strategy_params, current_trade_params)
+
+                if train_pf is None:
+                    continue # Skip if PF creation failed or no trades
+
+                # Evaluate metric
                 try:
-                    stats = pf.stats()
+                    stats = train_pf.stats(settings=dict(freq=train_pf.wrapper.freq)) # Pass freq explicitly
                     metric_value = stats.get(OPTIMIZATION_METRIC)
-                    
-                    if metric_value is None and OPTIMIZATION_METRIC != 'Sharpe Ratio':
-                        logger.warning(f"Metric '{OPTIMIZATION_METRIC}' not found, falling back to Sharpe Ratio")
-                        metric_value = stats.get('Sharpe Ratio')
-                        
+
+                    # Handle cases where metric might not exist (e.g., no trades)
                     if metric_value is None or not np.isfinite(metric_value):
-                        metric_value = float('-inf')
-                        
-                    # Handle drawdown metric (less negative is better)
-                    if OPTIMIZATION_METRIC == 'max_drawdown':
-                        metric_value = -abs(metric_value)
-                        
-                    # Track results
-                    result = params.copy()
-                    result['split_idx'] = split_idx
-                    result['set'] = 'train'
-                    result['metric_value'] = metric_value
-                    train_results.append(result)
+                        metric_value = -np.inf # Treat missing/invalid metrics as worst score
                     
-                    # Update best parameters if better
-                    if metric_value > best_metric_value:
-                        best_metric_value = metric_value
-                        best_params = params
-                        
-                except Exception as e:
-                    logger.error(f"Error evaluating portfolio: {e}")
+                    # Count valid parameter sets
+                    valid_params_count += 1
+                    wfo_logger.debug(f"Valid params found: {current_strategy_params} with metric {OPTIMIZATION_METRIC}={metric_value:.4f}")
+
+                    # Handle metrics where higher is worse (e.g., Max Drawdown)
+                    if OPTIMIZATION_METRIC == 'max_drawdown' and metric_value != -np.inf:
+                         current_metric = -abs(metric_value) # More negative is worse
+                    else:
+                         current_metric = metric_value
+
+                    if current_metric > best_split_metric:
+                        best_split_metric = current_metric
+                        best_split_params = params # Store the full parameter dict
+
+                except Exception as eval_err:
+                    wfo_logger.error(f"Error evaluating training portfolio for split {split_idx + 1}: {eval_err}", exc_info=False) # Don't need full traceback here usually
                     continue
             
-            # If no valid parameters found, skip this split
-            if best_params is None:
-                logger.warning(f"No valid parameters found for split {split_idx}. Skipping.")
-                continue
-                
-            logger.info(f"Best parameters for split {split_idx}: {best_params}")
+            # Log the number of valid parameter sets found
+            wfo_logger.info(f"Split {split_idx + 1}: Found {valid_params_count} valid parameter sets out of {len(param_combinations)} combinations.")
+
+            # --- Out-of-Sample Evaluation ---
+            if best_split_params is not None:
+                wfo_logger.info(f"Best metric ({OPTIMIZATION_METRIC}) in split {split_idx + 1}: {best_split_metric:.4f}")
+                wfo_logger.info(f"Best params: {best_split_params}")
+                best_params_per_split.append({**best_split_params, 'split': split_idx + 1, 'metric_value': best_split_metric})
+
+                # Separate best params for OOS run
+                oos_strategy_params = {k: v for k, v in best_split_params.items() if k in ['lookback_window', 'volatility_threshold', 'factor_weights', 'vol_filter_window']}
+                oos_trade_params = {k: v for k, v in best_split_params.items() if k in ['tsl_stop', 'tp_stop', 'atr_multiple_sl']}
+                oos_trade_params.update(trade_param_template)
+
+                # Run portfolio on test data with best params
+                test_pf = create_pf_for_params(test_data, oos_strategy_params, oos_trade_params)
+
+                if test_pf is not None:
+                    wfo_logger.info(f"Successfully created OOS portfolio for split {split_idx + 1}.")
+                    # Add benchmark returns to the OOS portfolio if available
+                    if benchmark_rets is not None:
+                         test_benchmark_rets = benchmark_rets.reindex(test_data.index).fillna(0)
+                         test_pf.benchmark_returns = test_benchmark_rets
+                    all_oos_portfolios.append(test_pf)
+                else:
+                    wfo_logger.warning(f"Could not create OOS portfolio for split {split_idx + 1} (likely no trades).")
+
+            else:
+                wfo_logger.warning(f"No valid parameters found during optimization for split {split_idx + 1}. Skipping OOS.")
+
+            # Enhanced error handling in optimization loop
+            if best_split_params is None and chat_model:
+                optimization_analysis = ask_chat_model(chat_model,
+                    f"No valid parameters found for split {split_idx + 1}. What might be the issue?",
+                    {
+                        "metric": OPTIMIZATION_METRIC,
+                        "param_combinations_tested": len(param_combinations),
+                        "data_period": f"{train_data.index[0]} to {train_data.index[-1]}"
+                    }
+                )
+                wfo_logger.warning(f"Optimization Analysis (Split {split_idx + 1}):\n{optimization_analysis}")
             
-            # Add best parameters to DataFrame
-            best_params_row = best_params.copy()
-            best_params_row['split_idx'] = split_idx
-            best_params_per_split = pd.concat([best_params_per_split, pd.DataFrame([best_params_row])], ignore_index=True)
-            
-            # Evaluate best parameters on test data
-            test_pf = create_pf_for_params(
-                data=test_data,
-                lookback_window=best_params['lookback_window'],
-                volatility_threshold=best_params['volatility_threshold'],
-                tsl_stop=best_params['tsl_stop'],
-                tp_stop=best_params['tp_stop'],
-                atr_multiple_sl=best_params['atr_multiple_sl'],
-                factor_weights=best_params['factor_weights']
-            )
-            
-            if test_pf is not None:
-                # Evaluate test portfolio
+            # Save checkpoint after each split
+            if best_params_per_split:
                 try:
-                    test_stats = test_pf.stats()
-                    test_metric_value = test_stats.get(OPTIMIZATION_METRIC)
+                    checkpoint_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    checkpoint_filename = f"edge_wfo_checkpoint_split{split_idx+1}_{checkpoint_timestamp}.json"
+                    checkpoint_path = OUTPUT_DIR / checkpoint_filename
                     
-                    if test_metric_value is None and OPTIMIZATION_METRIC != 'Sharpe Ratio':
-                        test_metric_value = test_stats.get('Sharpe Ratio')
-                        
-                    if test_metric_value is None or not np.isfinite(test_metric_value):
-                        test_metric_value = float('-inf')
-                        
-                    # Handle drawdown metric
-                    if OPTIMIZATION_METRIC == 'max_drawdown':
-                        test_metric_value = -abs(test_metric_value)
-                        
-                    # Track result
-                    test_result = best_params.copy()
-                    test_result['split_idx'] = split_idx
-                    test_result['set'] = 'test'
-                    test_result['metric_value'] = test_metric_value
-                    all_test_results.append(test_result)
+                    checkpoint_data = {
+                        "best_params_per_split": best_params_per_split,
+                        "completed_splits": split_idx + 1,
+                        "total_splits": len(splits),
+                        "optimization_metric": OPTIMIZATION_METRIC,
+                        "timestamp": checkpoint_timestamp
+                    }
                     
-                    logger.info(f"Test {OPTIMIZATION_METRIC} for split {split_idx}: {test_metric_value:.4f}")
+                    with open(checkpoint_path, 'w') as f:
+                        json.dump(checkpoint_data, f, indent=2, default=str)
                     
-                except Exception as e:
-                    logger.error(f"Error evaluating test portfolio for split {split_idx}: {e}")
-            else:
-                logger.warning(f"Could not create test portfolio for split {split_idx}")
-                
-            # Add train results
-            all_train_results.extend(train_results)
-            
-        # Convert to DataFrames
-        all_train_results_df = pd.DataFrame(all_train_results)
-        all_test_results_df = pd.DataFrame(all_test_results)
-        
-        if all_test_results_df.empty:
-            logger.error("No valid test results. Aborting.")
-            return
-            
-        # Print summary of OOS performance
-        logger.info("\n--- OOS Performance Summary ---")
-        logger.info(f"Mean OOS {OPTIMIZATION_METRIC}: {all_test_results_df['metric_value'].mean():.4f}")
-        logger.info(f"Std Dev OOS {OPTIMIZATION_METRIC}: {all_test_results_df['metric_value'].std():.4f}")
-        
-        # Reconstruct OOS portfolios
-        logger.info("\nReconstructing OOS Portfolio...")
-        oos_portfolios = []
-        
-        for _, row in all_test_results_df.iterrows():
-            split_idx = int(row['split_idx'])
-            test_indices = splitter.get_indices(split_idx=split_idx, set_label="test")
-            
-            if test_indices is None or len(test_indices) == 0:
-                logger.warning(f"No test indices found for split {split_idx}, skipping portfolio reconstruction.")
-                continue
-                
-            oos_data_slice = price_data.iloc[test_indices]
-            
-            # Use the helper function to create the portfolio for this OOS slice with best params
-            pf_oos = create_pf_for_params(
-                data=oos_data_slice,
-                lookback_window=int(row['lookback_window']),
-                volatility_threshold=float(row['volatility_threshold']),
-                tsl_stop=float(row['tsl_stop']),
-                tp_stop=float(row['tp_stop']),
-                atr_multiple_sl=float(row['atr_multiple_sl']),
-                factor_weights=row['factor_weights']
-            )
-            
-            if pf_oos is not None:
-                oos_portfolios.append(pf_oos)
-            else:
-                logger.warning(f"Failed to create portfolio for OOS split {split_idx}")
+                    wfo_logger.info(f"Saved checkpoint after split {split_idx+1}: {checkpoint_path}")
+                except Exception as checkpoint_err:
+                    wfo_logger.error(f"Error saving checkpoint: {checkpoint_err}")
 
-        if not oos_portfolios:
-            logger.error("Could not reconstruct any OOS portfolios.")
+        # --- Final Aggregation and Evaluation ---
+        if not all_oos_portfolios:
+            if chat_model:
+                failure_analysis = ask_chat_model(chat_model,
+                    "WFO failed to generate any OOS portfolios. What could be wrong?",
+                    {
+                        "splits_processed": len(splits),
+                        "param_combinations": len(param_combinations),
+                        "optimization_metric": OPTIMIZATION_METRIC
+                    }
+                )
+                wfo_logger.critical(f"WFO failed. Analysis:\n{failure_analysis}")
+            else:
+                wfo_logger.critical("No OOS portfolios were generated. WFO failed. Check parameters and data.")
             return
 
-        # Combine the OOS portfolio segments
-        final_oos_pf = vbt.Portfolio.combine(oos_portfolios)
-        logger.info("\n--- Final OOS Combined Portfolio Stats ---")
-        final_stats = final_oos_pf.stats(benchmark_rets=benchmark_rets)
-        print(final_stats) # Use print for potentially large DataFrame output
+        wfo_logger.info("--- Aggregating Out-of-Sample Results ---")
+        # Combine the list of Portfolio objects into a single WFO portfolio
+        # Note: This automatically handles concatenating returns, trades, logs etc.
+        final_oos_pf = vbt.Portfolio.concat(*all_oos_portfolios,
+                                            keys=[f'split_{i+1}' for i in range(len(all_oos_portfolios))], # Label each segment
+                                            concat_func='concat', # Standard pandas concat
+                                            save_state=True)      # Ensure state is saved for combined
 
-        # Save stats and generate plots for the combined OOS portfolio
-        logger.info("\nSaving final OOS results and plots...")
+        wfo_logger.info("Combined OOS portfolio created.")
+
+        # --- Final Stats and Plots ---
+        wfo_logger.info("--- Final Combined OOS Portfolio Stats ---")
+        
+        # Recalculate benchmark for the combined OOS period index
+        if benchmark_rets is not None:
+            final_oos_benchmark_rets = benchmark_rets.reindex(final_oos_pf.wrapper.index).fillna(0)
+            final_oos_pf.benchmark_returns = final_oos_benchmark_rets # Set benchmark on the final object
+        else:
+            final_oos_pf.benchmark_returns = None # Ensure no stale benchmark data
+
+        # Calculate final stats
+        final_stats = final_oos_pf.stats() # Benchmark is included if set above
+        # Use print for potentially large DataFrame output
+        print("Final OOS Stats:")
+        print(final_stats)
+
+        # Calculate and log enhanced performance metrics from the final stats
         try:
-            # Save Stats
-            stats_df = pd.DataFrame([final_stats])
-            stats_df.to_csv('edge_strategy_wfo_refactored_stats.csv')
-            logger.info("Saved: edge_strategy_wfo_refactored_stats.csv")
+            metrics = final_stats # Already calculated
+            # Access returns stats if returns were saved (should be default)
+            risk_metrics = final_oos_pf.returns.stats()
+
+            calmar_ratio = metrics.get('calmar_ratio', np.nan)
+            sortino_ratio = metrics.get('sortino_ratio', np.nan)
+            omega_ratio = metrics.get('omega_ratio', np.nan)
+            var_95 = risk_metrics.get('var_95', np.nan)
+            cvar_95 = risk_metrics.get('cvar_95', np.nan)
+
+            wfo_logger.info(f"Enhanced Performance Metrics for Combined OOS Period:")
+            wfo_logger.info(f"Calmar Ratio: {calmar_ratio:.4f}")
+            wfo_logger.info(f"Sortino Ratio: {sortino_ratio:.4f}")
+            wfo_logger.info(f"Omega Ratio: {omega_ratio:.4f}")
+            wfo_logger.info(f"Value at Risk (95%): {var_95:.4f}")
+            wfo_logger.info(f"Conditional VaR (95%): {cvar_95:.4f}")
+            
+            # Add enhanced metrics to stats DataFrame before saving
+            enhanced_metrics_dict = {
+                'calmar_ratio': calmar_ratio,
+                'sortino_ratio': sortino_ratio,
+                'omega_ratio': omega_ratio,
+                'var_95': var_95,
+                'cvar_95': cvar_95
+            }
+            # Add as new rows or columns depending on preference
+            # As rows (like original stats):
+            for k, v in enhanced_metrics_dict.items():
+                if k not in final_stats.index: # Avoid overwriting if already present
+                    final_stats.loc[k] = v
+
+        except Exception as metric_err:
+            wfo_logger.error(f"Error calculating/accessing enhanced metrics: {metric_err}", exc_info=False)
+
+
+        # --- Saving Results ---
+        wfo_logger.info("Saving final WFO results...")
+        try:
+            run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            base_filename = f"edge_wfo_{SYMBOL}_{GRANULARITY_STR}_{run_timestamp}"
+
+            # Save Final Stats
+            stats_df = pd.DataFrame(final_stats) # Ensure it's a DataFrame
+            stats_path = OUTPUT_DIR / f'{base_filename}_stats.csv'
+            stats_df.to_csv(stats_path)
+            wfo_logger.info(f"Saved final stats: {stats_path}")
 
             # Save Parameter Evolution
-            best_params_per_split.to_csv('edge_strategy_wfo_refactored_parameters.csv')
-            logger.info("Saved: edge_strategy_wfo_refactored_parameters.csv")
+            if best_params_per_split:
+                params_df = pd.DataFrame(best_params_per_split)
+                params_path = OUTPUT_DIR / f'{base_filename}_params.csv'
+                params_df.to_csv(params_path, index=False)
+                wfo_logger.info(f"Saved best parameters per split: {params_path}")
 
-            # Save Plots
-            fig = final_oos_pf.plot(benchmark_rets=benchmark_rets, title="Edge Strategy WFO - Combined OOS Equity")
-            fig.write_image('edge_strategy_wfo_refactored_equity.png')
-            fig_dd = final_oos_pf.plot_drawdowns(title="Edge Strategy WFO - Combined OOS Drawdowns")
-            fig_dd.write_image('edge_strategy_wfo_refactored_drawdowns.png')
-            fig_trades = final_oos_pf.trades.plot(title="Edge Strategy WFO - Combined OOS Trades")
-            fig_trades.write_image('edge_strategy_wfo_refactored_trades.png')
-            # Add more plots if needed (rolling sharpe, etc.)
-            logger.info("Saved OOS plots.")
+            # Save Plots (use vectorbtpro's built-in saving)
+            # Ensure kaleido is installed (`pip install -U kaleido`) for image saving
+            plot_settings = {'show': False, 'return_fig': True} # Don't show, just get fig
+
+            equity_path = OUTPUT_DIR / f'{base_filename}_equity.png'
+            fig_eq = final_oos_pf.plot(**plot_settings)
+            fig_eq.write_image(str(equity_path))
+            wfo_logger.info(f"Saved equity plot: {equity_path}")
+
+            dd_path = OUTPUT_DIR / f'{base_filename}_drawdowns.png'
+            fig_dd = final_oos_pf.plot_drawdowns(**plot_settings)
+            fig_dd.write_image(str(dd_path))
+            wfo_logger.info(f"Saved drawdowns plot: {dd_path}")
+
+            trades_path = OUTPUT_DIR / f'{base_filename}_trades.png'
+            # Plotting trades can be slow for many trades
+            if final_oos_pf.trades.count() > 0:
+                 try:
+                     fig_trades = final_oos_pf.trades.plot(**plot_settings)
+                     fig_trades.write_image(str(trades_path))
+                     wfo_logger.info(f"Saved trades plot: {trades_path}")
+                 except Exception as trade_plot_err:
+                     wfo_logger.warning(f"Could not generate trades plot: {trade_plot_err}")
+            else:
+                 wfo_logger.info("Skipping trades plot as there were no trades in the combined OOS period.")
+
+            # Optional: Save the final portfolio object itself
+            # pf_path = OUTPUT_DIR / f'{base_filename}_portfolio.pkl'
+            # final_oos_pf.save(pf_path)
+            # wfo_logger.info(f"Saved final portfolio object: {pf_path}")
 
         except Exception as save_err:
-           logger.error(f"Error saving final OOS results: {save_err}")
+           wfo_logger.error(f"Error saving final WFO results: {save_err}", exc_info=True)
+
+        wfo_logger.info("--- Walk-Forward Optimization Finished ---")
 
     except Exception as e:
-        logging.error(f"Error in run_wfo_refactored: {str(e)}")
+        if chat_model:
+            error_analysis = ask_chat_model(chat_model,
+                "An unhandled error occurred in WFO. Please analyze:",
+                {
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                    "wfo_config": {
+                        "symbol": SYMBOL,
+                        "granularity": GRANULARITY_STR,
+                        "dates": f"{WFO_START_DATE} to {WFO_END_DATE}",
+                        "is_days": IN_SAMPLE_DAYS,
+                        "oos_days": OUT_SAMPLE_DAYS
+                    }
+                }
+            )
+            wfo_logger.critical(f"WFO Error Analysis:\n{error_analysis}")
+        wfo_logger.critical(f"An unhandled error occurred in run_walk_forward_optimization: {e}", exc_info=True)
         raise
 
 
-# --- Main Execution Block ---
+# =============================================================================
+# Main Execution Block
+# =============================================================================
 if __name__ == "__main__":
-    # Run the refactored WFO
-    run_wfo_refactored() 
+    wfo_logger.info("Executing WFO script...")
+    try:
+        run_walk_forward_optimization()
+        wfo_logger.info("Script execution completed successfully.")
+    except Exception as main_err:
+        wfo_logger.critical(f"Script failed with error: {main_err}")
+        # Optionally exit with error code
+        sys.exit(1) 
