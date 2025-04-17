@@ -194,7 +194,7 @@ def run_all_tests():
     
     # Calculate success rate
     success_count = sum(1 for result in results.values() if result is True)
-    total_tests = sum(1 for result in results.values() if result is not "SKIPPED")
+    total_tests = sum(1 for result in results.values() if result != "SKIPPED")
     
     if total_tests > 0:
         success_rate = (success_count / total_tests) * 100

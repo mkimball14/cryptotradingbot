@@ -10,6 +10,7 @@ A cryptocurrency trading bot with walk-forward optimization and AI-assisted stra
 - **Backtest Analysis**: Comprehensive performance metrics and visualization
 - **Parameter Research**: AI-assisted research for optimal indicator settings
 - **Adaptive Strategies**: Generation of strategies that adapt to changing market conditions
+- **Direct Chat API Integration**: Flexible communication with LLMs via OpenRouter/OpenAI APIs
 
 ## System Requirements
 
@@ -39,8 +40,9 @@ pip install -r requirements.txt
 
 4. Set up environment variables (create a `.env` file):
 ```
+# Either OpenAI API key
 OPENAI_API_KEY=your_openai_api_key_here
-# OR
+# OR OpenRouter API key (will be used if OpenAI key is not available)
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
@@ -51,12 +53,14 @@ The system consists of several key components:
 1. **Edge Strategy Assistant**: AI-powered strategy development and optimization
    - ChatVBT integration for parameter suggestions
    - SearchVBT for researching optimal indicator settings
+   - Direct Chat API for flexible LLM interactions
    - Strategy enhancement and adaptation
 
 2. **Walk-Forward Optimization**: Robust parameter optimization
    - Multiple in-sample/out-of-sample splits
    - Comprehensive performance metrics
    - Parameter stability analysis
+   - Enhanced portfolio validity checks
 
 3. **Multi-Factor Strategy**: Combines multiple trading signals
    - RSI (Relative Strength Index)
@@ -86,6 +90,12 @@ To test the AI strategy assistant:
 python scripts/strategies/test_edge_assistant.py
 ```
 
+To test direct chat functionality:
+
+```bash
+python scripts/strategies/test_direct_chat.py
+```
+
 ### Understanding the Results
 
 Analysis results are saved in the `analysis_results` directory:
@@ -93,6 +103,226 @@ Analysis results are saved in the `analysis_results` directory:
 - Backtesting results with performance metrics
 - Market analysis and recommendations
 - Adaptive strategy implementations
+
+## AI-Assisted Strategy Development with VectorBT
+
+This section provides a comprehensive explanation of how the AI assistance system works with VectorBT and how you can leverage it using Cursor for strategy enhancement, debugging, and development.
+
+### ChatVBT and SearchVBT Architecture
+
+#### ChatVBT Implementation
+
+ChatVBT is VectorBT Pro's built-in integration with language models (LLMs) like OpenAI's GPT or models accessed through OpenRouter. The system implements this functionality through several key components:
+
+1. **ChatVBT Configuration** (`setup_chat_provider()` in `wfo_edge_strategy.py`):
+   - Initializes the LLM connection through VectorBT's API
+   - Configures API keys from environment variables
+   - Sets up knowledge base paths and settings
+
+2. **ChatVBT Usage Flow**:
+   ```
+   User Request → wfo_edge_strategy.py → ask_chat_model() → VectorBT ChatProvider → API Response
+   ```
+
+3. **Fallback Mechanism**:
+   - If ChatVBT initialization fails, system falls back to direct API calls
+   - Failures detected in `setup_chat_provider()` trigger the fallback system
+   - Direct calls bypass VectorBT's chat infrastructure entirely
+
+#### SearchVBT Implementation
+
+SearchVBT allows semantic search across VectorBT's documentation to find relevant information for strategy development:
+
+1. **SearchVBT Configuration** (`search_vectorbt_docs()` in `edge_strategy_assistant.py`):
+   - Initializes VectorBT's search functionality
+   - Configures search parameters (max results, search depth)
+   - Sets up result formatting
+
+2. **Usage Flow**:
+   ```
+   Search Query → EdgeStrategyAssistant → search_vectorbt_docs() → VectorBT Search API → Formatted Results
+   ```
+
+### When Each System is Used
+
+The system intelligently selects which AI interaction method to use based on context and availability:
+
+1. **ChatVBT is used when**:
+   - Running the walk-forward optimization process
+   - Getting parameter suggestions via `get_optimization_advice_from_chat_model()`
+   - Debugging portfolio creation issues via `debug_with_chat()`
+   - Analyzing market conditions via `EnhancedEdgeStrategy.optimize_for_market_condition()`
+
+2. **SearchVBT is used when**:
+   - Researching optimal indicator settings via `research_indicator_settings()`
+   - Looking up VectorBT documentation for specific functions
+   - Finding parameter ranges and best practices from the knowledge base
+
+3. **Direct API Calls are used when**:
+   - ChatVBT initialization fails (API key issues, missing dependencies)
+   - The `direct_chat()` function is explicitly called
+   - Advanced prompts require bypassing VectorBT's formatting
+
+### AI Integration Points
+
+The system integrates AI at several critical decision points:
+
+1. **Parameter Optimization**:
+   - Before optimization: Get advice on parameter ranges
+   - During optimization: Analyze intermediate results
+   - After optimization: Interpret results and suggest improvements
+
+2. **Strategy Development**:
+   - Generate new strategy components
+   - Enhance existing factor calculations
+   - Create adaptive strategies for different market conditions
+
+3. **Error Handling and Debugging**:
+   - Analyze portfolio creation failures
+   - Debug data processing issues
+   - Suggest fixes for implementation errors
+
+### Using With Cursor for Strategy Enhancement
+
+Cursor is an AI-powered IDE that can help you enhance and debug the trading system. Here are detailed workflows for common tasks:
+
+#### 1. Enhancing an Existing Strategy
+
+**Workflow**:
+1. Open the strategy file (e.g., `edge_multi_factor.py`) in Cursor
+2. Use Cursor to analyze the existing factor functions
+3. Ask Cursor to suggest improvements based on financial principles
+4. Test modifications with `test_edge_assistant.py`
+
+**Example Query to Cursor**:
+```
+Analyze the RSI implementation in create_volatility_regime_indicator() and suggest improvements for detecting market regime changes more accurately.
+```
+
+#### 2. Debugging VectorBT Integration Issues
+
+**Workflow**:
+1. If you encounter ChatVBT failures, examine the error logs
+2. Open related files in Cursor (e.g., `wfo_edge_strategy.py`)
+3. Focus on the `setup_chat_provider()` and `ask_chat_model()` functions
+4. Ask Cursor to analyze potential failure points
+
+**Example Query to Cursor**:
+```
+Analyze the setup_chat_provider() function and help me identify why the ChatVBT initialization is failing with a KeyError on 'kb'.
+```
+
+#### 3. Adding New Technical Indicators
+
+**Workflow**:
+1. Research the indicator you want to add
+2. Use Cursor to help implement it in the appropriate file
+3. Update the `EdgeMultiFactorStrategy` class to incorporate the new indicator
+4. Use direct chat or ChatVBT to test parameter ranges
+
+**Example Query to Cursor**:
+```
+Help me implement the Chaikin Money Flow (CMF) indicator and integrate it into the EdgeMultiFactorStrategy class.
+```
+
+#### 4. Creating Custom AI Prompts
+
+The system can be enhanced with better prompts for specific tasks:
+
+1. Open `wfo_edge_strategy.py` in Cursor
+2. Locate the `get_optimization_advice_from_chat_model()` function
+3. Ask Cursor to help improve the prompt template
+4. Test with `test_direct_chat.py`
+
+**Example Implementation**:
+```python
+def get_optimization_advice_from_chat_model():
+    """Get optimization advice from ChatVBT."""
+    prompt = """
+    [SYSTEM: You are an expert in algorithmic trading and optimization.
+    Your task is to analyze the current market conditions for BTC/USD and recommend 
+    parameter ranges for the Edge Multi-Factor Strategy.
+    
+    Format your response as a JSON object with these sections:
+    1. market_analysis - Brief analysis of current market conditions
+    2. parameter_recommendations - Specific parameter ranges for RSI, BB, and ATR
+    3. optimization_strategy - Suggested approach for parameter optimization
+    
+    Make your recommendations specific and actionable.]
+    
+    Please analyze the current market conditions for BTC/USD and provide 
+    optimization advice for our trading strategy.
+    """
+    
+    response = ask_chat_model(prompt)
+    return response
+```
+
+### Practical Example: Market Regime Detection Enhancement
+
+Here's a complete example of using the AI system to enhance the trading strategy:
+
+1. **Question Definition**:
+   "How can we improve market regime detection in our strategy?"
+
+2. **Using SearchVBT**:
+   ```python
+   from scripts.strategies.edge_strategy_assistant import EdgeStrategyAssistant
+   
+   assistant = EdgeStrategyAssistant()
+   search_results = assistant.search_vectorbt_docs("market regime detection methods")
+   print(search_results)
+   ```
+
+3. **Using ChatVBT for Analysis**:
+   ```python
+   from scripts.strategies.wfo_edge_strategy import ask_chat_model
+   
+   # Current implementation
+   with open("scripts/strategies/edge_multi_factor.py", "r") as f:
+       current_code = f.read()
+   
+   prompt = f"""
+   Here is our current market regime detection code:
+   ```python
+   {current_code}
+   ```
+   
+   How can we improve this to better detect market regime changes? Please suggest specific code modifications.
+   """
+   
+   suggestions = ask_chat_model(prompt)
+   print(suggestions)
+   ```
+
+4. **Implementing Changes with Cursor**:
+   - Open `edge_multi_factor.py` in Cursor
+   - Ask Cursor to implement the suggested changes
+   - Test the modified strategy
+
+### Debugging Optimization Issues
+
+When encountering optimization problems (like the "name 'create_portfolio' is not defined" error), use this workflow:
+
+1. **Error Analysis**:
+   ```python
+   from scripts.strategies.wfo_edge_strategy import debug_with_chat
+   
+   error_message = "name 'create_portfolio' is not defined"
+   context = {
+       "function": "optimize_parameters",
+       "file": "wfo_edge_strategy.py",
+       "line": 899
+   }
+   
+   analysis = debug_with_chat(error_message, context)
+   print(analysis)
+   ```
+
+2. **Solution Implementation with Cursor**:
+   - Open the file in Cursor
+   - Ask Cursor to analyze the error and suggest fixes
+   - Apply the changes and test again
 
 ## Key Components
 
@@ -152,6 +382,24 @@ print(analysis["market_data"])
 print(analysis["analysis"]["market_regime"])
 ```
 
+### Direct Chat API Integration
+
+The system now supports direct interaction with language models via API, bypassing VectorBT's built-in chat functionality when needed:
+
+```python
+from scripts.strategies.wfo_edge_strategy import ask_chat_model
+
+# Simple query
+response = ask_chat_model("What is the best RSI period for BTC?")
+
+# With context
+market_data = {"price": 50000, "volatility": "high", "trend": "bullish"}
+response = ask_chat_model(
+    "Suggest trading parameters for the current market", 
+    context=market_data
+)
+```
+
 ## Advanced Features
 
 ### Adaptive Strategy Generation
@@ -209,7 +457,7 @@ Key configuration options:
 To add new indicators to the strategy:
 
 1. Add parameters to the `EdgeMultiFactorStrategy` class
-2. Update the signal generation logic in `create_pf_for_params()`
+2. Update the signal generation logic in `generate_signals()`
 3. Add the new parameters to the parameter space in `run_walk_forward_optimization()`
 
 ### Creating Custom Strategies
@@ -233,18 +481,31 @@ Common issues and solutions:
 
 ### API Key Issues
 - Ensure API keys are properly set in the .env file
-- Check that the .env file is being loaded correctly
-- Verify API key format and subscription status
+- The system will automatically use OPENROUTER_API_KEY if OPENAI_API_KEY is not available
+- Verify that your API keys are valid and have sufficient credits
+- Check error logs for specific API-related errors
 
 ### VectorBT Issues
 - Make sure VectorBT Pro is properly licensed and installed
 - Check for version compatibility issues
 - Ensure data inputs are in the correct format
+- Note that all column names should be lowercase (`close` instead of `Close`)
+- If ChatVBT fails, the system will fall back to direct API calls
 
-### Performance Issues
-- Reduce parameter space for faster optimization
-- Use more efficient data preparation methods
-- Consider parallel processing for parameter optimization
+### WFO Process Issues
+- If the WFO process fails with no valid parameters, try:
+  - Relaxing the portfolio validation criteria
+  - Expanding the parameter search space
+  - Checking for data quality issues
+  - Running with fewer splits or larger training windows
+- Check the log files for specific error messages
+
+### Dependencies
+- The system now automatically checks for and installs required dependencies
+- If you encounter missing package errors, manually install them with:
+  ```bash
+  pip install lmdbm vectorbtpro pandas-ta
+  ```
 
 ## Contributing
 
