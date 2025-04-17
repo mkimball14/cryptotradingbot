@@ -2,8 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
 *.so
 .Python
+env/
 build/
 develop-eggs/
 dist/
@@ -15,35 +17,38 @@ lib64/
 parts/
 sdist/
 var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 
 # Virtual Environment
 venv/
-env/
 ENV/
-.env
-.venv
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.project
-.pydevproject
-.settings/
 
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-coverage.xml
-*.cover
-.hypothesis/
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+knowledge/
+vectorbt.pro/
+*.log
+*.csv
+*checkpoint.pt
+
+# Exclude specific test files if needed
+# test_*.py
 
 # Logs and databases
 *.log
@@ -63,7 +68,6 @@ api_keys.yaml
 *.model
 charts/
 analysis/temp/
-vectorbt.pro/
 VectorBTDocumentation/
 
 # Sensitive keys and secrets
@@ -82,8 +86,6 @@ cdp_api_key.json
 *.keystore
 
 # OS specific
-.DS_Store
-Thumbs.db
 *.bak
 *.tmp
 *.temp

@@ -1,0 +1,146 @@
+{
+  "market_analysis": {
+    "error": "'YFData' object has no attribute 'empty'"
+  },
+  "optimization_results": {
+    "general_suggestions": {
+      "RSI Window": {
+        "Suggested Value": 21,
+        "Explanation": "Increasing the RSI window to 21 days smooths out the RSI indicator, potentially reducing the number of false signals in choppy or trending markets. This adjustment aims to improve the strategy's ability to identify more significant market reversals."
+      },
+      "RSI Entry (Oversold)": {
+        "Suggested Value": 25,
+        "Explanation": "Lowering the oversold threshold to 25 makes the strategy more conservative, entering trades only when the market shows stronger signs of being oversold. This could potentially increase the likelihood of successful trades by focusing on more pronounced market conditions."
+      },
+      "RSI Exit (Overbought)": {
+        "Suggested Value": 75,
+        "Explanation": "Raising the overbought threshold to 75 allows positions to capture more gains in strong uptrends before exiting, potentially increasing profitability in scenarios where the price continues to rise beyond the traditional overbought level."
+      },
+      "Bollinger Bands Window": {
+        "Suggested Value": 25,
+        "Explanation": "Extending the Bollinger Bands window to 25 days may provide a better representation of market volatility and trend strength by incorporating more data points. This adjustment can help in making more informed decisions on entry and exit points."
+      },
+      "Bollinger Bands Deviation": {
+        "Suggested Value": 2.5,
+        "Explanation": "Increasing the standard deviation for Bollinger Bands to 2.5 helps in identifying more extreme market conditions, potentially leading to the selection of trades with a higher probability of significant price movement."
+      },
+      "Volatility Window (ATR)": {
+        "Suggested Value": 14,
+        "Explanation": "Reducing the ATR window to 14 days makes the volatility measure more responsive to recent market changes, which could improve the strategy's adaptability to sudden increases or decreases in market volatility."
+      },
+      "Volatility Threshold": {
+        "Suggested Value": 1.0,
+        "Explanation": "Decreasing the volatility threshold to 1.0 makes the strategy more sensitive to changes in volatility, potentially leading to earlier identification of market conditions suitable for trading."
+      },
+      "Stop Loss Percentage": {
+        "Suggested Value": 1.5,
+        "Explanation": "Lowering the stop loss percentage to 1.5% reduces the risk per trade, potentially preserving capital over the long term by minimizing losses on unsuccessful trades."
+      },
+      "Take Profit Percentage": {
+        "Suggested Value": 3.5,
+        "Explanation": "Adjusting the take profit percentage to 3.5% aims to strike a better balance between capturing profits and ensuring trades do not reverse before hitting the take profit level, possibly enhancing the win rate."
+      },
+      "Risk Per Trade": {
+        "Suggested Value": 1.5,
+        "Explanation": "Reducing the risk per trade to 1.5% offers a more conservative approach to money management, potentially improving the strategy's longevity and reducing drawdowns during losing streaks."
+      },
+      "Additional Indicators": {
+        "MACD": {
+          "Explanation": "Incorporating the Moving Average Convergence Divergence (MACD) can provide additional confirmations for trade entries and exits by identifying the momentum behind market movements. This helps in filtering trades and increasing the strategy's overall effectiveness."
+        },
+        "Stochastic Oscillator": {
+          "Explanation": "Adding a Stochastic Oscillator could enhance the strategy by identifying overbought and oversold conditions with a focus on the closing price's location relative to the high-low range. This can offer complementary signals to the RSI and potentially increase trade accuracy."
+        }
+      }
+    },
+    "market_specific_optimizations": {
+      "trending": {
+        "market_condition": "trending",
+        "raw_response": "```json\n{\n  \"RSI_Window\": 10,\n  \"RSI_Window_Explanation\": \"A shorter RSI window of 10 periods makes the indicator more sensitive to recent price changes. In a trending market, this helps in capturing the momentum more effectively than the standard 14 periods.\",\n  \n  \"RSI_Entry_Oversold\": 25,\n  \"RSI_Entry_Oversold_Explanation\": \"Lowering the RSI entry to 25 from 30 for oversold conditions means waiting for a more extreme condition before buying. This is because, in a strong uptrend, the price might not fall to the usual oversold levels before resuming the trend.\",\n  \n  \"RSI_Exit_Overbought\": 75,\n  \"RSI_Exit_Overbought_Explanation\": \"Increasing the RSI exit level to 75 from 70 allows the strategy to ride the trend longer. In a trending market, the price can remain overbought for extended periods, so a higher threshold helps in maximizing gains.\",\n  \n  \"Bollinger_Bands_Window\": 15,\n  \"Bollinger_Bands_Window_Explanation\": \"Shortening the Bollinger Bands window to 15 periods makes the bands more responsive to price changes, which is useful in a trending market for identifying the strength and sustainability of the trend more accurately.\",\n  \n  \"Bollinger_Bands_Deviation\": 2.5,\n  \"Bollinger_Bands_Deviation_Explanation\": \"Increasing the standard deviation to 2.5 helps in filtering out the noise during a strong trend. A wider band captures the trend more effectively, reducing the likelihood of false signals during volatile movements.\",\n  \n  \"Volatility_Window_ATR\": 14,\n  \"Volatility_Window_ATR_Explanation\": \"A shorter ATR window of 14 periods makes the indicator more sensitive to recent volatility changes. This adjustment helps in setting more responsive stop-loss and take-profit levels in a trending market.\",\n  \n  \"Volatility_Threshold\": 2.0,\n  \"Volatility_Threshold_Explanation\": \"Raising the volatility threshold to 2.0 times the ATR ensures that trades are only entered when there's significant movement, indicative of a strong trend, thus avoiding less volatile, non-trending conditions.\",\n  \n  \"Stop_Loss_Percentage\": 2.5,\n  \"Stop_Loss_Percentage_Explanation\": \"Increasing the stop loss to 2.5% gives trades more room to breathe in a trending market, where larger price swings are common. This helps in staying in the trade longer to capture more of the trend.\",\n  \n  \"Take_Profit_Percentage\": 6.0,\n  \"Take_Profit_Percentage_Explanation\": \"Raising the take profit to 6.0% aligns with the goal of letting profits run in a trending market. This adjustment aims to capture larger price movements, maximizing the return on successful trades.\",\n  \n  \"Risk_Per_Trade\": 1.5,\n  \"Risk_Per_Trade_Explanation\": \"Lowering the risk per trade to 1.5% makes the strategy more conservative, acknowledging that while aiming to capture trends, it's also important to manage the risk, especially in the volatile BTC/USD market.\"\n}\n```\n\nThese adjustments to the trading parameters are designed to optimize the strategy's performance in trending market conditions by making it more responsive to recent price actions and volatility, allowing for longer participation in the trend, and balancing risk management with the potential for higher returns."
+      },
+      "ranging": {
+        "market_condition": "ranging",
+        "raw_response": "```json\n{\n  \"RSI Window\": 14,\n  \"RSI Entry (Oversold)\": 35.0,\n  \"RSI Exit (Overbought)\": 65.0,\n  \"Bollinger Bands Window\": 14,\n  \"Bollinger Bands Deviation\": 2.5,\n  \"Volatility Window (ATR)\": 14,\n  \"Volatility Threshold\": 1.0,\n  \"Stop Loss Percentage\": 1.5,\n  \"Take Profit Percentage\": 3.0,\n  \"Risk Per Trade\": 1.0,\n  \"Parameter Adjustments\": {\n    \"RSI Entry (Oversold)\": {\n      \"Value\": 35.0,\n      \"Explanation\": \"Tightening the RSI entry threshold to 35 helps avoid false signals in a ranging market, allowing for entries closer to the actual market bottoms.\"\n    },\n    \"RSI Exit (Overbought)\": {\n      \"Value\": 65.0,\n      \"Explanation\": \"Adjusting the RSI exit threshold to 65 ensures quicker exits before the price potentially reverses in a tight ranging market.\"\n    },\n    \"Bollinger Bands Window\": {\n      \"Value\": 14,\n      \"Explanation\": \"Shortening the Bollinger Bands window to 14 periods makes the bands more responsive to price movements within the range, helping to identify entry and exit points more accurately.\"\n    },\n    \"Bollinger Bands Deviation\": {\n      \"Value\": 2.5,\n      \"Explanation\": \"Increasing the deviation to 2.5 for Bollinger Bands creates a wider channel, which is beneficial in a ranging market to filter out noise and reduce the likelihood of being stopped out prematurely.\"\n    },\n    \"Volatility Window (ATR)\": {\n      \"Value\": 14,\n      \"Explanation\": \"Reducing the ATR window to 14 makes it more responsive to recent price changes, offering a better gauge of the market's volatility within the range.\"\n    },\n    \"Volatility Threshold\": {\n      \"Value\": 1.0,\n      \"Explanation\": \"Lowering the volatility threshold to 1.0 helps in identifying significant moves within the range that are more likely to be sustained and less likely to be a volatile spike.\"\n    },\n    \"Stop Loss Percentage\": {\n      \"Value\": 1.5,\n      \"Explanation\": \"Decreasing the stop loss percentage to 1.5% reduces the risk per trade, which is crucial in a ranging market where profit margins are typically smaller.\"\n    },\n    \"Take Profit Percentage\": {\n      \"Value\": 3.0,\n      \"Explanation\": \"Lowering the take profit percentage to 3.0 aligns with the expectation of shorter movement ranges and helps to capture profits more consistently before any potential reversal.\"\n    },\n    \"Risk Per Trade\": {\n      \"Value\": 1.0,\n      \"Explanation\": \"Reducing the risk per trade to 1.0% further minimizes the potential downside on each trade, which is important in a ranging market where opportunities may be frequent but smaller in scale.\"\n    }\n  }\n}\n```\n\nThis JSON configuration provides a comprehensive overview of optimized parameters for a BTC/USD trading strategy in a ranging market using RSI, Bollinger Bands, and ATR. Each parameter adjustment is carefully explained to illustrate why the change is suitable for ranging conditions, aiming to strike a balance between responsiveness to market movements and risk management."
+      },
+      "volatile": {
+        "market_condition": "volatile",
+        "raw_response": "```json\n{\n  \"RSI Window\": {\n    \"value\": 10,\n    \"explanation\": \"A shorter RSI window makes the indicator more responsive to recent price changes, which is beneficial in volatile markets where price movements are rapid and significant.\"\n  },\n  \"RSI Entry (Oversold)\": {\n    \"value\": 20.0,\n    \"explanation\": \"Lowering the RSI entry threshold helps in identifying oversold conditions earlier in a volatile market, potentially capturing rebounds from sharp price drops.\"\n  },\n  \"RSI Exit (Overbought)\": {\n    \"value\": 80.0,\n    \"explanation\": \"Increasing the RSI exit threshold allows traders to stay in trades longer during strong uptrends, which are common in volatile markets, potentially increasing profit margins.\"\n  },\n  \"Bollinger Bands Window\": {\n    \"value\": 12,\n    \"explanation\": \"A shorter Bollinger Bands window makes the bands more responsive to price changes, capturing the volatility more effectively and providing more timely trade signals.\"\n  },\n  \"Bollinger Bands Deviation\": {\n    \"value\": 2.5,\n    \"explanation\": \"Increasing the deviation allows the bands to widen, accommodating the increased price swings in volatile markets and reducing the likelihood of a signal being triggered by normal fluctuations.\"\n  },\n  \"Volatility Window (ATR)\": {\n    \"value\": 10,\n    \"explanation\": \"A shorter ATR window makes the indicator more responsive to recent changes in volatility, which is crucial for adjusting stop loss and take profit levels more accurately in a volatile environment.\"\n  },\n  \"Volatility Threshold\": {\n    \"value\": 2.0,\n    \"explanation\": \"Increasing the volatility threshold ensures that trades are only entered when the market shows significant movement, which is more suitable for volatile conditions.\"\n  },\n  \"Stop Loss Percentage\": {\n    \"value\": 3.0,\n    \"explanation\": \"A higher stop loss percentage is recommended in volatile markets to avoid being prematurely stopped out of trades by normal, yet large, price swings.\"\n  },\n  \"Take Profit Percentage\": {\n    \"value\": 6.0,\n    \"explanation\": \"Increasing the take profit percentage can be beneficial in volatile markets as it aims for larger gains that reflect the increased risk and price movements.\"\n  },\n  \"Risk Per Trade\": {\n    \"value\": 1.0,\n    \"explanation\": \"Lowering the risk per trade is prudent in volatile markets to manage the increased risk of rapid price movements more effectively and preserve capital over the long term.\"\n  }\n}\n```\n\nThis JSON object provides a comprehensive set of parameter adjustments and explanations tailored for trading in volatile market conditions, specifically for the BTC/USD pair. Each parameter adjustment is aimed at making the strategy more responsive and better suited to the challenges posed by high volatility, balancing the need for quick reactions to market movements with the goal of protecting against excessive risk."
+      }
+    },
+    "indicator_research": {
+      "rsi": {
+        "indicator": "RSI",
+        "documentation_search": {
+          "query": "optimal RSI settings for cryptocurrency trading",
+          "results": [
+            {
+              "title": "VectorBT Documentation",
+              "description": "The official VectorBT documentation. SearchVBT not available in current installation.",
+              "url": "https://vectorbt.dev/docs/",
+              "score": 1.0
+            },
+            {
+              "title": "RSI Documentation",
+              "description": "Information on the Relative Strength Index (RSI) indicator.",
+              "url": "https://vectorbt.dev/docs/indicators/ta/rsi/",
+              "score": 0.9
+            },
+            {
+              "title": "Bollinger Bands Documentation",
+              "description": "Information on the Bollinger Bands indicator.",
+              "url": "https://vectorbt.dev/docs/indicators/ta/bbands/",
+              "score": 0.8
+            }
+          ],
+          "timestamp": "2025-04-17T15:20:18.763391",
+          "fallback": true
+        },
+        "expert_analysis": {
+          "raw_analysis": "```json\n{\n  \"1. Effective RSI Parameter Values for Bitcoin\": {\n    \"Introduction\": \"The Relative Strength Index (RSI) is a popular momentum oscillator used in cryptocurrency trading, including Bitcoin. It measures the speed and change of price movements, typically on a scale of 0 to 100.\",\n    \"Optimal Values\": \"While the traditional setting for RSI is a period of 14, which can be applied to any timeframe (daily, hourly, etc.), empirical research suggests that adjusting the period can enhance trading performance depending on the volatility and trading volume of Bitcoin.\",\n    \"Recommendations\": {\n      \"High Volatility\": \"A shorter period, such as 9 or 10, can be more responsive to rapid price movements, providing timely signals.\",\n      \"Low Volatility\": \"A longer period, such as 16 to 20, may filter out market noise and yield more reliable signals.\"\n    }\n  },\n  \"2. Adjusting RSI Parameters for Different Market Conditions\": {\n    \"Market Phases\": {\n      \"Bull Market\": \"Consider lowering the RSI overbought threshold to 70 or even 65, as prices can remain in overbought conditions longer.\",\n      \"Bear Market\": \"Consider raising the RSI oversold threshold to 35 or 40, as prices can remain oversold longer.\"\n    },\n    \"Adjustment Strategy\": \"Adapt the RSI settings based on the prevailing market conditions. This dynamic approach can help traders better align their strategies with the current market environment.\"\n  },\n  \"3. Common Mistakes in Using RSI\": {\n    \"Overreliance\": \"Traders often make the mistake of relying solely on RSI for making trading decisions, neglecting other fundamental and technical analysis tools.\",\n    \"Misinterpreting Signals\": \"Another common error is misinterpreting RSI divergences or disregarding the importance of the RSI level in relation to the 50 mark, which can indicate ongoing momentum.\",\n    \"Ignoring Context\": \"Failing to consider the larger market context or the specific cryptocurrency's historical behavior can lead to misguided conclusions.\"\n  },\n  \"4. Complementary Indicators\": {\n    \"MACD\": \"The Moving Average Convergence Divergence (MACD) can complement RSI by confirming momentum and trend direction.\",\n    \"Bollinger Bands\": \"Used in conjunction with RSI, Bollinger Bands can help identify overbought or oversold conditions based on price volatility.\",\n    \"Volume Indicators\": \"Incorporating volume indicators can validate the strength of an RSI signal, providing a more comprehensive view of market sentiment.\"\n  },\n  \"5. Effective Use of RSI for Entry and Exit Signals\": {\n    \"Entry Signals\": {\n      \"Buy\": \"Consider buying when the RSI crosses above the 30 (oversold) level, especially if accompanied by a bullish divergence or volume increase.\",\n      \"Sell\": \"Consider selling when the RSI crosses below the 70 (overbought) level, particularly if accompanied by a bearish divergence or volume decrease.\"\n    },\n    \"Exit Signals\": {\n      \"Profit Taking\": \"Exiting a position when the RSI approaches extreme levels (above 70 or below 30) can be a prudent strategy to lock in gains or prevent losses.\",\n      \"Stop-Loss\": \"Setting a stop-loss order based on an RSI reversal can help manage risk. For instance, exiting a trade if the RSI moves back into the overbought or oversold region after signaling an entry.\"\n    },\n    \"Strategy Tips\": \"Incorporating multiple time frames in RSI analysis can provide deeper insights, allowing for more precise timing in entry and exit decisions.\"\n  }\n}\n```"
+        },
+        "timestamp": "2025-04-17T15:20:48.051544"
+      },
+      "bollinger_bands": {
+        "indicator": "Bollinger Bands",
+        "documentation_search": {
+          "query": "optimal Bollinger Bands settings for cryptocurrency trading",
+          "results": [
+            {
+              "title": "VectorBT Documentation",
+              "description": "The official VectorBT documentation. SearchVBT not available in current installation.",
+              "url": "https://vectorbt.dev/docs/",
+              "score": 1.0
+            },
+            {
+              "title": "RSI Documentation",
+              "description": "Information on the Relative Strength Index (RSI) indicator.",
+              "url": "https://vectorbt.dev/docs/indicators/ta/rsi/",
+              "score": 0.9
+            },
+            {
+              "title": "Bollinger Bands Documentation",
+              "description": "Information on the Bollinger Bands indicator.",
+              "url": "https://vectorbt.dev/docs/indicators/ta/bbands/",
+              "score": 0.8
+            }
+          ],
+          "timestamp": "2025-04-17T15:20:48.051764",
+          "fallback": true
+        },
+        "expert_analysis": {
+          "raw_analysis": "```json\n{\n  \"Analysis\": {\n    \"1. Most Effective Parameter Values for Bitcoin\": {\n      \"StandardSettings\": \"The standard settings for Bollinger Bands in most markets, including Bitcoin, are a 20-period moving average with a 2 standard deviation for the upper and lower bands. These settings work well in a variety of market conditions, providing a good balance between sensitivity and reliability.\",\n      \"OptimalSettings\": \"However, due to Bitcoin's high volatility, some traders find that adjusting the settings to a 21-period moving average with a 2.5 standard deviation helps in better capturing market movements without too much noise. Empirical research suggests experimenting within these ranges to find the most suitable settings for one's trading strategy.\"\n    },\n    \"2. Adjustments for Different Market Conditions\": {\n      \"HighVolatility\": \"During periods of high volatility, it is advisable to increase the standard deviation to 2.5 or 3 to avoid too many false breakouts. This adjustment helps in filtering out the noise in highly volatile markets.\",\n      \"LowVolatility\": \"In contrast, during periods of low volatility, a standard deviation of 1.5 can be more effective. This adjustment makes the bands more responsive to slight price movements, potentially increasing the number of trading signals.\",\n      \"AdaptiveApproach\": \"An adaptive approach, where the settings are adjusted based on the prevailing market conditions, is recommended. Traders can use a longer moving average period in trending markets and a shorter period in ranging markets.\"\n    },\n    \"3. Common Mistakes\": {\n      \"Overreliance\": \"One of the most common mistakes is overreliance on Bollinger Bands alone for trading decisions. It's crucial to use them in conjunction with other indicators and analysis methods.\",\n      \"Misinterpretation\": \"Another mistake is the misinterpretation of the bands tightening as an imminent volatile move. While this can indicate increased volatility, it does not necessarily predict the direction.\",\n      \"IgnoringContext\": \"Ignoring the market context and not adjusting the parameters according to market conditions can also lead to suboptimal trading decisions.\"\n    },\n    \"4. Complementary Indicators\": {\n      \"RSI\": \"The Relative Strength Index (RSI) is a good complement to Bollinger Bands, helping to identify overbought or oversold conditions.\",\n      \"MACD\": \"The Moving Average Convergence Divergence (MACD) can also be used alongside Bollinger Bands to confirm the strength of a trend.\",\n      \"Volume\": \"Volume indicators can provide additional confirmation of the strength or weakness of the price movements within the bands.\"\n    },\n    \"5. Effective Use for Entry and Exit Signals\": {\n      \"EntrySignals\": \"A common strategy is to buy when the price touches the lower band and shows signs of reversal, indicated by other technical indicators. Conversely, selling when the price touches the upper band and begins to reverse can be effective.\",\n      \"ExitSignals\": \"Setting exit points at the moving average or the opposite band can help in locking in profits. Additionally, a break of the band not supported by other indicators might be used as a signal to exit to avoid potential losses from a false breakout.\",\n      \"TrendConfirmation\": \"Bollinger Bands can also be used to confirm the strength of a trend. A price consistently touching or moving outside the bands indicates a strong trend, while trading within the bands suggests a weaker trend or consolidation.\"\n    }\n  }\n}\n```"
+        },
+        "timestamp": "2025-04-17T15:21:13.655509"
+      }
+    },
+    "timestamp": "2025-04-17T15:21:13.655547"
+  },
+  "enhanced_strategy": {
+    "implementation_file": "/Users/maximiliankimball/dev/crypto_bot/Crypto Trading Bot/analysis_results/adaptive_edge_strategy.py",
+    "implementation_length": 1020,
+    "timestamp": "2025-04-17T15:21:22.020491"
+  },
+  "backtest_results": {
+    "error": "'YFData' object has no attribute 'empty'"
+  }
+}
