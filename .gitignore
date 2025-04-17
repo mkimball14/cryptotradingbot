@@ -63,6 +63,9 @@ api_keys.yaml
 *.model
 charts/
 analysis/temp/
+vectorbt.pro/
+VectorBTDocumentation/
+
 # Sensitive keys and secrets
 *.pem
 *key.json

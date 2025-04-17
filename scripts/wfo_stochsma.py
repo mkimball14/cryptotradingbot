@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from tqdm.auto import tqdm
 import argparse
-from typing import Optional # Added for potential type hints if needed
+from typing import Optional, Tuple, Dict # Added Tuple, Dict
 
 # Add project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -22,13 +22,12 @@ import time
 
 # Assuming data fetching and strategy class are in these locations
 from data.data_fetcher import fetch_historical_data, get_vbt_freq_str, get_granularity_str
-from strategies.stoch_sma_strategy import StochSMAStrategy
 from reporting.report_generator import calculate_risk_metrics # Reuse risk metrics calc
 
 # Setup Logging
 log_dir = Path("logs")
 log_dir.mkdir(parents=True, exist_ok=True)
-log_file = log_dir / f"wfo_stochsma_{datetime.now():%Y%m%d_%H%M%S}.log"
+log_file = log_dir / f"adaptive_wfo_stochsma_{datetime.now():%Y%m%d_%H%M%S}.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -58,6 +57,41 @@ except AttributeError as e:
 # --- Data Fetching Functions Removed (Now Imported) ---
 # [Code for GRANULARITY_MAP_SECONDS, get_granularity_str, get_vbt_freq_str, create_sample_data, fetch_historical_data was here]
 
+# --- Helper Function (Moved from backtest script) ---
+def get_best_index(performance: pd.Series, higher_better: bool = True) -> Optional[Tuple]:
+    """Finds index (tuple) of best performing parameters for a single split's performance Series."""
+    if performance is None or performance.empty:
+        logger.warning("Get_best_index: Performance data is empty.")
+        return None
+    try:
+        if not performance.notna().any():
+            logger.warning("Get_best_index: Performance data contains only NaNs.")
+            return None
+        # Ensure performance index is a MultiIndex before accessing levels
+        if not isinstance(performance.index, pd.MultiIndex):
+            logger.warning(f"Get_best_index: Performance index is not a MultiIndex. Index type: {type(performance.index)}")
+            # Handle Series with simple index (single parameter run)
+            if len(performance) == 1:
+                 # If it was a single run, the index might be the tuple itself if vbt returned it that way
+                 if isinstance(performance.index[0], tuple):
+                      return performance.index[0]
+                 else: # Or just wrap the simple index value in a tuple
+                      return (performance.index[0],) 
+            else:
+                 # Cannot reliably get best index from non-MultiIndex with multiple values
+                 return None 
+                 
+        if higher_better:
+            idx = performance.idxmax() # Returns the tuple index
+        else:
+            idx = performance.idxmin() # Returns the tuple index
+            
+        # Ensure the result is always a tuple, even if only one parameter level exists
+        return idx if isinstance(idx, tuple) else (idx,)
+    except Exception as e:
+        logger.error(f"Error getting best index: {e}", exc_info=True)
+        return None
+
 # --- Main WFO Execution ---
 
 def run_stochsma_wfo(
@@ -65,38 +99,48 @@ def run_stochsma_wfo(
     start_date: str, 
     end_date: str, 
     granularity: int, # Seconds
-    best_params: dict, # Fixed best parameters
     initial_capital: float = 10000, 
     commission_pct: float = 0.001, 
     slippage_pct: float = 0.0005,
-    use_stops: bool = True, # Keep consistent with optimization runs
-    sl_atr_multiplier: float = 1.5, # Keep consistent
-    tsl_atr_multiplier: float = 2.0, # Keep consistent
-    trend_sma_window: int = 50, # Keep consistent
+    use_stops: bool = True, 
+    sl_atr_multiplier: float = 1.5, 
+    tsl_atr_multiplier: float = 2.0, 
+    trend_sma_window: int = 50, 
     wfo_test_days: int = 90, 
-    wfo_window_years: float = 1.5 # Removed reports_dir parameter
+    wfo_window_years: float = 1.5 
 ):
-    """Performs Walk-Forward Optimization for StochSMA using FIXED parameters."""
+    """Performs Adaptive Walk-Forward Optimization for StochSMA (re-optimizes each fold)."""
     
     granularity_str = get_granularity_str(granularity) or f"{granularity}s"
     vbt_freq_str = get_vbt_freq_str(granularity)
     if not vbt_freq_str:
         logger.error(f"Cannot map granularity {granularity}s to vbt freq string.")
-        return None, None
+        return None
         
-    logger.info(f"--- Running WFO (StochSMA - Fixed Params) for {symbol} ({granularity_str}) --- ")
+    logger.info(f"--- Running Adaptive WFO (StochSMA) for {symbol} ({granularity_str}) --- ")
     logger.info(f"Date Range: {start_date} to {end_date}")
-    logger.info(f"Fixed Parameters: {best_params}")
     logger.info(f"Initial Capital: ${initial_capital:,.2f}, Commission: {commission_pct*100:.3f}%, Slippage: {slippage_pct*100:.3f}%")
     logger.info(f"Stops: {'Enabled' if use_stops else 'Disabled'} (SL: {sl_atr_multiplier}*ATR, TSL: {tsl_atr_multiplier}*ATR)")
     logger.info(f"Trend Filter: SMA({trend_sma_window})")
     logger.info(f"WFO: Test Days={wfo_test_days}, Total Window={wfo_window_years:.1f} years")
 
+    # --- Define Optimization Grid and Metric ---
+    # You might move this to args or a config file
+    OPTIMIZATION_PARAM_GRID = {
+        'stoch_k': np.arange(5, 25, 3),       # Example: 5, 8, ..., 23
+        'stoch_d': np.arange(3, 10, 2),       # Example: 3, 5, 7, 9
+        'stoch_lower_th': np.arange(15, 40, 5), # Example: 15, 20, ..., 35
+        'stoch_upper_th': np.arange(60, 85, 5)  # Example: 60, 65, ..., 80
+    }
+    OPTIMIZATION_METRIC = 'sharpe_ratio' # Metric to optimize for in training folds
+    logger.info(f"Optimization Metric for Training Folds: {OPTIMIZATION_METRIC}")
+    logger.info(f"Optimization Parameter Grid: {OPTIMIZATION_PARAM_GRID}")
+    
     # 1. Fetch Full Data
     full_price_data = fetch_historical_data(symbol, start_date, end_date, granularity)
     if full_price_data is None or full_price_data.empty: 
         logger.error("Failed to fetch price data for WFO.")
-        return None, None
+        return None
         
     # --- ADDED: Adjust granularity if using daily sample data ---
     is_sample_data = False
@@ -112,7 +156,7 @@ def run_stochsma_wfo(
                 is_sample_data = True
                 if not vbt_freq_str:
                     logger.error("Failed to get vbt_freq_str for daily sample data!")
-                    return None, None
+                    return None
     except Exception as freq_err:
          logger.warning(f"Could not infer frequency from data index, proceeding with original granularity: {freq_err}")
     # --- END ADDED SECTION ---
@@ -121,8 +165,7 @@ def run_stochsma_wfo(
         logger.info("Price data index is confirmed to be DatetimeIndex.")
     else:
         logger.warning("Price data index is not confirmed to be DatetimeIndex.")
-
-    # --- Explicit frequency setting REMOVED --- 
+        return None # Exit if index is not correct type
 
     close = full_price_data['close']
     high = full_price_data['high']
@@ -130,18 +173,15 @@ def run_stochsma_wfo(
     open_ = full_price_data['open'] # Needed for StochSMA strategy run
     
     # 2. Define WFO Splits
-    periods_per_day = 86400 // granularity # Recalculate based on potentially adjusted granularity
+    periods_per_day = 86400 // granularity
     window_len_periods = int(wfo_window_years * 365.25 * periods_per_day)
     test_len_periods = int(wfo_test_days * periods_per_day)
-    # Ensure train_len is calculated correctly and is positive
     train_len_periods = max(1, window_len_periods - test_len_periods) 
     
     if train_len_periods + test_len_periods > len(close):
          logger.warning(f"WFO window length ({window_len_periods} periods) exceeds data length ({len(close)} periods). Adjusting...")
-         # Adjust window or split logic if needed, or just proceed if rolling_split handles it
     
     # 4. Initialize Strategy Instance (outside loop)
-    # Use parameters appropriate for the *detected* data granularity
     strategy = StochSMAStrategy(
         initial_capital=initial_capital, 
         commission_pct=commission_pct, 
@@ -152,187 +192,177 @@ def run_stochsma_wfo(
         trend_sma_window=trend_sma_window
     )
 
-    # 5. Run WFO Loop
+    # 5. Run WFO Loop (Modified for Adaptive Optimization)
     all_fold_results = []
-    logger.info("--- Starting WFO Loop --- ")
-    # --- Calculate splits manually ---
+    all_fold_best_params = {} # Store best params for each fold
+    logger.info("--- Starting Adaptive WFO Loop --- ")
     n_datapoints = len(full_price_data)
     if window_len_periods > n_datapoints:
         logger.error(f"Data length ({n_datapoints}) is shorter than the WFO window length ({window_len_periods}). Cannot perform WFO.")
-        return
+        return None # Return None instead of exiting
     
-    # Calculate the number of steps the test window can take
     n_manual_splits = ((n_datapoints - window_len_periods) // test_len_periods) + 1
     logger.info(f"Calculated {n_manual_splits} manual WFO splits.")
     if n_manual_splits <= 0:
          logger.error("WFO parameters result in 0 or negative splits.")
-         return
+         return None # Return None instead of exiting
          
     try:
-        # --- Loop using manual index calculation ---
-        for i in tqdm(range(n_manual_splits), desc="Running WFO Segments"):
-            # Calculate integer indices for train/test slices
+        for i in tqdm(range(n_manual_splits), desc="Running Adaptive WFO Segments"):
             train_start_idx = i * test_len_periods
             train_end_idx = train_start_idx + train_len_periods 
             test_start_idx = train_end_idx
             test_end_idx = test_start_idx + test_len_periods
-
-            # Ensure test_end_idx does not exceed data length
             test_end_idx = min(test_end_idx, n_datapoints)
-            # Adjust train_end_idx/test_start_idx if test window gets truncated at the end
             test_start_idx = min(test_start_idx, test_end_idx)
             train_end_idx = test_start_idx
-            
-            # Ensure train start index is valid
             train_start_idx = max(0, train_start_idx)
             train_end_idx = max(train_start_idx, train_end_idx)
 
-            # Check if slices are valid
             if train_start_idx >= train_end_idx or test_start_idx >= test_end_idx:
-                 logger.warning(f"Split {i+1}: Invalid indices calculated. Train: {train_start_idx}-{train_end_idx}, Test: {test_start_idx}-{test_end_idx}. Skipping.")
+                 logger.warning(f"Split {i+1}: Invalid indices calculated. Skipping.")
                  continue
 
             fold_num = i + 1
             logger.info(f"\n--- Running Fold {fold_num}/{n_manual_splits} --- ")
 
-            # Slice data for this fold using iloc with the calculated indices
             train_data = full_price_data.iloc[train_start_idx:train_end_idx]
             test_data = full_price_data.iloc[test_start_idx:test_end_idx]
 
-            # Check for empty slices after iloc
             if train_data.empty or test_data.empty:
-                 logger.warning(f"Fold {fold_num}: Train or Test data slice is empty after iloc. Skipping fold.")
+                 logger.warning(f"Fold {fold_num}: Train or Test data slice is empty. Skipping fold.")
                  all_fold_results.append(None)
+                 all_fold_best_params[fold_num] = None
                  continue
 
             logger.info(f"Fold {fold_num}: Train Data {train_data.index[0]} to {train_data.index[-1]} ({len(train_data)} periods)")
             logger.info(f"Fold {fold_num}: Test Data  {test_data.index[0]} to {test_data.index[-1]} ({len(test_data)} periods)")
 
-            # Check for sufficient data length in train split
-            if len(train_data) < train_len_periods:
-                logger.warning(f"Fold {fold_num}: Insufficient data in train split. Skipping fold.")
+            # --- A) Optimize on Training Data ---
+            logger.info(f"Fold {fold_num}: Optimizing parameters on training data...")
+            try:
+                train_pf = strategy.optimize(
+                    data=train_data.copy(), 
+                    param_grid=OPTIMIZATION_PARAM_GRID, 
+                    optimize_metric=OPTIMIZATION_METRIC, 
+                    granularity_seconds=granularity
+                )
+                
+                if train_pf is None or not hasattr(train_pf, 'stats') or train_pf.stats().empty:
+                     logger.warning(f"Fold {fold_num}: Optimization on training data failed or yielded no results. Skipping fold.")
+                     all_fold_results.append(None)
+                     all_fold_best_params[fold_num] = None
+                     continue
+                     
+                # --- Extract Best Parameters ---
+                # Get stats per column (parameter combination)
+                try:
+                    performance = train_pf.stats(OPTIMIZATION_METRIC, per_column=True) 
+                except Exception as stats_err:
+                     logger.error(f"Fold {fold_num}: Error getting per-column stats for {OPTIMIZATION_METRIC}: {stats_err}", exc_info=True)
+                     all_fold_results.append(None)
+                     all_fold_best_params[fold_num] = None
+                     continue
+                 
+                best_param_idx_tuple = get_best_index(performance, higher_better=(OPTIMIZATION_METRIC not in ['max_dd']))
+
+                if best_param_idx_tuple is None:
+                    logger.warning(f"Fold {fold_num}: Could not determine best parameters from training optimization ({OPTIMIZATION_METRIC}). Skipping fold.")
+                    all_fold_results.append(None)
+                    all_fold_best_params[fold_num] = None
+                    continue
+
+                # Convert tuple index back to dict
+                best_params_fold = dict(zip(OPTIMIZATION_PARAM_GRID.keys(), best_param_idx_tuple))
+                logger.info(f"Fold {fold_num}: Best params from training: {best_params_fold}")
+                all_fold_best_params[fold_num] = best_params_fold # Store best params for this fold
+                
+            except Exception as train_opt_err:
+                logger.error(f"Fold {fold_num}: Error during training optimization: {train_opt_err}", exc_info=True)
                 all_fold_results.append(None)
+                all_fold_best_params[fold_num] = None
                 continue
 
-            # Use the FIXED best_params found from prior optimization
-            current_params = best_params.copy() 
-            logger.info(f"Applying fixed params: {current_params}")
-
+            # --- B) Test on Test Data using Best Params from Training ---
+            logger.info(f"Fold {fold_num}: Testing with best parameters ({best_params_fold}) on test data...")
             try:
-                # Run the StochSMA strategy.optimize on the TEST data using fixed parameters
-                # The optimize method handles single parameters sets when passed as lists
-                single_param_grid = {k: [v] for k, v in current_params.items() if k not in ['trend_filter_window', 'use_stops', 'sl_atr_multiplier', 'tsl_atr_multiplier']}
-
-                logger.debug(f"Fold {fold_num}: Calling strategy.optimize for test data...")
-                segment_pf = strategy.optimize(
-                    data=test_data.copy(), # Pass testing data
-                    param_grid=single_param_grid, # Use the single set of parameters
-                    optimize_metric='sharpe_ratio', # Metric doesn't matter for single run
+                 # Run optimize again, but with a single parameter set derived from training
+                single_param_grid_test = {k: [v] for k, v in best_params_fold.items()}
+                
+                test_pf = strategy.optimize(
+                    data=test_data.copy(), # Pass TESTING data
+                    param_grid=single_param_grid_test, # Use the single best set found in training
+                    optimize_metric=OPTIMIZATION_METRIC, # Metric doesn't matter for single run
                     granularity_seconds=granularity
                 )
 
-                if segment_pf is None:
-                     logger.warning(f"Fold {fold_num}: Strategy optimize run returned None. Skipping.")
+                if test_pf is None:
+                     logger.warning(f"Fold {fold_num}: Strategy run on test data returned None. Skipping.")
                      all_fold_results.append(None)
                      continue
-
-                # Portfolio is generated by optimize, no need for from_signals here
-                segment_metrics = calculate_risk_metrics(segment_pf)
-                logger.info(f"Fold {fold_num} Metrics: {segment_metrics}")
-
-                # Check if any trades were made using len()
-                if len(segment_pf.trades) > 0:
-                     all_fold_results.append(segment_pf)
-                     # all_metrics.append(segment_metrics) # Metrics are derived from combined pf later
+                     
+                # Extract the returns series for this single run
+                # The column name should match the best_param_idx_tuple
+                if best_param_idx_tuple in test_pf.returns.columns:
+                     test_returns = test_pf.returns[best_param_idx_tuple]
+                     all_fold_results.append(test_returns) # Append the Series of returns
+                     segment_metrics = test_pf.stats() # Get stats for this segment (optional logging)
+                     logger.info(f"Fold {fold_num} Test Metrics (using best train params): {segment_metrics[best_param_idx_tuple]}") # Log the specific column stats
                 else:
-                     logger.info(f"Fold {fold_num}: No trades executed. Storing None for segment.")
-                     all_fold_results.append(None) # Store None if no trades, to avoid issues with combine
-
-            except TypeError as te:
-                 logger.error(f"TypeError during WFO loop iteration: {te}", exc_info=True)
-                 all_fold_results.append(None)
-            except Exception as loop_err:
-                 logger.error(f"Error during WFO loop iteration: {loop_err}", exc_info=True)
+                     logger.warning(f"Fold {fold_num}: Could not find returns column {best_param_idx_tuple} in test portfolio. Skipping.")
+                     all_fold_results.append(None)
+            
+            except Exception as test_run_err:
+                 logger.error(f"Fold {fold_num}: Error during test run with best params: {test_run_err}", exc_info=True)
                  all_fold_results.append(None)
 
     except Exception as e:
-        logger.error(f"Error during WFO loop: {e}", exc_info=True)
-        return None, None
+        logger.error(f"Error during Adaptive WFO loop: {e}", exc_info=True)
+        return None
 
-    logger.info(f"Completed iterating through {n_manual_splits} WFO segments.") # Log total splits processed
+    logger.info(f"Completed iterating through {n_manual_splits} Adaptive WFO segments.") 
 
     # 6. Aggregate Results
-    logger.info("\n--- Aggregating WFO Results ---")
-    if not all_fold_results or all(result is None for result in all_fold_results):
-         logger.error("WFO finished, but no valid portfolio segments were generated.")
-         return None, None
+    logger.info("\n--- Aggregating Adaptive WFO Results ---")
+    # Filter out None results before concatenation
+    valid_fold_returns = [r for r in all_fold_results if r is not None and isinstance(r, pd.Series)]
+    
+    if not valid_fold_returns:
+         logger.error(f"Adaptive WFO finished for {symbol}, but no valid return series were generated for aggregation.")
+         return None
          
-    # --- Manual Aggregation (Simpler Approach for Fixed Params WFO) ---
-    # Concatenate returns from each segment's test period
+    logger.info(f"Aggregating returns from {len(valid_fold_returns)} valid folds.")
     
-    # Define the key for the fixed parameters used in this WFO run
-    param_key_list = ['stoch_k', 'stoch_d', 'stoch_lower_th', 'stoch_upper_th']
-    param_key = tuple(best_params[k] for k in param_key_list)
-    logger.info(f"Extracting returns for parameter key: {param_key}")
+    # Concatenate the list of returns Series
+    all_returns = pd.concat(valid_fold_returns)
+    all_returns = all_returns.sort_index() 
     
-    # Extract the specific returns column corresponding to the fixed parameters
-    all_returns_list = []
-    for pf in all_fold_results:
-        if pf is not None:
-            if isinstance(pf.returns, pd.Series) and isinstance(pf.returns.name, tuple) and pf.returns.name == param_key:
-                # Handle case where pf.returns might be a Series with the tuple as name
-                all_returns_list.append(pf.returns)
-            elif isinstance(pf.returns, pd.DataFrame) and param_key in pf.returns.columns:
-                 # Handle case where pf.returns is a DataFrame with MultiIndex columns
-                all_returns_list.append(pf.returns[param_key])
-            elif isinstance(pf.returns, pd.Series) and len(pf.returns.name) == 1 and pf.returns.name[0] == param_key: # Check if it's a single column DataFrame-like Series
-                 all_returns_list.append(pf.returns)
-            else:
-                 logger.warning(f"Could not find returns for key {param_key} in portfolio segment. Index/Columns: {pf.returns.index}, {getattr(pf.returns, 'columns', 'N/A')}")
-
-    if not all_returns_list:
-        logger.error("Failed to extract any valid return series for the specified parameters.")
-        return None # Or return empty metrics
-
-    # Concatenate the list of simple Series
-    all_returns = pd.concat(all_returns_list)
-    # all_returns = pd.concat([pf.returns for pf in all_fold_results if pf is not None]) # Original line
-    all_returns = all_returns.sort_index().drop_duplicates() # Ensure chronological order and uniqueness
+    # Remove potential overlaps if test windows slightly overlapped or duplicates exist
+    all_returns = all_returns[~all_returns.index.duplicated(keep='first')]
 
     # Reindex to the full data range to handle potential gaps if segments were skipped
-    all_returns = all_returns.reindex(full_price_data.index).fillna(0)
+    # Ensure the index range covers the *test periods* accurately
+    first_test_start_idx = train_len_periods # Index of the start of the first test period
+    last_test_end_idx = n_datapoints # End of the last test period
+    full_test_index = full_price_data.index[first_test_start_idx:last_test_end_idx]
     
-    # Create a final portfolio from the combined returns
-    # Note: This doesn't perfectly reconstruct orders/logs across boundaries, 
-    # but gives the correct overall equity curve and performance from returns.
-    logger.info("Creating final portfolio from combined returns...")
-    # final_pf = all_returns.vbt.to_portfolio( # Incorrect accessor method
-    # Revert to using the class method Portfolio.from_returns
-    # final_pf = vbt.Portfolio.from_returns(
-    #     returns=all_returns, # Pass the returns series
-    #     init_cash=initial_capital,
-    #     freq=vbt_freq_str,
-    #     fees=commission_pct, # Apply fees/slippage notionally
-    #     slippage=slippage_pct,
-    # )
-
-    # Calculate metrics directly from the aggregated returns series
+    if not full_test_index.empty:
+        all_returns = all_returns.reindex(full_test_index).fillna(0)
+        logger.info(f"Combined returns reindexed to full test range: {full_test_index[0]} to {full_test_index[-1]}")
+    else:
+        logger.warning("Could not determine full test index range for reindexing.")
+        # Proceed without reindexing, might have gaps
+    
+    # Calculate overall metrics directly from the aggregated returns series
     try:
-        # Correctly CALL .metrics() as a method
-        # overall_metrics = all_returns.vbt.returns(freq=vbt_freq_str).metrics()
-        # Use .stats() to get metrics from the returns accessor
         overall_metrics = all_returns.vbt.returns(freq=vbt_freq_str).stats()
-        logger.info(f"Overall WFO Performance Metrics:\n{overall_metrics}")
+        logger.info(f"Overall Adaptive WFO Performance Metrics: {overall_metrics}")
     except Exception as metrics_err:
         logger.error(f"Failed to calculate metrics from combined returns: {metrics_err}", exc_info=True)
-        overall_metrics = pd.Series(name="Metrics Calculation Failed") # Placeholder
+        overall_metrics = pd.Series(name="Metrics Calculation Failed") 
 
-    # overall_metrics = calculate_risk_metrics(final_pf) # Removed, metrics calculated directly above
-    # logger.info(f"Overall WFO Performance Metrics: {overall_metrics}") # Logging moved up
-    
     # --- Save Results ---
-    # Define reports_dir INSIDE the function, using the potentially adjusted granularity_str
-    reports_dir = f"reports/wfo_stochsma/{symbol}_{granularity_str}"
+    reports_dir = f"reports/adaptive_wfo_stochsma/{symbol}_{granularity_str}" # New report directory
     logger.info(f"Attempting to save results to directory: {reports_dir}")
     reports_path = Path(reports_dir)
     try:
@@ -340,79 +370,75 @@ def run_stochsma_wfo(
         logger.info(f"Ensured report directory exists: {reports_path}")
     except Exception as mkdir_err:
         logger.error(f"Failed to create report directory {reports_path}: {mkdir_err}", exc_info=True)
-        # Optionally return here if directory creation is critical
-        return overall_metrics
+        return overall_metrics 
     
     # Save aggregated metrics
     metrics_df = pd.DataFrame([overall_metrics])
-    metrics_file = reports_path / f"wfo_{symbol}_{granularity_str}_metrics.csv"
+    metrics_file = reports_path / f"adaptive_wfo_{symbol}_{granularity_str}_metrics.csv" 
     metrics_df.to_csv(metrics_file, index=False)
-    logger.info(f"Saved aggregated WFO metrics to {metrics_file}")
+    logger.info(f"Saved aggregated Adaptive WFO metrics to {metrics_file}")
 
-    # --- ADD DEBUGGING ---
-    logger.info(f"Debugging all_returns before saving to CSV:")
-    logger.info(f"Length: {len(all_returns)}")
-    logger.info(f"Non-zero count: {(all_returns != 0).sum()}")
-    logger.info(f"Max value: {all_returns.max()}")
-    logger.info(f"Min value: {all_returns.min()}")
-    logger.info(f"Describe:\n{all_returns.describe()}")
-    # --- END DEBUGGING ---
-    
+    # Save the best parameters found for each fold
+    params_file = reports_path / f"adaptive_wfo_{symbol}_{granularity_str}_best_params.json"
+    try:
+        # Convert numpy types to standard types for JSON serialization
+        serializable_params = {}
+        for fold, params in all_fold_best_params.items():
+            if params:
+                serializable_params[fold] = {k: (int(v) if isinstance(v, np.integer) else float(v) if isinstance(v, np.floating) else v) for k, v in params.items()}
+            else:
+                serializable_params[fold] = None
+                
+        with open(params_file, 'w') as f:
+            json.dump(serializable_params, f, indent=4)
+        logger.info(f"Saved best parameters per fold to {params_file}")
+    except Exception as json_err:
+        logger.error(f"Failed to save best parameters JSON: {json_err}")
+
     # Save the raw returns series
-    returns_file = reports_path / f"wfo_{symbol}_{granularity_str}_returns.csv"
+    returns_file = reports_path / f"adaptive_wfo_{symbol}_{granularity_str}_returns.csv" 
     all_returns.to_csv(returns_file)
-    logger.info(f"Saved aggregated WFO returns series to {returns_file}")
+    logger.info(f"Saved aggregated Adaptive WFO returns series to {returns_file}")
     
-    # Return metrics (final_pf is no longer returned)
     return overall_metrics
 
 
 if __name__ == "__main__":
-    # --- Configuration ---
-    SYMBOL = "BTC-USD" 
-    START_DATE = "2021-01-01" # Adjust as needed
-    END_DATE = "2024-06-01"   # Adjust as needed
-    GRANULARITY_SECONDS = 14400 # 4 hours
-    
-    # Best parameters identified from optimization
-    BEST_STOCHSMA_PARAMS = {
-        'stoch_k': 5, 
-        'stoch_d': 4, 
-        'stoch_lower_th': 35, 
-        'stoch_upper_th': 65
-    }
+    # --- Argument Parsing ---
+    parser = argparse.ArgumentParser(description='Run Adaptive Walk-Forward Optimization for StochSMA.')
+    parser.add_argument('--symbol', type=str, default='BTC-USD', help='Trading pair symbol (e.g., BTC-USD, ETH-USD)')
+    parser.add_argument('--start_date', type=str, default='2021-01-01', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, default='2024-06-01', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--granularity', type=int, default=14400, help='Data granularity in seconds (e.g., 14400 for 4H)')
+    parser.add_argument('--initial_capital', type=float, default=10000, help='Initial capital')
+    parser.add_argument('--commission', type=float, default=0.001, help='Commission per trade')
+    parser.add_argument('--slippage', type=float, default=0.0005, help='Slippage per trade')
+    parser.add_argument('--no_stops', action='store_true', help='Disable stop loss usage')
+    parser.add_argument('--sl_atr', type=float, default=1.5, help='ATR multiplier for stop loss')
+    parser.add_argument('--tsl_atr', type=float, default=2.0, help='ATR multiplier for trailing stop loss')
+    parser.add_argument('--trend_window', type=int, default=50, help='SMA window for trend filter')
+    parser.add_argument('--wfo_test_days', type=int, default=90, help='Days for each WFO test period')
+    parser.add_argument('--wfo_window_years', type=float, default=1.5, help='Total years for each WFO train+test window')
+    args = parser.parse_args()
 
-    # Strategy fixed parameters (consistent with optimization)
-    INITIAL_CAPITAL = 10000
-    COMMISSION_PCT = 0.001 # Example for Coinbase Advanced
-    SLIPPAGE_PCT = 0.0005
-    USE_STOPS = True 
-    SL_ATR_MULTIPLIER = 1.5 # From StochSMA defaults or optimization? Assume default
-    TSL_ATR_MULTIPLIER = 2.0 # From StochSMA defaults or optimization? Assume default
-    TREND_SMA_WINDOW = 50 # From StochSMA defaults or optimization? Assume default
+    # --- Configuration (using args or defaults) ---
+    logger.info("Starting Adaptive StochSMA Walk-Forward Optimization Script")
     
-    # WFO specific parameters
-    WFO_TEST_DAYS = 90 # How many days for each out-of-sample test period
-    WFO_WINDOW_YEARS = 1.5 # Total length of each train+test window
-    
-    logger.info("Starting StochSMA Walk-Forward Optimization Script")
-    
-    # Adjusted to only receive metrics back
+    # Call the WFO function with parsed arguments (no best_params)
     overall_metrics = run_stochsma_wfo(
-        symbol=SYMBOL, 
-        start_date=START_DATE, 
-        end_date=END_DATE, 
-        granularity=GRANULARITY_SECONDS, 
-        best_params=BEST_STOCHSMA_PARAMS, 
-        initial_capital=INITIAL_CAPITAL, 
-        commission_pct=COMMISSION_PCT, 
-        slippage_pct=SLIPPAGE_PCT,
-        use_stops=USE_STOPS, 
-        sl_atr_multiplier=SL_ATR_MULTIPLIER, 
-        tsl_atr_multiplier=TSL_ATR_MULTIPLIER, 
-        trend_sma_window=TREND_SMA_WINDOW,
-        wfo_test_days=WFO_TEST_DAYS, 
-        wfo_window_years=WFO_WINDOW_YEARS # Removed reports_dir argument
+        symbol=args.symbol, 
+        start_date=args.start_date, 
+        end_date=args.end_date, 
+        granularity=args.granularity, 
+        initial_capital=args.initial_capital, 
+        commission_pct=args.commission, 
+        slippage_pct=args.slippage,
+        use_stops=(not args.no_stops), 
+        sl_atr_multiplier=args.sl_atr, 
+        tsl_atr_multiplier=args.tsl_atr, 
+        trend_sma_window=args.trend_window, 
+        wfo_test_days=args.wfo_test_days, 
+        wfo_window_years=args.wfo_window_years 
     )
 
-    logger.info("StochSMA Walk-Forward Optimization Script Finished") 
+    logger.info(f"Adaptive StochSMA Walk-Forward Optimization Script Finished for {args.symbol}") 
