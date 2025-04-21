@@ -69,6 +69,12 @@ api_keys.yaml
 charts/
 analysis/temp/
 VectorBTDocumentation/
+optimization_results/
+market_data/
+strategy_cache/
+*.trades
+trade_history/
+position_logs/
 
 # Sensitive keys and secrets
 *.pem
@@ -84,6 +90,11 @@ cdp_api_key.json
 *.pfx
 *.jks
 *.keystore
+.env
+.env.*
+config.local.json
+api_credentials.json
+exchange_keys.json
 
 # OS specific
 *.bak
@@ -111,3 +122,18 @@ node_modules/
 # Installer Files
 Miniconda3-latest-MacOSX-arm64.sh
 Miniconda3-latest-MacOSX-x86_64.sh
+
+# Performance and profiling
+*.prof
+*.stats
+profiling/
+performance_logs/
+
+# AI and model files
+*.h5
+*.pkl
+*.joblib
+model_checkpoints/
+*.onnx
+*.tflite
+*.pt
