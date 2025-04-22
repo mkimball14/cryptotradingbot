@@ -1,3 +1,0 @@
-,lookback_window,volatility_threshold,tsl_stop,tp_stop,atr_multiple_sl,factor_weights,split_idx
-0,25,0.5,0.07,0.1,2.0,"{'volatility_regime': 0.0, 'consolidation_breakout': 0.0, 'volume_divergence': 1.0, 'market_microstructure': 0.0}",0
-1,25,0.5,0.07,0.1,2.0,"{'volatility_regime': 0.0, 'consolidation_breakout': 0.0, 'volume_divergence': 1.0, 'market_microstructure': 0.0}",1

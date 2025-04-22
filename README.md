@@ -927,6 +927,30 @@ Trading Context → AI System → Model Selection → Query Processing → Strat
    - Feedback loop to improve prompts
    - Evolution of strategy based on AI insights
 
+### 5. Integrated Parameter Optimization Workflow (NEW)
+
+The system now incorporates a two-stage optimization process:
+
+1.  **Enhanced Parameter Suggestion (Initial Tuning):**
+    *   Run `python scripts/strategies/enhanced_parameter_suggestions.py`.
+    *   This script analyzes the current market conditions (over the last 30 days) to identify the market regime.
+    *   It generates strategy parameter suggestions tailored to this regime.
+    *   These suggestions are then validated against a longer historical backtest (365 days by default).
+    *   If the backtest shows improved performance (Return and Sharpe Ratio) compared to baseline parameters, the suggested parameters are saved to `config/optimized_strategy_params.json`.
+
+2.  **Walk-Forward Optimization (Fine-tuning & Adaptation):**
+    *   Run `python scripts/strategies/wfo_edge_strategy.py`.
+    *   Before optimizing each walk-forward window, the script attempts to load the parameters from `config/optimized_strategy_params.json`.
+    *   If found, these parameters are used as the *initial guess* (first trial) for the Optuna optimization process within that specific WFO window.
+    *   If the file is not found, Optuna starts its search from scratch for that window.
+    *   The WFO process then proceeds as usual, optimizing parameters for each training split and evaluating on the subsequent out-of-sample period.
+
+**Benefits of this workflow:**
+
+*   **Better Starting Point:** WFO starts its optimization search from a more informed position based on recent market analysis and long-term validation, potentially leading to faster convergence and better final parameters.
+*   **Adaptation + Robustness:** Combines long-term validation (from the suggestion script) with rolling window adaptation (from WFO).
+*   **Flexibility:** You can run the suggestion script periodically to update the baseline optimized parameters used by WFO.
+
 ## Future Roadmap
 
 The Crypto Trading Bot system is continuously evolving. Here are the planned enhancements for upcoming releases:

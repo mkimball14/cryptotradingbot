@@ -41,7 +41,7 @@ except ImportError:
             logger.error(f"Could not import data fetching functions: {e}")
             sys.exit(1)
 
-from scripts.strategies.edge_multi_factor import EdgeMultiFactorStrategy
+from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
 
 # Define parameters - Use results from latest TSL optimization
 # OR load from best_edge_params.json if available
@@ -57,10 +57,10 @@ lookback_window = 25
 volatility_threshold = 0.5
 initial_capital = 3000
 optimal_factor_weights = {
-    'volatility_regime': 0.5,
-    'consolidation_breakout': 0.0,
-    'volume_divergence': 0.25,
-    'market_microstructure': 0.25
+    'volatility_regime': 0.3,
+    'consolidation_breakout': 0.3,
+    'volume_divergence': 0.2,
+    'market_microstructure': 0.2
 }
 tsl_stop = 0.05 # Example optimal TSL
 tp_stop = 0.10 # Example optimal TP (or 0 to disable)
@@ -134,7 +134,7 @@ def main():
 
     # Generate Signals
     logger.info("Generating signals...")
-    long_entries, short_entries = strategy.generate_signals(price_data)
+    long_entries, short_entries, is_trending, is_ranging = strategy.generate_signals(price_data)
     logger.info(f"Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries.")
 
     if long_entries.sum() + short_entries.sum() == 0:
@@ -160,9 +160,13 @@ def main():
     sl_stop_pct = np.clip(sl_stop_pct, 0.001, 0.5)
 
     # Run Backtest with TargetPercent
-    logger.info(f"Running backtest with TargetPercent sizing...")
+    logger.info(f"Running backtest with percentage-based sizing...")
     vbt_freq = get_vbt_freq_str(current_granularity_seconds) or pd.infer_freq(price_data.index)
 
+    # Calculate position sizes as percentage of capital (adapted from target percentage)
+    avg_target_pct = target_pct.mean()
+    logger.info(f"Using average position size of {avg_target_pct*100:.2f}% of capital")
+    
     portfolio = vbt.Portfolio.from_signals(
         price_data,
         entries=long_entries,
@@ -170,8 +174,8 @@ def main():
         sl_stop=sl_stop_pct,
         tp_stop=args.tp_stop if args.tp_stop > 0 else None,
         tsl_stop=args.tsl_stop if args.tsl_stop > 0 else None,
-        size=target_pct, # Pass target percentage
-        size_type='TargetPercent', # Use TargetPercent
+        size=avg_target_pct,  # Use average percentage for simple % sizing
+        size_type='percent',  # Use standard percent sizing
         init_cash=args.initial_capital,
         fees=strategy.commission_pct,
         slippage=strategy.slippage_pct,

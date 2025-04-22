@@ -64,11 +64,14 @@ def get_best_index(performance: pd.Series, higher_better: bool = True) -> Option
         logger.warning("Get_best_index: Performance data is empty.")
         return None
     try:
-        if not performance.notna().any():
+        # Check for any non-NaN values safely
+        if not performance.notna().any().item():  # Add .item() to convert to scalar boolean
             logger.warning("Get_best_index: Performance data contains only NaNs.")
             return None
+            
         # Ensure performance index is a MultiIndex before accessing levels
-        if not isinstance(performance.index, pd.MultiIndex):
+        is_multi_index = isinstance(performance.index, pd.MultiIndex)
+        if not is_multi_index:
             logger.warning(f"Get_best_index: Performance index is not a MultiIndex. Index type: {type(performance.index)}")
             # Handle Series with simple index (single parameter run)
             if len(performance) == 1:
@@ -82,9 +85,43 @@ def get_best_index(performance: pd.Series, higher_better: bool = True) -> Option
                  return None 
                  
         if higher_better:
-            idx = performance.idxmax() # Returns the tuple index
+            # Get best performing parameter combination - handle case where result may be a Series
+            try:
+                idx = performance.idxmax() # Returns the tuple index or might return Series for MultiColumns
+                
+                # If idxmax returns a Series, we need to find the maximum value's index
+                if isinstance(idx, pd.Series):
+                    logger.info("get_best_index: idxmax returned a Series, finding the best value")
+                    max_val = performance.max()
+                    # Filter for the maximum value and get the first matching index
+                    matching_indices = performance[performance == max_val].index
+                    if len(matching_indices) > 0:
+                        idx = matching_indices[0]
+                    else:
+                        logger.warning("get_best_index: Could not find matching index for max value")
+                        return None
+            except Exception as e:
+                logger.error(f"Error in get_best_index using idxmax: {e}", exc_info=True)
+                return None
         else:
-            idx = performance.idxmin() # Returns the tuple index
+            # Same for minimum
+            try:
+                idx = performance.idxmin() # Returns the tuple index
+                
+                # If idxmin returns a Series, we need to find the minimum value's index
+                if isinstance(idx, pd.Series):
+                    logger.info("get_best_index: idxmin returned a Series, finding the best value")
+                    min_val = performance.min()
+                    # Filter for the minimum value and get the first matching index
+                    matching_indices = performance[performance == min_val].index
+                    if len(matching_indices) > 0:
+                        idx = matching_indices[0]
+                    else:
+                        logger.warning("get_best_index: Could not find matching index for min value")
+                        return None
+            except Exception as e:
+                logger.error(f"Error in get_best_index using idxmin: {e}", exc_info=True)
+                return None
             
         # Ensure the result is always a tuple, even if only one parameter level exists
         return idx if isinstance(idx, tuple) else (idx,)
@@ -125,16 +162,22 @@ def run_stochsma_wfo(
     logger.info(f"WFO: Test Days={wfo_test_days}, Total Window={wfo_window_years:.1f} years")
 
     # --- Define Optimization Grid and Metric ---
-    # You might move this to args or a config file
+    # Reduced parameter grid to avoid Numba JIT compilation errors
     OPTIMIZATION_PARAM_GRID = {
-        'stoch_k': np.arange(5, 25, 3),       # Example: 5, 8, ..., 23
-        'stoch_d': np.arange(3, 10, 2),       # Example: 3, 5, 7, 9
-        'stoch_lower_th': np.arange(15, 40, 5), # Example: 15, 20, ..., 35
-        'stoch_upper_th': np.arange(60, 85, 5)  # Example: 60, 65, ..., 80
+        'stoch_k': np.arange(5, 24, 6),       # Reduced from [5,8,11,14,17,20,23] to [5,11,17,23]
+        'stoch_d': np.arange(3, 10, 3),       # Reduced from [3,5,7,9] to [3,6,9]
+        'stoch_lower_th': np.arange(15, 40, 10), # Reduced from [15,20,25,30,35] to [15,25,35]
+        'stoch_upper_th': np.arange(60, 85, 10)  # Reduced from [60,65,70,75,80] to [60,70,80]
     }
     OPTIMIZATION_METRIC = 'sharpe_ratio' # Metric to optimize for in training folds
     logger.info(f"Optimization Metric for Training Folds: {OPTIMIZATION_METRIC}")
     logger.info(f"Optimization Parameter Grid: {OPTIMIZATION_PARAM_GRID}")
+    
+    # Calculate total parameter combinations to log
+    param_combinations_count = 1
+    for param_values in OPTIMIZATION_PARAM_GRID.values():
+        param_combinations_count *= len(param_values)
+    logger.info(f"Total parameter combinations to evaluate: {param_combinations_count} (reduced grid)")
     
     # 1. Fetch Full Data
     full_price_data = fetch_historical_data(symbol, start_date, end_date, granularity)
@@ -241,6 +284,7 @@ def run_stochsma_wfo(
             # --- A) Optimize on Training Data ---
             logger.info(f"Fold {fold_num}: Optimizing parameters on training data...")
             try:
+                # First try using vectorized optimization
                 train_pf = strategy.optimize(
                     data=train_data.copy(), 
                     param_grid=OPTIMIZATION_PARAM_GRID, 
@@ -248,22 +292,121 @@ def run_stochsma_wfo(
                     granularity_seconds=granularity
                 )
                 
+                # Check if vectorized optimization failed
                 if train_pf is None or not hasattr(train_pf, 'stats') or train_pf.stats().empty:
-                     logger.warning(f"Fold {fold_num}: Optimization on training data failed or yielded no results. Skipping fold.")
-                     all_fold_results.append(None)
-                     all_fold_best_params[fold_num] = None
-                     continue
-                     
+                    logger.warning(f"Fold {fold_num}: Vectorized optimization failed. Attempting sequential optimization...")
+                    
+                    # Try sequential optimization instead
+                    train_pf = strategy.optimize_sequential(
+                        data=train_data.copy(), 
+                        param_grid=OPTIMIZATION_PARAM_GRID, 
+                        optimize_metric=OPTIMIZATION_METRIC, 
+                        granularity_seconds=granularity
+                    )
+                    
+                    # Check if sequential optimization also failed
+                    if train_pf is None or not hasattr(train_pf, 'stats'):
+                         logger.warning(f"Fold {fold_num}: Both optimization methods failed. Skipping fold.")
+                         all_fold_results.append(None)
+                         all_fold_best_params[fold_num] = None
+                         continue
+                         
                 # --- Extract Best Parameters ---
                 # Get stats per column (parameter combination)
                 try:
+                    # First try with primary optimization metric
                     performance = train_pf.stats(OPTIMIZATION_METRIC, per_column=True) 
+                    
+                    # Add detailed debugging
+                    if performance is not None:
+                        logger.info(f"Fold {fold_num}: Performance shape: {performance.shape if hasattr(performance, 'shape') else 'no shape'}")
+                        logger.info(f"Fold {fold_num}: Performance type: {type(performance)}")
+                        logger.info(f"Fold {fold_num}: Performance contains NaNs: {performance.isna().any() if hasattr(performance, 'isna') else 'unknown'}")
+                        if not performance.empty and len(performance) > 0:
+                            logger.info(f"Fold {fold_num}: First few performance values: {performance.head(3) if hasattr(performance, 'head') else str(performance)[:100]}")
+                            
+                            # Check for all zero values which might indicate no trades
+                            all_zeros = False
+                            if hasattr(performance, 'values'):
+                                all_zeros = (performance.values == 0).all() if hasattr(performance.values, 'all') else False
+                            if all_zeros:
+                                logger.warning(f"Fold {fold_num}: All performance values are zero. Possible no-trade scenario.")
+                    
+                    # Check if we need a fallback metric - use a simpler approach
+                    need_fallback = False
+                    if performance is None:
+                        need_fallback = True
+                    elif hasattr(performance, 'empty') and performance.empty:
+                        need_fallback = True
+                    elif hasattr(performance, 'isna'):
+                        # For DataFrames/Series, check if all values are NaN in a safe way
+                        try:
+                            # If performance is a DataFrame, check if all values are NaN
+                            if hasattr(performance, 'values') and performance.size > 0:
+                                need_fallback = np.isnan(performance.values).all()
+                            else:
+                                need_fallback = True
+                        except:
+                            # If any error occurs, assume fallback is needed
+                            need_fallback = True
+                    
+                    if need_fallback:
+                        # Try fallback metrics in order of preference
+                        fallback_metrics = ['total_return', 'win_rate', 'profit_factor']
+                        
+                        for fallback_metric in fallback_metrics:
+                            logger.info(f"Fold {fold_num}: Trying fallback metric '{fallback_metric}'")
+                            fallback_performance = train_pf.stats(fallback_metric, per_column=True)
+                            
+                            # Check if fallback performance is valid using same safe approach
+                            fallback_is_valid = False
+                            if fallback_performance is not None:
+                                if not hasattr(fallback_performance, 'empty') or not fallback_performance.empty:
+                                    # Check if it has usable values (not all NaN)
+                                    try:
+                                        if hasattr(fallback_performance, 'values') and fallback_performance.size > 0:
+                                            fallback_is_valid = not np.isnan(fallback_performance.values).all()
+                                    except:
+                                        fallback_is_valid = False
+                                        
+                            if fallback_is_valid:
+                                logger.info(f"Fold {fold_num}: Using fallback metric '{fallback_metric}' instead of '{OPTIMIZATION_METRIC}'")
+                                performance = fallback_performance
+                                # Update higher_better flag for the metric
+                                higher_better = fallback_metric not in ['max_dd']
+                                break
+                                
+                        # If all fallbacks failed, continue with original empty performance
+                        fallback_still_needed = False
+                        if performance is None:
+                            fallback_still_needed = True
+                        elif hasattr(performance, 'empty') and performance.empty:
+                            fallback_still_needed = True
+                        elif hasattr(performance, 'isna'):
+                            # For DataFrames/Series, check if all values are NaN in a safe way
+                            try:
+                                # If performance is a DataFrame, check if all values are NaN
+                                if hasattr(performance, 'values') and performance.size > 0:
+                                    fallback_still_needed = np.isnan(performance.values).all()
+                                else:
+                                    fallback_still_needed = True
+                            except:
+                                # If any error occurs, assume fallback is needed
+                                fallback_still_needed = True
+                            
+                        if need_fallback and fallback_still_needed:
+                            logger.warning(f"Fold {fold_num}: All fallback metrics failed. Skipping fold.")
+                            all_fold_results.append(None)
+                            all_fold_best_params[fold_num] = None
+                            continue
+                    
                 except Exception as stats_err:
                      logger.error(f"Fold {fold_num}: Error getting per-column stats for {OPTIMIZATION_METRIC}: {stats_err}", exc_info=True)
                      all_fold_results.append(None)
                      all_fold_best_params[fold_num] = None
                      continue
                  
+                # Use the defined higher_better value based on the metric used
                 best_param_idx_tuple = get_best_index(performance, higher_better=(OPTIMIZATION_METRIC not in ['max_dd']))
 
                 if best_param_idx_tuple is None:
@@ -289,6 +432,7 @@ def run_stochsma_wfo(
                  # Run optimize again, but with a single parameter set derived from training
                 single_param_grid_test = {k: [v] for k, v in best_params_fold.items()}
                 
+                # First try with vectorized method
                 test_pf = strategy.optimize(
                     data=test_data.copy(), # Pass TESTING data
                     param_grid=single_param_grid_test, # Use the single best set found in training
@@ -296,11 +440,22 @@ def run_stochsma_wfo(
                     granularity_seconds=granularity
                 )
 
+                # If vectorized method fails, use sequential method as fallback
                 if test_pf is None:
-                     logger.warning(f"Fold {fold_num}: Strategy run on test data returned None. Skipping.")
+                     logger.warning(f"Fold {fold_num}: Vectorized test run failed. Trying sequential method...")
+                     test_pf = strategy.optimize_sequential(
+                         data=test_data.copy(),
+                         param_grid=single_param_grid_test,
+                         optimize_metric=OPTIMIZATION_METRIC,
+                         granularity_seconds=granularity
+                     )
+                
+                # Check if both methods failed
+                if test_pf is None:
+                     logger.warning(f"Fold {fold_num}: Both test methods failed. Skipping.")
                      all_fold_results.append(None)
                      continue
-                     
+
                 # Extract the returns series for this single run
                 # The column name should match the best_param_idx_tuple
                 if best_param_idx_tuple in test_pf.returns.columns:
@@ -327,7 +482,10 @@ def run_stochsma_wfo(
     # Filter out None results before concatenation
     valid_fold_returns = [r for r in all_fold_results if r is not None and isinstance(r, pd.Series)]
     
-    if not valid_fold_returns:
+    # Explicitly log the number of valid returns series found
+    logger.info(f"Found {len(valid_fold_returns)} valid fold return series out of {len(all_fold_results)} total folds")
+    
+    if len(valid_fold_returns) == 0:
          logger.error(f"Adaptive WFO finished for {symbol}, but no valid return series were generated for aggregation.")
          return None
          

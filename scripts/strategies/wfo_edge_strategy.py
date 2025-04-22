@@ -17,6 +17,13 @@ import inspect
 from dotenv import load_dotenv
 import time
 
+# Import create_portfolio from edge_strategy_assistant
+try:
+    from scripts.strategies.edge_strategy_assistant import create_portfolio
+except ModuleNotFoundError:
+    # Handle case when file is run directly from the strategies directory
+    from edge_strategy_assistant import create_portfolio
+
 # Add dotenv import and loading
 load_dotenv(verbose=True)
 
@@ -122,13 +129,13 @@ if not wfo_logger.handlers:
 # --- Import Strategy and Data Fetcher ---
 try:
     # Use the correct relative path based on standard project structure
-    from scripts.strategies.edge_multi_factor import EdgeMultiFactorStrategy
+    from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
     wfo_logger.info("Successfully imported refactored EdgeMultiFactorStrategy.")
 except ImportError as e:
     wfo_logger.error(f"Could not import EdgeMultiFactorStrategy: {e}")
     # Attempt fallback if path structure is different
     try:
-        from edge_multi_factor import EdgeMultiFactorStrategy
+        from edge_multi_factor_fixed import EdgeMultiFactorStrategy
         wfo_logger.info("Imported EdgeMultiFactorStrategy from current directory.")
     except ImportError:
         wfo_logger.critical("Failed to import EdgeMultiFactorStrategy from both locations. Exiting.")
@@ -143,6 +150,41 @@ except ImportError as e:
     def fetch_historical_data(*args, **kwargs): return None
     def get_vbt_freq_str(*args, **kwargs): return "1h"
     GRANULARITY_MAP_SECONDS = {'1h': 3600}
+
+# --- NEW JSON DEFAULT FUNCTION ---
+def json_encoder_default(obj):
+    """Custom default function for json.dump to handle non-serializable types."""
+    if isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64, np.uint8, np.uint16, np.uint32, np.uint64)):
+        return int(obj)
+    elif isinstance(obj, (np.float16, np.float32, np.float64)):
+        # Handle potential infinity/NaN from numpy floats
+        if np.isinf(obj) or np.isnan(obj):
+            return None
+        return float(obj)
+    elif hasattr(np, 'floating') and isinstance(obj, np.floating):
+        if np.isinf(obj) or np.isnan(obj):
+            return None
+        return float(obj)
+    elif isinstance(obj, (np.bool_, bool)):
+        return str(obj) # Explicitly convert numpy and python bools to string
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat()
+    elif isinstance(obj, (pd.Timedelta, timedelta)):
+        return str(obj)
+    elif pd.isna(obj):
+        return None
+    elif obj is pd.NA:
+        return None
+    # Add other specific type checks if needed
+    
+    # Default fallback: Raise TypeError so json.dump knows it wasn't handled
+    # Or, convert to string as a last resort (less ideal, but might prevent crashes)
+    # logger.warning(f"JSON Fallback: Converting type {type(obj)} to string.")
+    # return str(obj)
+    raise TypeError(f'Object of type {obj.__class__.__name__} is not JSON serializable')
+# --- END NEW JSON DEFAULT FUNCTION ---
 
 # --- VectorBT Pro Chat Model Configuration --- NEW FUNCTION
 def setup_chat_provider():
@@ -663,8 +705,40 @@ def create_pf_for_params(data, params, init_cash=INITIAL_CAPITAL):
             logging.error(f"Unsupported data type: {type(data)}")
             return None
         
+        # Convert parameters to the format expected by EdgeMultiFactorStrategy
+        edge_strategy_params = {}
+        
+        # Parameter mapping from wfo parameter space to EdgeMultiFactorStrategy parameters
+        if 'lookback_window' not in params:
+            # Use bb_window as lookback_window if present
+            if 'bb_window' in params:
+                edge_strategy_params['lookback_window'] = params['bb_window']
+            else:
+                edge_strategy_params['lookback_window'] = 20  # default
+                
+        if 'vol_filter_window' not in params:
+            edge_strategy_params['vol_filter_window'] = 100  # default
+            
+        if 'volatility_threshold' not in params:
+            # Use volatility_lower as the threshold if present
+            if 'volatility_lower' in params:
+                edge_strategy_params['volatility_threshold'] = params['volatility_lower']
+            else:
+                edge_strategy_params['volatility_threshold'] = 0.5  # default
+        
+        # Set any other parameters that are directly used by EdgeMultiFactorStrategy
+        edge_strategy_params['initial_capital'] = init_cash
+        edge_strategy_params['commission_pct'] = params.get('commission_pct', 0.001)
+        edge_strategy_params['slippage_pct'] = params.get('slippage_pct', 0.0005)
+        
+        # Add any additional parameters that might be directly transferable
+        for key, value in params.items():
+            if key in ['lookback_window', 'vol_filter_window', 'volatility_threshold', 
+                      'initial_capital', 'commission_pct', 'slippage_pct']:
+                edge_strategy_params[key] = value
+        
         # Use our standardized create_portfolio function
-        portfolio, success = create_portfolio(df, params)
+        portfolio, success = create_portfolio(df, edge_strategy_params)
         
         if not success or portfolio is None:
             logging.error(f"Failed to create portfolio with params: {params}")
@@ -841,7 +915,7 @@ def filter_valid_portfolios(portfolios, param_combinations):
     
     return valid_portfolios, valid_params, valid_indices
 
-def optimize_parameters(data, params_space, n_trials=50, progress_callback=None):
+def optimize_parameters(data, params_space, n_trials=50, progress_callback=None, initial_params: Optional[Dict[str, Any]] = None):
     """
     Optimize strategy parameters using Optuna.
     
@@ -991,6 +1065,30 @@ def optimize_parameters(data, params_space, n_trials=50, progress_callback=None)
         # Create Optuna study
         study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler())
         
+        # Enqueue initial parameters if provided
+        if initial_params:
+            try:
+                # Ensure initial_params keys match params_space
+                valid_initial_params = {k: v for k, v in initial_params.items() if k in params_space}
+                # Ensure values are within defined ranges/categories if possible (basic check)
+                for k, v in valid_initial_params.items():
+                    p_range = params_space[k]
+                    if isinstance(p_range, tuple) and len(p_range) == 2:
+                         if not (p_range[0] <= v <= p_range[1]):
+                             logger.warning(f"Initial param {k}={v} out of range {p_range}, clamping.")
+                             valid_initial_params[k] = max(p_range[0], min(v, p_range[1]))
+                    elif isinstance(p_range, list) and v not in p_range:
+                         logger.warning(f"Initial param {k}={v} not in categorical list {p_range}, removing.")
+                         del valid_initial_params[k]
+                
+                if valid_initial_params:
+                     logger.info(f"Enqueuing initial parameters as first trial: {valid_initial_params}")
+                     study.enqueue_trial(valid_initial_params)
+                else:
+                     logger.warning("Provided initial_params were invalid or empty after validation.")
+            except Exception as e_enqueue:
+                 logger.error(f"Error enqueuing initial trial: {e_enqueue}")
+
         # Number of processes to use
         n_jobs = min(multiprocessing.cpu_count() - 1, 4)  # Leave 1 CPU free, max 4
         n_jobs = max(1, n_jobs)  # At least 1 job
@@ -1284,11 +1382,30 @@ def run_walk_forward_optimization():
         logging.info(f"Split {i+1}: Training dates: {train_data['close'].index[0]} to {train_data['close'].index[-1]}")
         logging.info(f"Split {i+1}: Testing dates: {test_data['close'].index[0]} to {test_data['close'].index[-1]}")
         
+        # --- Load suggested parameters as initial guess ---
+        loaded_initial_params = None
+        params_filepath = Path("config/optimized_strategy_params.json")
+        if params_filepath.exists():
+            try:
+                with open(params_filepath, 'r') as f:
+                    loaded_initial_params = json.load(f)
+                logging.info(f"Loaded initial parameters from {params_filepath} for WFO window {i+1}")
+            except Exception as e_load:
+                logging.warning(f"Could not load initial parameters from {params_filepath}: {e_load}")
+        else:
+            logging.info(f"No optimized parameter file found at {params_filepath}, starting optimization from scratch for window {i+1}.")
+        # --- End loading suggested parameters ---
+
         # Optimize parameters on training data
         logging.info(f"Optimizing parameters for split {i+1} with {N_TRIALS} trials")
         start_time = time.time()
         
-        best_params, best_score, trial_history = optimize_parameters(train_data, params_space, n_trials=N_TRIALS)
+        best_params, best_score, trial_history = optimize_parameters(
+            train_data, 
+            params_space, 
+            n_trials=N_TRIALS,
+            initial_params=loaded_initial_params # Pass loaded params
+        )
         
         logging.info(f"Optimization completed in {time.time() - start_time:.1f} seconds")
         
@@ -1394,9 +1511,29 @@ def run_walk_forward_optimization():
 def calculate_performance_metrics(portfolio):
     """Calculate key performance metrics from a portfolio object."""
     metrics = {}
+    
+    if portfolio is None:
+        return {
+            'sharpe': 0,
+            'calmar': 0,
+            'max_dd': 0,
+            'total_return': 0,
+            'win_rate': 0,
+            'volatility': 0,
+            'var': 0,
+            'num_trades': 0,
+            'profit_factor': 0,
+            'avg_trade': 0
+        }
+    
     try:
         # Basic metrics
-        stats = portfolio.stats()
+        # Try to get stats - handle both property and method
+        if callable(getattr(portfolio, 'stats', None)):
+            stats = portfolio.stats()
+        else:
+            stats = getattr(portfolio, 'stats', {})
+            
         metrics['sharpe'] = stats.get('sharpe_ratio', 0)
         metrics['calmar'] = stats.get('calmar_ratio', 0)
         metrics['max_dd'] = stats.get('max_drawdown', 0)
@@ -1408,20 +1545,111 @@ def calculate_performance_metrics(portfolio):
         metrics['volatility'] = risk.get('volatility', 0)
         metrics['var'] = risk.get('var', 0)
         
-        # Add number of trades
-        metrics['num_trades'] = len(portfolio.trades) if hasattr(portfolio, 'trades') else 0
+        # Handle trades information
+        if hasattr(portfolio, 'trades'):
+            trades = portfolio.trades
+            
+            # Try direct property access first
+            if hasattr(trades, 'count'):
+                # Handle count as both method and attribute
+                if callable(trades.count):
+                    metrics['num_trades'] = trades.count()
+                else:
+                    metrics['num_trades'] = trades.count
+                
+                # If win_rate wasn't in stats, try to get it from trades
+                if metrics['win_rate'] == 0 and hasattr(trades, 'win_rate'):
+                    metrics['win_rate'] = trades.win_rate
+                
+                # Try to get profit factor from trades
+                if hasattr(trades, 'profit_factor'):
+                    metrics['profit_factor'] = trades.profit_factor
+            # If that fails, use the records_readable DataFrame
+            elif hasattr(trades, 'records_readable'):
+                try:
+                    trades_df = trades.records_readable
+                    
+                    # Handle both 'pnl' and 'PnL' column names
+                    pnl_col = None
+                    if 'PnL' in trades_df.columns:
+                        pnl_col = 'PnL'
+                    elif 'pnl' in trades_df.columns:
+                        pnl_col = 'pnl'
+                    
+                    if pnl_col is not None:
+                        metrics['num_trades'] = len(trades_df)
+                        winning_trades = trades_df[trades_df[pnl_col] > 0]
+                        losing_trades = trades_df[trades_df[pnl_col] <= 0]
+                        
+                        metrics['winning_trades'] = len(winning_trades)
+                        metrics['losing_trades'] = len(losing_trades)
+                        metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
+                        
+                        # Calculate profit factor
+                        total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
+                        total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
+                        metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
+                        
+                        # Average trade
+                        metrics['avg_trade'] = trades_df[pnl_col].mean() if len(trades_df) > 0 else 0
+                    else:
+                        metrics['num_trades'] = len(trades_df)
+                        metrics['winning_trades'] = 0
+                        metrics['losing_trades'] = 0
+                        metrics['win_rate'] = 0.0
+                        metrics['profit_factor'] = 0.0
+                        metrics['avg_trade'] = 0.0
+                except Exception as e:
+                    wfo_logger.warning(f"Failed to process trades using records_readable: {e}")
+                    metrics['num_trades'] = 0
+                    metrics['winning_trades'] = 0
+                    metrics['losing_trades'] = 0
+                    metrics['win_rate'] = 0.0
+                    metrics['profit_factor'] = 0.0
+                    metrics['avg_trade'] = 0.0
+            else:
+                metrics['num_trades'] = 0
+                metrics['winning_trades'] = 0
+                metrics['losing_trades'] = 0
+                metrics['win_rate'] = 0.0
+                metrics['profit_factor'] = 0.0
+                metrics['avg_trade'] = 0.0
+        else:
+            metrics['num_trades'] = 0
+            metrics['winning_trades'] = 0
+            metrics['losing_trades'] = 0
+            metrics['win_rate'] = 0.0
+            metrics['profit_factor'] = 0.0
+            metrics['avg_trade'] = 0.0
         
-        # Calculated metrics
-        metrics['profit_factor'] = stats.get('profit_factor', 0)
-        metrics['avg_trade'] = stats.get('avg_trade', 0)
+        # Make sure profit_factor is set
+        if 'profit_factor' not in metrics:
+            metrics['profit_factor'] = stats.get('profit_factor', 0)
+            
+        # Make sure avg_trade is set
+        if 'avg_trade' not in metrics:
+            metrics['avg_trade'] = stats.get('avg_trade', 0)
         
     except Exception as e:
         wfo_logger.warning(f"Error calculating metrics: {str(e)}")
-        # Use chat model to help debug metrics calculation issues
         if chat_model_available():
             explanation = ask_chat_model(
                 f"Error calculating portfolio metrics: {str(e)}. What might be causing this?")
             wfo_logger.info(f"Metric calculation error explanation: {explanation}")
+        
+        # Return default metrics if calculation fails
+        metrics = {
+            'sharpe': 0,
+            'calmar': 0,
+            'max_dd': 0,
+            'total_return': 0,
+            'win_rate': 0,
+            'volatility': 0,
+            'var': 0,
+            'num_trades': 0,
+            'profit_factor': 0,
+            'avg_trade': 0
+        }
     
     return metrics
 
@@ -2086,90 +2314,6 @@ def handle_portfolio_error(error, params):
     return debug_with_chat(error, context=context, params=params) 
 
 # --- Create portfolios with modified signal generation ---
-def create_pf_for_params(data, params, init_cash=INITIAL_CAPITAL):
-    """
-    Create portfolio for specified parameters.
-    
-    Args:
-        data: DataFrame containing OHLCV data and indicators
-        params: Dictionary of strategy parameters
-        init_cash: Initial capital
-        
-    Returns:
-        Portfolio object or None if creation fails
-    """
-    try:
-        import pandas as pd
-        
-        # Handle different data types
-        if isinstance(data, pd.DataFrame):
-            # Make a copy to avoid modifying the original
-            df = data.copy()
-            
-            # Ensure column names are standardized to lowercase
-            df.columns = [col.lower() for col in df.columns]
-            
-            # Check if we have all required columns
-            required_cols = ['open', 'high', 'low', 'close', 'volume']
-            for col in required_cols:
-                if col not in df.columns:
-                    # Try to find a case-insensitive match
-                    matching_cols = [c for c in df.columns if c.lower() == col.lower()]
-                    if matching_cols:
-                        df[col] = df[matching_cols[0]]
-                    else:
-                        logging.error(f"Required column {col} not found. Available columns: {df.columns.tolist()}")
-                        return None
-        elif isinstance(data, dict):
-            # For dictionary data, create a DataFrame with standardized column names
-            df = {}
-            column_map = {
-                'open': ['open', 'Open', 'OPEN'],
-                'high': ['high', 'High', 'HIGH'],
-                'low': ['low', 'Low', 'LOW'],
-                'close': ['close', 'Close', 'CLOSE'],
-                'volume': ['volume', 'Volume', 'VOLUME']
-            }
-            
-            # Try to find matching columns
-            for std_col, variants in column_map.items():
-                found = False
-                for variant in variants:
-                    if variant in data:
-                        df[std_col] = data[variant]
-                        found = True
-                        break
-                
-                if not found:
-                    logging.error(f"Required column {std_col} not found in data dictionary")
-                    return None
-            
-            # Include any additional indicators from the data dictionary
-            for key, value in data.items():
-                if key.lower() not in ['open', 'high', 'low', 'close', 'volume']:
-                    df[key.lower()] = value
-        else:
-            logging.error(f"Unsupported data type: {type(data)}")
-            return None
-        
-        # Use our standardized create_portfolio function
-        portfolio, success = create_portfolio(df, params)
-        
-        if not success or portfolio is None:
-            logging.error(f"Failed to create portfolio with params: {params}")
-            return None
-            
-        return portfolio
-        
-    except Exception as e:
-        logging.error(f"Error creating portfolio: {str(e)}")
-        import traceback
-        logging.debug(traceback.format_exc())
-        return None
-
-# Fix the progress callback function to accept the study and trial parameters
-def progress_callback(study, trial=None):
-    """Callback function for Optuna to track optimization progress"""
     logging.info(f"Completed {len(study.trials)} trials so far")
     if len(study.trials) % 10 == 0:
         best_trial = study.best_trial
@@ -2196,26 +2340,85 @@ def evaluate_portfolio(portfolio):
     metrics = {}
     
     try:
-        # Basic metrics
-        metrics['total_return'] = portfolio.total_return()
-        metrics['max_drawdown'] = portfolio.max_drawdown()
+        # Basic metrics - check if attributes exist and are callable
+        # Get total_return safely
+        if hasattr(portfolio, 'total_return'):
+            if callable(getattr(portfolio, 'total_return')):
+                metrics['total_return'] = portfolio.total_return()
+            else:
+                # If it's a property/attribute instead of a method
+                metrics['total_return'] = portfolio.total_return
+        else:
+            # Try alternative ways to calculate return
+            try:
+                if hasattr(portfolio, 'final_value') and hasattr(portfolio, 'init_cash'):
+                    metrics['total_return'] = (portfolio.final_value / portfolio.init_cash) - 1
+                else:
+                    metrics['total_return'] = 0.0
+            except:
+                metrics['total_return'] = 0.0
+        
+        # Get max_drawdown safely
+        if hasattr(portfolio, 'max_drawdown'):
+            if callable(getattr(portfolio, 'max_drawdown')):
+                metrics['max_drawdown'] = portfolio.max_drawdown()
+            else:
+                metrics['max_drawdown'] = portfolio.max_drawdown
+        else:
+            metrics['max_drawdown'] = 0.0
         
         # Trading metrics
-        trades = portfolio.trades
-        if trades is not None and len(trades) > 0:
+        trades = portfolio.trades if hasattr(portfolio, 'trades') else None
+        if trades is not None and hasattr(trades, '__len__') and len(trades) > 0:
             metrics['total_trades'] = len(trades)
-            winning_trades = trades[trades.pnl > 0]
-            losing_trades = trades[trades.pnl <= 0]
-            metrics['winning_trades'] = len(winning_trades)
-            metrics['losing_trades'] = len(losing_trades)
             
-            # Win rate
-            metrics['win_rate'] = len(winning_trades) / len(trades) if len(trades) > 0 else 0
-            
-            # Profit factor
-            total_profit = winning_trades.pnl.sum() if len(winning_trades) > 0 else 0
-            total_loss = abs(losing_trades.pnl.sum()) if len(losing_trades) > 0 else 0
-            metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
+            # NEW METHOD: Use vectorbt's built-in properties for win rate and profit factor
+            if hasattr(trades, 'win_rate') and hasattr(trades, 'profit_factor'):
+                metrics['winning_trades'] = int(trades.count * trades.win_rate)
+                metrics['losing_trades'] = int(trades.count * (1 - trades.win_rate))
+                metrics['win_rate'] = trades.win_rate
+                metrics['profit_factor'] = trades.profit_factor
+            # ALTERNATIVE METHOD: Use the records_readable DataFrame
+            elif hasattr(trades, 'records_readable'):
+                try:
+                    trades_df = trades.records_readable
+                    # Handle both 'pnl' and 'PnL' column names
+                    pnl_col = None
+                    if 'PnL' in trades_df.columns:
+                        pnl_col = 'PnL'
+                    elif 'pnl' in trades_df.columns:
+                        pnl_col = 'pnl'
+                    
+                    if pnl_col is not None:
+                        winning_trades = trades_df[trades_df[pnl_col] > 0]
+                        losing_trades = trades_df[trades_df[pnl_col] <= 0]
+                        
+                        metrics['winning_trades'] = len(winning_trades)
+                        metrics['losing_trades'] = len(losing_trades)
+                        metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
+                        
+                        # Calculate profit factor
+                        total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
+                        total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
+                        metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
+                    else:
+                        logging.warning("Neither 'PnL' nor 'pnl' column found in trades dataframe")
+                        metrics['winning_trades'] = 0
+                        metrics['losing_trades'] = 0
+                        metrics['win_rate'] = 0.0
+                        metrics['profit_factor'] = 0.0
+                except Exception as e:
+                    logging.warning(f"Failed to process trades using records_readable: {e}")
+                    metrics['winning_trades'] = 0
+                    metrics['losing_trades'] = 0
+                    metrics['win_rate'] = 0.0
+                    metrics['profit_factor'] = 0.0
+            else:
+                # Fallback to default values
+                metrics['winning_trades'] = 0
+                metrics['losing_trades'] = 0
+                metrics['win_rate'] = 0.0
+                metrics['profit_factor'] = 0.0
         else:
             # Default values if no trades
             metrics['total_trades'] = 0
@@ -2224,26 +2427,48 @@ def evaluate_portfolio(portfolio):
             metrics['win_rate'] = 0.0
             metrics['profit_factor'] = 0.0
         
-        # Risk metrics
-        returns = portfolio.returns()
-        if returns is not None and len(returns) > 0:
-            # Annualized returns (assuming daily data)
-            annualized_return = np.mean(returns) * 252
-            annualized_vol = np.std(returns) * np.sqrt(252)
-            risk_free_rate = 0.02  # 2% risk-free rate assumption
-            
-            # Sharpe ratio
-            metrics['sharpe_ratio'] = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol != 0 else 0
-            
-            # Sortino ratio (downside risk)
-            downside_returns = returns[returns < 0]
-            downside_vol = np.std(downside_returns) * np.sqrt(252) if len(downside_returns) > 0 else annualized_vol
-            metrics['sortino_ratio'] = (annualized_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0
-            
-            # Average trade
-            if metrics['total_trades'] > 0:
-                metrics['avg_trade_pct'] = metrics['total_return'] / metrics['total_trades']
+        # Risk metrics - get returns safely
+        if hasattr(portfolio, 'returns'):
+            if callable(getattr(portfolio, 'returns')):
+                returns = portfolio.returns()
             else:
+                returns = portfolio.returns
+        else:
+            returns = None
+        
+        # Process returns for risk metrics
+        if returns is not None:
+            try:
+                # Convert to numpy array if it's not already
+                returns_array = np.array(returns)
+                
+                if len(returns_array) > 0:
+                    # Annualized returns (assuming daily data)
+                    annualized_return = np.mean(returns_array) * 252
+                    annualized_vol = np.std(returns_array) * np.sqrt(252)
+                    risk_free_rate = 0.02  # 2% risk-free rate assumption
+                    
+                    # Sharpe ratio
+                    metrics['sharpe_ratio'] = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol != 0 else 0
+                    
+                    # Sortino ratio (downside risk)
+                    downside_returns = returns_array[returns_array < 0]
+                    downside_vol = np.std(downside_returns) * np.sqrt(252) if len(downside_returns) > 0 else annualized_vol
+                    metrics['sortino_ratio'] = (annualized_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0
+                    
+                    # Average trade
+                    if metrics['total_trades'] > 0:
+                        metrics['avg_trade_pct'] = metrics['total_return'] / metrics['total_trades']
+                    else:
+                        metrics['avg_trade_pct'] = 0.0
+                else:
+                    metrics['sharpe_ratio'] = 0.0
+                    metrics['sortino_ratio'] = 0.0
+                    metrics['avg_trade_pct'] = 0.0
+            except Exception as e:
+                logging.warning(f"Error processing returns: {e}")
+                metrics['sharpe_ratio'] = 0.0
+                metrics['sortino_ratio'] = 0.0
                 metrics['avg_trade_pct'] = 0.0
         else:
             metrics['sharpe_ratio'] = 0.0
@@ -2252,15 +2477,20 @@ def evaluate_portfolio(portfolio):
         
         # Exposure metrics
         if hasattr(portfolio, 'cash') and hasattr(portfolio, 'value'):
-            cash_series = portfolio.cash
-            value_series = portfolio.value
-            
-            # Average market exposure
-            if len(cash_series) > 0 and len(value_series) > 0:
-                exposure = 1 - (cash_series / value_series)
-                metrics['avg_exposure'] = np.mean(exposure)
-                metrics['max_exposure'] = np.max(exposure)
-            else:
+            try:
+                cash_series = np.array(portfolio.cash)
+                value_series = np.array(portfolio.value)
+                
+                # Average market exposure
+                if len(cash_series) > 0 and len(value_series) > 0:
+                    exposure = 1 - (cash_series / value_series)
+                    metrics['avg_exposure'] = float(np.mean(exposure))
+                    metrics['max_exposure'] = float(np.max(exposure))
+                else:
+                    metrics['avg_exposure'] = 0.0
+                    metrics['max_exposure'] = 0.0
+            except Exception as e:
+                logging.warning(f"Error calculating exposure metrics: {e}")
                 metrics['avg_exposure'] = 0.0
                 metrics['max_exposure'] = 0.0
         else:
@@ -2288,93 +2518,15 @@ def evaluate_portfolio(portfolio):
     
     return metrics
 
-def create_portfolio(data, params, debug=False):
-    """
-    Create a portfolio using the edge strategy with the given parameters.
-    
-    Args:
-        data: Market data (DataFrame or dictionary)
-        params: Strategy parameters
-        debug: Whether to print debug information
-        
-    Returns:
-        tuple: (portfolio, success_flag)
-    """
-    try:
-        # Check if data is valid
-        if data is None:
-            logging.error("Insufficient data for portfolio creation")
-            return None, False
-            
-        # Convert dictionary to DataFrame if needed
-        import pandas as pd
-        if isinstance(data, dict):
-            # Create DataFrame from dictionary of Series
-            df = pd.DataFrame({k: v for k, v in data.items() if isinstance(v, (pd.Series, pd.DataFrame))})
+def progress_callback(study, trial=None):
+    """Callback function for Optuna to track optimization progress"""
+    logging.info(f"Completed {len(study.trials)} trials so far")
+    if len(study.trials) % 10 == 0:
+        best_trial = study.best_trial
+        if best_trial.value != float('-inf'):
+            logging.info(f"Best value so far: {best_trial.value} with params: {best_trial.params}")
         else:
-            # Make a copy to avoid modifying the original
-            df = data.copy()
-        
-        # Ensure all required columns are present and numeric
-        required_columns = ['open', 'high', 'low', 'close', 'volume']
-        
-        # Standardize column names (convert to lowercase)
-        df.columns = [col.lower() for col in df.columns]
-        
-        for col in required_columns:
-            if col not in df.columns:
-                # Try to find a case-insensitive match
-                if isinstance(data, dict) and col.capitalize() in data:
-                    df[col] = data[col.capitalize()]
-                else:
-                    matching_cols = [c for c in df.columns if c.lower() == col.lower()]
-                    if matching_cols:
-                        df[col] = df[matching_cols[0]]
-                    else:
-                        logging.error(f"Missing required column: {col}")
-                        return None, False
+            logging.warning("No valid portfolio found yet")
             
-            # Convert to numeric and handle any errors
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Check for NaN values
-        if df[required_columns].isna().any().any():
-            logging.warning("Data contains NaN values. Filling with forward fill method.")
-            df[required_columns] = df[required_columns].fillna(method='ffill')
-            # After filling, check again for any remaining NaNs
-            if df[required_columns].isna().any().any():
-                logging.error("Data still contains NaN values after filling")
-                return None, False
-        
-        # Apply edge strategy with parameters
-        from scripts.strategies.edge_strategy import EdgeMultiFactorStrategy
-        
-        # Convert parameters to appropriate types if needed
-        strategy_params = params.copy()
-        
-        # Create the strategy
-        strategy = EdgeMultiFactorStrategy(df, **strategy_params)
-        
-        # Run the strategy to get entry/exit signals
-        entry_signals, exit_signals = strategy.generate_signals()
-        
-        # Check if any signals were generated
-        if entry_signals.sum() == 0:
-            logging.warning(f"No entry signals generated with parameters: {params}")
-            return None, False
-            
-        # Create portfolio from signals
-        portfolio = strategy.backtest_signals(entry_signals, exit_signals)
-        
-        # Debug info if requested
-        if debug:
-            metrics = evaluate_portfolio(portfolio)
-            logging.debug(f"Portfolio metrics: {metrics}")
-            
-        return portfolio, True
-        
-    except Exception as e:
-        logging.error(f"Error creating portfolio: {str(e)}")
-        import traceback
-        logging.debug(traceback.format_exc())
-        return None, False
+    # Return true to continue optimization
+    return True

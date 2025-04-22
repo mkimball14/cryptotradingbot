@@ -1,0 +1,178 @@
+{
+  "market_context": {
+    "symbol": "BTC-USD",
+    "period": "2025-03-22 to 2025-04-21",
+    "current_price": 87262.95,
+    "price_change": 1170.0099999999948,
+    "price_change_pct": 1.3590080673281628,
+    "high": 88804.64,
+    "low": 74420.69,
+    "volatility": 2.782050056258276,
+    "recent_volatility": 1.3704572822559036,
+    "volume_change_pct": 228.36856057676846,
+    "volume_trend": "increasing",
+    "atr_percent": 3.754492272248088,
+    "volatility_expanding": "False",
+    "rsi": 65.63755412447148,
+    "price_range_pct": 19.02015420711632,
+    "near_support": "False",
+    "near_resistance": "True",
+    "is_above_ma20": "True",
+    "is_above_ma50": "False",
+    "is_above_ma200": "False",
+    "ma20_above_ma50": "False",
+    "ma50_above_ma200": "False",
+    "ma_20_slope": 0,
+    "ma_50_slope": 0,
+    "market_regime": "volatile_low_contracting",
+    "support_resistance": {
+      "pivot": 84823.12333333334,
+      "nearest_support": 84327.03666666667,
+      "nearest_resistance": 85673.42666666667,
+      "support_levels": [
+        83088.02,
+        83476.73333333334,
+        83972.82
+      ],
+      "resistance_levels": [],
+      "price_to_support_pct": 3.364444284009801,
+      "price_to_resistance_pct": -1.8215328880508062
+    },
+    "market_cycle": {
+      "cycle_phase": "anxiety",
+      "price_trend": "weakly_bearish",
+      "rsi": 65.63755412447148,
+      "volume_trend": "increasing",
+      "volatility_trend": "decreasing",
+      "ma_20_50_relationship": "bearish"
+    },
+    "performance_expectations": {
+      "win_rate": 0.55,
+      "profit_factor": 1.7,
+      "max_drawdown": -0.1,
+      "trades_per_month": 2,
+      "avg_trade_duration": 6.0,
+      "description": "Contracting volatility often preceding a significant move",
+      "optimal_strategy": "Breakout anticipation strategies with pending orders at boundaries"
+    }
+  },
+  "original_parameters": {
+    "lookback_window": 20,
+    "vol_filter_window": 20,
+    "vol_window": 20,
+    "rsi_window": 14,
+    "rsi_entry": 30,
+    "rsi_exit": 70,
+    "bb_dev": 2.0,
+    "volatility_threshold": 0.3,
+    "sl_pct": 2.0,
+    "tp_pct": 4.0,
+    "risk_per_trade": 0.02,
+    "max_active_positions": 3
+  },
+  "suggested_parameters": {
+    "lookback_window": 15,
+    "vol_filter_window": 20,
+    "vol_window": 15,
+    "rsi_window": 14,
+    "rsi_entry": 28,
+    "rsi_exit": 65,
+    "bb_dev": 2.1,
+    "volatility_threshold": 0.25,
+    "sl_pct": 1.8,
+    "tp_pct": 4.0,
+    "risk_per_trade": 0.015,
+    "max_active_positions": 3
+  },
+  "parameter_adjustments": [
+    "Adjusted for volatility contraction, anticipating breakout",
+    "Slightly widened Bollinger Bands for potential expansion",
+    "Kept stops relatively tight while waiting for confirmation",
+    "Shortened volume window to be more responsive to increasing volume",
+    "Lowered RSI exit threshold due to proximity to resistance level",
+    "Optimized for short data periods with aggressive trade generation"
+  ],
+  "baseline_metrics": {
+    "total_return": 0.04,
+    "sharpe_ratio": 2.4383933839516594,
+    "max_drawdown": 0.0,
+    "win_rate": 1.0,
+    "num_trades": 1,
+    "profit_factor": Infinity,
+    "avg_trade_duration": 2.0,
+    "recovery_factor": 0,
+    "calmar_ratio": null,
+    "consistency_score": 1.0
+  },
+  "optimized_metrics": {
+    "total_return": 0.021280000000000108,
+    "sharpe_ratio": 1.1901615190050412,
+    "max_drawdown": -0.017999999999999683,
+    "win_rate": 0.5,
+    "num_trades": 2,
+    "profit_factor": 2.136752136752149,
+    "avg_trade_duration": 3.0,
+    "recovery_factor": 0,
+    "calmar_ratio": 4.952730195217964,
+    "consistency_score": 1.0
+  },
+  "performance_analysis": {
+    "changes": {
+      "total_return_change": -0.018719999999999893,
+      "sharpe_ratio_change": -1.2482318649466182,
+      "max_drawdown_change": -0.017999999999999683,
+      "win_rate_change": -0.5,
+      "trades_change": 1
+    },
+    "improvement_score": 0,
+    "total_score": 8,
+    "improvement_percentage": 0.0,
+    "expected_metrics": {
+      "win_rate": 0.55,
+      "profit_factor": 1.7
+    },
+    "actual_metrics": {
+      "win_rate": 0.5,
+      "profit_factor": 2.136752136752149
+    },
+    "is_close_to_expected": "False",
+    "market_regime": "volatile_low_contracting"
+  },
+  "is_improved": "False",
+  "period_improvements": [
+    {
+      "period": "Period 1",
+      "start_date": "2025-01-22",
+      "end_date": "2025-02-20",
+      "return_change": 0.0,
+      "sharpe_change": null,
+      "win_rate_change": null,
+      "is_improved": "False"
+    },
+    {
+      "period": "Period 2",
+      "start_date": "2025-02-21",
+      "end_date": "2025-03-22",
+      "return_change": 0.0,
+      "sharpe_change": null,
+      "win_rate_change": null,
+      "is_improved": "False"
+    },
+    {
+      "period": "Period 3",
+      "start_date": "2025-03-23",
+      "end_date": "2025-04-21",
+      "return_change": 0.0,
+      "sharpe_change": null,
+      "win_rate_change": null,
+      "is_improved": "False"
+    }
+  ],
+  "consistency_change": 0.0,
+  "trade_generation_test": {
+    "is_sufficient": "True",
+    "trades_generated": 2
+  },
+  "timestamp": 1745265152.120472,
+  "recommendation": "The suggested parameters did not improve performance in any tested period. Consider keeping the baseline parameters or exploring different optimization approaches."
+}

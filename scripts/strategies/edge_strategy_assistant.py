@@ -26,25 +26,114 @@ logger = logging.getLogger("edge_strategy_assistant")
 # Load environment variables
 load_dotenv(verbose=True)
 
-# Try to import VectorBT Pro
-try:
-    import vectorbtpro as vbt
-    # Don't import EdgeMultiFactorStrategy anymore since we'll create our own version
-    VECTORBT_AVAILABLE = True
-    logger.info("VectorBTpro successfully imported")
-except ImportError as e:
-    logger.warning(f"Failed to import VectorBTpro: {e}")
-    logger.warning("Limited functionality available")
-    VECTORBT_AVAILABLE = False
+# --- New Helper Classes and Functions ---
 
-# Silence VBT warnings for cleaner output
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
+class RateLimiter:
+    """Rate limiter to prevent excessive API calls."""
+    def __init__(self, max_calls=20, per_seconds=60):
+        self.max_calls = max_calls
+        self.per_seconds = per_seconds
+        self.calls = []
+    
+    def can_call(self):
+        """Check if a call can be made without exceeding rate limits."""
+        now = time.time()
+        # Remove old calls
+        self.calls = [t for t in self.calls if now - t < self.per_seconds]
+        # Check if under limit
+        return len(self.calls) < self.max_calls
+    
+    def record_call(self):
+        """Record a call for rate limiting purposes."""
+        self.calls.append(time.time())
+    
+    def wait_if_needed(self):
+        """Wait if rate limit is exceeded and return whether waiting was needed."""
+        if not self.can_call():
+            logger.warning("Rate limit exceeded, waiting before next call...")
+            time.sleep(10)  # Wait before retry
+            return True
+        return False
+
+def parse_llm_json(response):
+    """Parse JSON from LLM response with robust fallbacks."""
+    try:
+        # Direct JSON parsing
+        return json.loads(response)
+    except json.JSONDecodeError:
+        # Try to extract JSON from code blocks
+        import re
+        json_match = re.search(r'```(?:json)?\n(.*?)\n```', response, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                pass
+        
+        # Try to extract JSON-like structures with simpler patterns
+        # Look for content within curly braces with reasonable JSON content
+        json_pattern = r'\{(?:[^{}]|\{[^{}]*\})*\}'
+        try:
+            json_match = re.search(json_pattern, response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+        except (re.error, json.JSONDecodeError):
+            pass
+        
+        # Return structured error
+        return {
+            "error": "Failed to parse JSON",
+            "raw_response": response
+        }
+
+def save_metrics(metrics_data):
+    """Save performance metrics to a jsonl file."""
+    try:
+        metrics_file = os.path.join(ROOT_DIR, "data/metrics/chat_metrics.jsonl")
+        os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
+        with open(metrics_file, 'a') as f:
+            f.write(json.dumps(metrics_data) + '\n')
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to save metrics: {e}")
+        return False
+
+def create_task_from_strategy_insight(insight, priority="medium"):
+    """Create a task from strategy insight using task-master."""
+    try:
+        import subprocess
+        
+        # Format the insight as a task prompt
+        prompt = f"Implement strategy improvement: {insight}"
+        
+        # Create task using task-master CLI
+        cmd = [
+            "task-master", "add-task",
+            "--prompt", prompt,
+            "--priority", priority
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            logger.info(f"Created new task from strategy insight: {insight}")
+            return {"success": True, "output": result.stdout}
+        else:
+            logger.error(f"Failed to create task: {result.stderr}")
+            return {"success": False, "error": result.stderr}
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        return {"success": False, "error": str(e)}
+
+# Initialize rate limiter for API calls
+api_rate_limiter = RateLimiter(max_calls=30, per_seconds=60)
+
+# --- End of New Helper Functions ---
 
 # Check for API keys
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
 if OPENAI_API_KEY:
     logger.info("Found OPENAI_API_KEY environment variable")
@@ -55,6 +144,79 @@ if OPENROUTER_API_KEY:
     logger.info("Found OPENROUTER_API_KEY environment variable")
 else:
     logger.warning("OPENROUTER_API_KEY not found in environment variables")
+
+# Use OpenRouter as fallback if OpenAI key is not available
+API_KEY = OPENAI_API_KEY or OPENROUTER_API_KEY
+API_BASE_URL = "https://openrouter.ai/api/v1" if not OPENAI_API_KEY and OPENROUTER_API_KEY else None
+
+# Try to import VectorBT Pro
+try:
+    import vectorbtpro as vbt
+    # Don't import EdgeMultiFactorStrategy anymore since we'll create our own version
+    VECTORBT_AVAILABLE = True
+    logger.info("VectorBTpro successfully imported")
+    
+    # Configure VectorBT with API keys if available
+    if API_KEY:
+        # Configure embeddings API key - but don't fail if settings aren't available
+        try:
+            # Check if required packages are installed
+            try:
+                import sentence_transformers
+                EMBEDDINGS_AVAILABLE = True
+                logger.info("sentence_transformers package is available for embeddings")
+            except ImportError:
+                EMBEDDINGS_AVAILABLE = False
+                logger.warning("sentence_transformers package not installed - embeddings features won't work")
+                logger.warning("Install with: pip install sentence-transformers")
+            
+            # Only try to set embeddings if the package is available
+            if EMBEDDINGS_AVAILABLE:
+                vbt.settings.set('knowledge.chat.embeddings_configs.openai.api_key', API_KEY)
+                logger.info("Configured embeddings API key in vbt.settings")
+            
+            # Configure GitHub token if available
+            if GITHUB_TOKEN:
+                vbt.settings.set('knowledge.assets.vbt.token', GITHUB_TOKEN)
+                logger.info("GitHub token configured in vbt.settings")
+                
+            # Configure base URL if using OpenRouter
+            if API_BASE_URL:
+                vbt.settings.set('knowledge.chat.openai_base_url', API_BASE_URL)
+                logger.info(f"Configured API base URL: {API_BASE_URL}")
+            
+            # Check if vbt.chat is available (this was confirmed working in our tests)
+            if hasattr(vbt, 'chat') and callable(vbt.chat):
+                NATIVE_CHATVBT_AVAILABLE = True
+                logger.info("Native vbt.chat function is available")
+            else:
+                NATIVE_CHATVBT_AVAILABLE = False
+                logger.warning("Native vbt.chat function not available in this version of VectorBT")
+                
+            # The actual ChatVBT class isn't available in your version
+            CHATVBT_AVAILABLE = False
+        except Exception as e:
+            logger.warning(f"Failed to configure VectorBT settings: {e}")
+            EMBEDDINGS_AVAILABLE = False
+            NATIVE_CHATVBT_AVAILABLE = False
+            CHATVBT_AVAILABLE = False
+    else:
+        logger.warning("No API keys available, ChatVBT will not be enabled")
+        EMBEDDINGS_AVAILABLE = False
+        NATIVE_CHATVBT_AVAILABLE = False
+        CHATVBT_AVAILABLE = False
+except ImportError as e:
+    logger.warning(f"Failed to import VectorBTpro: {e}")
+    logger.warning("Limited functionality available")
+    VECTORBT_AVAILABLE = False
+    EMBEDDINGS_AVAILABLE = False
+    NATIVE_CHATVBT_AVAILABLE = False
+    CHATVBT_AVAILABLE = False
+
+# Silence VBT warnings for cleaner output
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 def search_vectorbt_docs(query: str, max_results: int = 5) -> Dict[str, Any]:
     """
@@ -127,28 +289,175 @@ def search_vectorbt_docs(query: str, max_results: int = 5) -> Dict[str, Any]:
         logger.error(f"Error searching VectorBT docs: {e}")
         return {"error": str(e)}
 
-def chat_with_vectorbt(prompt: str, model=None, temperature=0.7, max_tokens=1500) -> str:
+def chat_with_vectorbt(prompt: str, model=None, temperature=0.7, max_tokens=1500, use_cache=True) -> str:
     """
-    Chat with VectorBT using ChatVBT.
+    Chat with LLM using VectorBT-compatible interface but with optimized fallbacks.
     
     Args:
-        prompt: The prompt to send to ChatVBT
+        prompt: The prompt to send to the model
         model: Optional model name (defaults to ChatVBT default)
         temperature: Temperature for generation
         max_tokens: Maximum tokens in response
+        use_cache: Whether to use cached responses if available
         
     Returns:
-        Response from ChatVBT
+        Response from the model
     """
-    logger.info(f"Sending prompt to ChatVBT: {prompt[:50]}...")
+    # Start metrics tracking
+    metrics = {
+        "start_time": time.time(),
+        "success": False,
+        "method_used": None,
+        "prompt_length": len(prompt),
+        "model": model or "gpt-4-turbo-preview",
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
     
-    # Function to handle direct OpenAI API calls as fallback
-    def query_openai_api(api_key, prompt):
+    logger.info(f"Sending prompt to AI: {prompt[:50]}...")
+    
+    # Check cache first if enabled
+    if use_cache:
+        cache_file = os.path.join(ROOT_DIR, "data/cache/chat_cache.json")
+        cache_key = f"{prompt}_{model}_{temperature}_{max_tokens}".replace(" ", "_")[:100]  # Keep key reasonable length
+        
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    cache = json.load(f)
+                    if cache_key in cache:
+                        cached_entry = cache[cache_key]
+                        # Check if cache entry is less than 24 hours old
+                        cache_time = pd.Timestamp(cached_entry.get('timestamp', '2000-01-01'))
+                        if pd.Timestamp.now() - cache_time < pd.Timedelta(hours=24):
+                            logger.info("Using cached response")
+                            metrics["method_used"] = "cache"
+                            metrics["success"] = True
+                            metrics["end_time"] = time.time()
+                            metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+                            save_metrics(metrics)
+                            return cached_entry['response']
+            except Exception as e:
+                logger.warning(f"Cache read error: {e}")
+    
+    # Always check rate limits before making API calls
+    api_rate_limiter.wait_if_needed()
+    api_rate_limiter.record_call()
+    
+    # Only try VectorBT native methods if embeddings are available
+    if VECTORBT_AVAILABLE and EMBEDDINGS_AVAILABLE:
+        # 1. Try native vbt.chat - our tests confirm this works!
+        if NATIVE_CHATVBT_AVAILABLE:
+            try:
+                logger.info("Using native vbt.chat which we know works...")
+                # Don't capture the printed response - it's sent to stdout
+                vbt.chat(prompt, api_key=API_KEY)
+                # Do a direct call to get a capturable response
+                response = None
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=API_KEY)
+                    completion = client.chat.completions.create(
+                        model="gpt-4-turbo-preview",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=max_tokens,
+                        temperature=temperature
+                    )
+                    response = completion.choices[0].message.content
+                    metrics["method_used"] = "native_vbt_with_direct_openai"
+                except Exception as e:
+                    logger.warning(f"Error getting capturable response: {e}")
+                    # Use a placeholder response since vbt.chat already printed the answer
+                    response = "Response was sent to console output via vbt.chat"
+                    metrics["method_used"] = "native_vbt_only"
+                
+                logger.info("Successfully completed native vbt.chat query")
+                metrics["success"] = True
+                metrics["end_time"] = time.time()
+                metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+                save_metrics(metrics)
+                
+                # Update cache if enabled
+                if use_cache and response:
+                    try:
+                        cache = {}
+                        if os.path.exists(cache_file):
+                            with open(cache_file, 'r') as f:
+                                cache = json.load(f)
+                        
+                        cache[cache_key] = {
+                            'response': response,
+                            'timestamp': pd.Timestamp.now().isoformat()
+                        }
+                        
+                        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                        with open(cache_file, 'w') as f:
+                            json.dump(cache, f)
+                    except Exception as e:
+                        logger.warning(f"Cache write error: {e}")
+                
+                return response
+            except Exception as e:
+                logger.warning(f"vbt.chat failed: {e}, trying alternatives")
+        
+        # 2. Try asset finding approach
         try:
-            logger.info("Trying OpenAI API directly")
+            api_rate_limiter.wait_if_needed()
+            api_rate_limiter.record_call()
+            
+            logger.info("Trying vbt.find_assets().chat approach...")
+            relevant_assets = vbt.find_assets(prompt, top_k=10)
+            if relevant_assets is not None:
+                response = relevant_assets.chat(prompt, api_key=API_KEY)
+                if response and len(response) > 0:
+                    logger.info("Successfully received response from find_assets().chat")
+                    metrics["method_used"] = "find_assets_chat"
+                    metrics["success"] = True
+                    metrics["end_time"] = time.time()
+                    metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+                    save_metrics(metrics)
+                    
+                    # Update cache
+                    if use_cache:
+                        try:
+                            cache = {}
+                            if os.path.exists(cache_file):
+                                with open(cache_file, 'r') as f:
+                                    cache = json.load(f)
+                            
+                            cache[cache_key] = {
+                                'response': response,
+                                'timestamp': pd.Timestamp.now().isoformat()
+                            }
+                            
+                            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                            with open(cache_file, 'w') as f:
+                                json.dump(cache, f)
+                        except Exception as e:
+                            logger.warning(f"Cache write error: {e}")
+                    
+                    return response
+            logger.warning("find_assets().chat failed or returned empty, trying alternatives")
+        except Exception as e:
+            logger.warning(f"find_assets().chat failed: {e}, trying alternatives")
+    else:
+        if VECTORBT_AVAILABLE:
+            logger.info("Skipping native VectorBT chat methods - embeddings not available")
+        else:
+            logger.info("VectorBT not available, using direct API calls")
+    
+    # Direct API paths - these are working in your setup
+    
+    # Direct OpenAI API calls - preferred path
+    if OPENAI_API_KEY:
+        try:
+            api_rate_limiter.wait_if_needed()
+            api_rate_limiter.record_call()
+            
+            logger.info("Using OpenAI API directly")
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}"
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
             }
             
             payload = {
@@ -166,21 +475,48 @@ def chat_with_vectorbt(prompt: str, model=None, temperature=0.7, max_tokens=1500
             
             if response.status_code == 200:
                 logger.info("Successfully received response from OpenAI API")
-                return response.json()["choices"][0]["message"]["content"]
+                result = response.json()["choices"][0]["message"]["content"]
+                metrics["method_used"] = "openai_direct"
+                metrics["success"] = True
+                metrics["end_time"] = time.time()
+                metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+                save_metrics(metrics)
+                
+                # Update cache
+                if use_cache:
+                    try:
+                        cache = {}
+                        if os.path.exists(cache_file):
+                            with open(cache_file, 'r') as f:
+                                cache = json.load(f)
+                        
+                        cache[cache_key] = {
+                            'response': result,
+                            'timestamp': pd.Timestamp.now().isoformat()
+                        }
+                        
+                        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                        with open(cache_file, 'w') as f:
+                            json.dump(cache, f)
+                    except Exception as e:
+                        logger.warning(f"Cache write error: {e}")
+                
+                return result
             else:
                 logger.error(f"OpenAI API error: {response.status_code} - {response.text}")
-                return None
         except Exception as e:
             logger.error(f"Error querying OpenAI API: {e}")
-            return None
     
-    # Function to handle direct OpenRouter API calls as fallback
-    def query_openrouter_api(api_key, prompt):
+    # OpenRouter API as fallback
+    if OPENROUTER_API_KEY:
         try:
-            logger.info("Trying OpenRouter API")
+            api_rate_limiter.wait_if_needed()
+            api_rate_limiter.record_call()
+            
+            logger.info("Using OpenRouter API")
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                 "HTTP-Referer": "https://github.com/openrouter-dev/openrouter",
                 "X-Title": "Edge Strategy Assistant"
             }
@@ -200,48 +536,48 @@ def chat_with_vectorbt(prompt: str, model=None, temperature=0.7, max_tokens=1500
             
             if response.status_code == 200:
                 logger.info("Successfully received response from OpenRouter API")
-                return response.json()["choices"][0]["message"]["content"]
+                result = response.json()["choices"][0]["message"]["content"]
+                metrics["method_used"] = "openrouter"
+                metrics["success"] = True
+                metrics["end_time"] = time.time()
+                metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+                save_metrics(metrics)
+                
+                # Update cache
+                if use_cache:
+                    try:
+                        cache = {}
+                        if os.path.exists(cache_file):
+                            with open(cache_file, 'r') as f:
+                                cache = json.load(f)
+                        
+                        cache[cache_key] = {
+                            'response': result,
+                            'timestamp': pd.Timestamp.now().isoformat()
+                        }
+                        
+                        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                        with open(cache_file, 'w') as f:
+                            json.dump(cache, f)
+                    except Exception as e:
+                        logger.warning(f"Cache write error: {e}")
+                
+                return result
             else:
                 logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
-                return None
         except Exception as e:
             logger.error(f"Error querying OpenRouter API: {e}")
-            return None
     
-    try:
-        # Method 1: Try to use vectorbtpro's ChatVBT if available
-        if VECTORBT_AVAILABLE and hasattr(vbt, 'ChatVBT'):
-            try:
-                logger.info("Attempting to use VectorBT's ChatVBT")
-                response = vbt.ChatVBT.chat(prompt=prompt)
-                if response:
-                    logger.info("Received response from ChatVBT")
-                    return response
-                logger.warning("ChatVBT returned empty response")
-            except Exception as e:
-                logger.warning(f"Error using ChatVBT: {e}")
-        elif VECTORBT_AVAILABLE:
-            logger.warning("ChatVBT not available in this version of VectorBT")
-        
-        # Method 2: Try OpenAI API directly
-        if OPENAI_API_KEY:
-            response = query_openai_api(OPENAI_API_KEY, prompt)
-            if response:
-                return response
-        
-        # Method 3: Try OpenRouter API
-        if OPENROUTER_API_KEY:
-            response = query_openrouter_api(OPENROUTER_API_KEY, prompt)
-            if response:
-                return response
-        
-        # No methods worked
-        logger.error("All methods failed to get a response from LLM")
-        return "Error: Unable to get a response from any available LLM service."
-    
-    except Exception as e:
-        logger.error(f"Error in chat_with_vectorbt: {e}")
-        return f"Error: {str(e)}"
+    # If all methods fail, return error message
+    error_msg = "All chat methods failed, please check API keys and try again."
+    logger.error(error_msg)
+    metrics["method_used"] = "all_failed"
+    metrics["success"] = False
+    metrics["error"] = error_msg
+    metrics["end_time"] = time.time()
+    metrics["duration"] = metrics["end_time"] - metrics["start_time"]
+    save_metrics(metrics)
+    return error_msg
 
 # Define EdgeStrategy class with RSI, BB, and vol parameters
 class EdgeStrategy:
@@ -436,28 +772,22 @@ class EnhancedEdgeStrategy(EdgeStrategy):
         
         response = chat_with_vectorbt(prompt)
         
-        # Try to parse JSON from the response
-        try:
-            # First try direct JSON parsing
-            suggestions = json.loads(response)
-        except json.JSONDecodeError:
-            # If that fails, try to extract JSON from text response
+        # Use the new JSON parser for more robust parsing
+        suggestions = parse_llm_json(response)
+        
+        # If the suggestions contain high-value improvements, create a task
+        if "parameter_suggestions" in suggestions and not isinstance(suggestions["parameter_suggestions"], str):
             try:
-                import re
-                json_match = re.search(r'```json\n(.*?)\n```', response, re.DOTALL)
-                if json_match:
-                    suggestions = json.loads(json_match.group(1))
-                else:
-                    # Create a fallback structure
-                    suggestions = {
-                        "parameter_suggestions": "Could not parse JSON from response",
-                        "original_response": response
-                    }
-            except Exception:
-                suggestions = {
-                    "parameter_suggestions": "Could not parse JSON from response",
-                    "original_response": response
-                }
+                # Extract a summary of the key improvements
+                params_improved = list(suggestions["parameter_suggestions"].keys())
+                summary = f"Parameter optimization for {', '.join(params_improved[:3])}"
+                if len(params_improved) > 3:
+                    summary += f" and {len(params_improved) - 3} more parameters"
+                
+                # Create a task with medium priority
+                create_task_from_strategy_insight(summary, priority="medium")
+            except Exception as e:
+                logger.warning(f"Failed to create task from parameter suggestions: {e}")
         
         return suggestions
     
@@ -495,16 +825,16 @@ class EnhancedEdgeStrategy(EdgeStrategy):
         
         response = chat_with_vectorbt(prompt)
         
-        # Try to parse JSON from the response
-        try:
-            # Attempt to parse JSON directly
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            # If parsing fails, return the raw response
-            result = {
-                "market_condition": market_condition,
-                "raw_response": response
-            }
+        # Use robust JSON parsing
+        result = parse_llm_json(response)
+        
+        # Create task for market condition optimization if it has parameters
+        if isinstance(result, dict) and any(k in result for k in ["parameters", "optimized_parameters", "values"]):
+            try:
+                insight = f"Optimized strategy for {market_condition} market conditions"
+                create_task_from_strategy_insight(insight, priority="high")
+            except Exception as e:
+                logger.warning(f"Failed to create task for market condition optimization: {e}")
         
         return result
     
@@ -544,68 +874,18 @@ class EnhancedEdgeStrategy(EdgeStrategy):
         
         response = chat_with_vectorbt(prompt)
         
-        # Try to parse JSON from the response
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            # If parsing fails, return a structured response with the raw text
-            result = {
-                "diagnosis": "Error parsing JSON response",
-                "solution": "See raw response for details",
-                "raw_response": response
-            }
+        # Use robust JSON parsing
+        result = parse_llm_json(response)
+        
+        # Create high priority task for critical errors
+        if isinstance(result, dict) and "diagnosis" in result and "solution" in result:
+            try:
+                insight = f"Fix portfolio creation error: {result['diagnosis'][:50]}..."
+                create_task_from_strategy_insight(insight, priority="high")
+            except Exception as e:
+                logger.warning(f"Failed to create task for error fix: {e}")
         
         return result
-    
-    def generate_adaptive_strategy(self) -> str:
-        """
-        Generate an adaptive strategy implementation based on ChatVBT recommendations.
-        
-        Returns:
-            Python code as a string for an adaptive version of the edge strategy
-        """
-        logger.info("Generating adaptive strategy implementation")
-        
-        prompt = """
-        Create a Python class for an adaptive trading strategy that:
-        
-        1. Inherits from EdgeMultiFactorStrategy
-        2. Adjusts RSI, Bollinger Bands, and ATR parameters based on current market volatility
-        3. Uses market regime detection to identify trending vs ranging conditions
-        4. Adjusts stop loss and take profit levels dynamically based on ATR
-        5. Includes position sizing that adapts to changing market conditions
-        6. Implements trailing stops for trending markets
-        
-        The implementation should:
-        - Use vectorbtpro for backtesting and optimization
-        - Include detailed comments explaining the adaptive logic
-        - Implement all methods needed for a complete class
-        - Be ready to run with minimal modifications
-        
-        Return ONLY valid Python code without explanations or markdown formatting.
-        """
-        
-        response = chat_with_vectorbt(prompt)
-        
-        # Clean up the response to extract just the code
-        import re
-        
-        # Try to extract code block if it exists
-        code_match = re.search(r'```python\n(.*?)\n```', response, re.DOTALL)
-        if code_match:
-            code = code_match.group(1)
-        else:
-            # If no code block, assume the entire response is code
-            code = response
-        
-        # Add a header comment
-        header = f"""#!/usr/bin/env python3
-# Adaptive Edge Strategy
-# Generated by EdgeStrategyAssistant on {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-# This strategy automatically adapts parameters based on market conditions
-
-"""
-        return header + code
     
     def research_indicator_settings(self, indicator: str) -> Dict[str, Any]:
         """
@@ -638,13 +918,8 @@ class EnhancedEdgeStrategy(EdgeStrategy):
         
         chat_response = chat_with_vectorbt(prompt)
         
-        # Compile the research results
-        try:
-            # Try to parse chat response as JSON
-            parsed_response = json.loads(chat_response)
-        except json.JSONDecodeError:
-            # If parsing fails, use the raw response
-            parsed_response = {"raw_analysis": chat_response}
+        # Use robust JSON parsing
+        parsed_response = parse_llm_json(chat_response)
         
         # Create the complete research package
         research = {
@@ -653,6 +928,13 @@ class EnhancedEdgeStrategy(EdgeStrategy):
             "expert_analysis": parsed_response,
             "timestamp": pd.Timestamp.now().isoformat()
         }
+        
+        # Create task for implementing research findings
+        try:
+            insight = f"Implement optimal {indicator} settings from research"
+            create_task_from_strategy_insight(insight, priority="medium")
+        except Exception as e:
+            logger.warning(f"Failed to create task for indicator research: {e}")
         
         return research
     
@@ -715,12 +997,20 @@ class EnhancedEdgeStrategy(EdgeStrategy):
             
             response = chat_with_vectorbt(prompt)
             
-            # Try to parse JSON from the response
-            try:
-                analysis = json.loads(response)
-            except json.JSONDecodeError:
-                # If parsing fails, use the raw response
-                analysis = {"raw_analysis": response}
+            # Use robust JSON parsing
+            analysis = parse_llm_json(response)
+            
+            # Create tasks from analysis insights if there are recommendations
+            if isinstance(analysis, dict) and "recommendations" in analysis:
+                try:
+                    # Look for recommendations
+                    recommendations = analysis["recommendations"]
+                    if isinstance(recommendations, list) and len(recommendations) > 0:
+                        # Create task for the first recommendation
+                        insight = f"Implement backtest improvement: {recommendations[0][:100]}"
+                        create_task_from_strategy_insight(insight, priority="high")
+                except Exception as e:
+                    logger.warning(f"Failed to create task from backtest analysis: {e}")
             
             # Combine metrics with analysis
             result = {
@@ -737,6 +1027,101 @@ class EnhancedEdgeStrategy(EdgeStrategy):
                 "error": str(e),
                 "timestamp": pd.Timestamp.now().isoformat()
             }
+
+def create_portfolio(data, params, debug=False):
+    """
+    Create a portfolio using the edge strategy with the given parameters.
+    
+    Args:
+        data: Market data (DataFrame or dictionary)
+        params: Strategy parameters
+        debug: Whether to print debug information
+        
+    Returns:
+        tuple: (portfolio, success_flag)
+    """
+    try:
+        # Check if data is valid
+        if data is None:
+            logger.error("Insufficient data for portfolio creation")
+            return None, False
+            
+        # Convert dictionary to DataFrame if needed
+        import pandas as pd
+        if isinstance(data, dict):
+            # Create DataFrame from dictionary of Series
+            df = pd.DataFrame({k: v for k, v in data.items() if isinstance(v, (pd.Series, pd.DataFrame))})
+        else:
+            # Make a copy to avoid modifying the original
+            df = data.copy()
+        
+        # Ensure all required columns are present and numeric
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        
+        # Standardize column names (convert to lowercase)
+        df.columns = [col.lower() for col in df.columns]
+        
+        for col in required_columns:
+            if col not in df.columns:
+                # Try to find a case-insensitive match
+                if isinstance(data, dict) and col.capitalize() in data:
+                    df[col] = data[col.capitalize()]
+                else:
+                    matching_cols = [c for c in df.columns if c.lower() == col.lower()]
+                    if matching_cols:
+                        df[col] = df[matching_cols[0]]
+                    else:
+                        logger.error(f"Missing required column: {col}")
+                        return None, False
+            
+            # Convert to numeric and handle any errors
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Check for NaN values
+        if df[required_columns].isna().any().any():
+            logger.warning("Data contains NaN values. Filling with forward fill method.")
+            df[required_columns] = df[required_columns].fillna(method='ffill')
+            # After filling, check again for any remaining NaNs
+            if df[required_columns].isna().any().any():
+                logger.error("Data still contains NaN values after filling")
+                return None, False
+        
+        # Apply edge strategy with parameters
+        from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
+        
+        # Convert parameters to appropriate types if needed
+        strategy_params = params.copy()
+        
+        # Create the strategy
+        strategy = EdgeMultiFactorStrategy(**strategy_params)
+        
+        # Run the strategy to get entry/exit signals
+        # --- Unpack all four return values --- (Regime masks not used here yet)
+        entry_signals, exit_signals, is_trending, is_ranging = strategy.generate_signals(df)
+        # -------------------------------------
+        
+        # Check if any signals were generated
+        if entry_signals.sum() == 0:
+            logger.warning(f"No entry signals generated with parameters: {params}")
+            return None, False
+            
+        # Create portfolio from signals
+        portfolio, metrics = strategy.backtest_signals(entry_signals, exit_signals)
+        
+        # Debug info if requested
+        if debug:
+            if portfolio is not None:
+                logger.debug(f"Portfolio metrics: {metrics}")
+            else:
+                logger.debug("Portfolio creation failed")
+            
+        return portfolio, True
+        
+    except Exception as e:
+        logger.error(f"Error creating portfolio: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return None, False
 
 def main():
     """Test the Edge Strategy Assistant."""

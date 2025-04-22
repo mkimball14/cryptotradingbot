@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Your rule content
+use the context7 MCP before adding any new dependencies or third party API's etc to check the up-to-date documentation. Do not proceed without first doing research in case your knowledge is out of date.
+
