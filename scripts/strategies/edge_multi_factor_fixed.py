@@ -41,7 +41,23 @@ def create_volatility_regime_indicator(close, lookback_window, vol_filter_window
     vol_ma = vol.vbt.rolling_mean(window=vol_filter_window, minp=vol_filter_window // 2)
     vol_ma_safe = vol_ma.replace(0, np.nan).ffill().bfill()
     vol_ratio = (vol / vol_ma_safe).fillna(1.0)
-    vol_compressed = vol_ratio < volatility_threshold
+    
+    # Print diagnostics about vol_ratio to help debug
+    print(f"Volatility ratio stats - min: {vol_ratio.min():.4f}, max: {vol_ratio.max():.4f}, mean: {vol_ratio.mean():.4f}")
+    print(f"Volatility threshold: {volatility_threshold}")
+    
+    # Count periods where vol_ratio is below threshold (volatility compression)
+    compressed_count = (vol_ratio < volatility_threshold).sum()
+    print(f"Volatility compression periods: {compressed_count}/{len(vol_ratio)} ({compressed_count/len(vol_ratio)*100:.2f}%)")
+    
+    # More sensitive detection - use a higher threshold if no compressions detected with current threshold
+    if compressed_count == 0 and volatility_threshold < 0.9:
+        adjusted_threshold = min(volatility_threshold * 1.5, 0.9)
+        print(f"No compressions detected! Adjusting threshold to {adjusted_threshold:.4f}")
+        vol_compressed = vol_ratio < adjusted_threshold
+    else:
+        vol_compressed = vol_ratio < volatility_threshold
+    
     vol_expansion = vol_ratio.diff().fillna(0) > 0
     
     # Fix: Completely restructure to avoid the warning
@@ -106,7 +122,8 @@ class EdgeMultiFactorStrategy:
                  initial_capital=3000,
                  default_factor_weights=None,
                  commission_pct=0.001,
-                 slippage_pct=0.0005):
+                 slippage_pct=0.0005,
+                 signal_threshold=0.3):
 
         self.lookback_window = int(lookback_window)
         self.vol_filter_window = int(vol_filter_window)
@@ -114,7 +131,7 @@ class EdgeMultiFactorStrategy:
         self.initial_capital = float(initial_capital)
         self.commission_pct = float(commission_pct)
         self.slippage_pct = float(slippage_pct)
-        self.signal_threshold = 0.3  # Lower threshold to generate more signals
+        self.signal_threshold = float(signal_threshold)
 
         if default_factor_weights is None:
             self.factor_weights = {
@@ -166,6 +183,9 @@ class EdgeMultiFactorStrategy:
         # Define market regimes
         is_trending = (adx > 25).fillna(False)
         is_ranging = (adx < 20).fillna(False)
+        
+        # Enhanced logging for market regimes
+        print(f"Market regimes - Trending: {is_trending.sum()}/{len(is_trending)} days, Ranging: {is_ranging.sum()}/{len(is_ranging)} days")
 
         # Calculate individual factor signals
         vol_signal = create_volatility_regime_indicator(
@@ -196,6 +216,22 @@ class EdgeMultiFactorStrategy:
               f"Volume Up: {volume_confirms_up.sum()}, Buying: {buying_pressure.sum()}")
         print(f"Signal components - Breakout Down: {breakout_down.sum()}, " + 
               f"Volume Down: {volume_confirms_down.sum()}, Selling: {selling_pressure.sum()}")
+              
+        # Enhanced logging for factor triggers with percentages
+        print(f"Factor triggers - Vol: {vol_signal.sum()}/{len(vol_signal)} ({vol_signal.sum()/len(vol_signal)*100:.2f}%)")
+        print(f"Factor triggers - Breakout Up: {breakout_up.sum()}/{len(breakout_up)} ({breakout_up.sum()/len(breakout_up)*100:.2f}%)")
+        print(f"Factor triggers - Volume Up: {volume_confirms_up.sum()}/{len(volume_confirms_up)} ({volume_confirms_up.sum()/len(volume_confirms_up)*100:.2f}%)")
+        print(f"Factor triggers - Buying: {buying_pressure.sum()}/{len(buying_pressure)} ({buying_pressure.sum()/len(buying_pressure)*100:.2f}%)")
+        
+        # Output factor triggers by date
+        if vol_signal.sum() > 0:
+            print(f"Vol signal true at: {vol_signal[vol_signal].index[:5].tolist()}")
+        if breakout_up.sum() > 0:
+            print(f"Breakout up true at: {breakout_up[breakout_up].index[:5].tolist()}")
+        if volume_confirms_up.sum() > 0:
+            print(f"Volume confirms up true at: {volume_confirms_up[volume_confirms_up].index[:5].tolist()}")
+        if buying_pressure.sum() > 0:
+            print(f"Buying pressure true at: {buying_pressure[buying_pressure].index[:5].tolist()}")
 
         # Combine signals using weights
         long_signal = pd.Series(0.0, index=data.index)
@@ -211,6 +247,11 @@ class EdgeMultiFactorStrategy:
         short_signal += breakout_down.astype(float) * self.factor_weights.get('consolidation_breakout', 0)
         short_signal += volume_confirms_down.astype(float) * self.factor_weights.get('volume_divergence', 0)
         short_signal += selling_pressure.astype(float) * self.factor_weights.get('market_microstructure', 0)
+        
+        # Enhanced logging for signal weights
+        print(f"Signal weights - Long: min={long_signal.min():.3f}, max={long_signal.max():.3f}, mean={long_signal.mean():.3f}")
+        print(f"Signal weights - Short: min={short_signal.min():.3f}, max={short_signal.max():.3f}, mean={short_signal.mean():.3f}")
+        print(f"Threshold for entry signals: {self.signal_threshold}")
 
         # Generate entries based on signal threshold
         long_entries = long_signal > self.signal_threshold
@@ -224,6 +265,9 @@ class EdgeMultiFactorStrategy:
         # Apply market regime adaptation (optional)
         trend_up = is_trending & (data['close'] > data['close'].shift(self.lookback_window))
         trend_down = is_trending & (data['close'] < data['close'].shift(self.lookback_window))
+        
+        # Enhanced logging for trend directions
+        print(f"Trend directions - Up: {trend_up.sum()}/{is_trending.sum()}, Down: {trend_down.sum()}/{is_trending.sum()}")
         
         # Fix: Create temporary boolean masks to avoid dtype incompatibility warnings
         long_adjusted_up = (long_signal[trend_up] > (self.signal_threshold * 0.7)).astype(bool)
@@ -371,44 +415,14 @@ def calculate_performance_metrics(portfolio):
         # Handle both direct property access and dataframe access
         try:
             # Try to get metrics directly from trades object
-            if hasattr(trades, 'count'):
+            if callable(trades.count):
                 # Handle count as both method and attribute
-                if callable(trades.count):
-                    metrics['total_trades'] = trades.count()
-                else:
-                    metrics['total_trades'] = trades.count
-                
-                metrics['win_rate'] = trades.win_rate
-                metrics['profit_factor'] = trades.profit_factor
-            # If that fails, use the records_readable DataFrame
-            elif hasattr(trades, 'records_readable'):
-                trades_df = trades.records_readable
-                
-                # Handle both 'pnl' and 'PnL' column names
-                pnl_col = None
-                if 'PnL' in trades_df.columns:
-                    pnl_col = 'PnL'
-                elif 'pnl' in trades_df.columns:
-                    pnl_col = 'pnl'
-                
-                if pnl_col is not None:
-                    winning_trades = trades_df[trades_df[pnl_col] > 0]
-                    losing_trades = trades_df[trades_df[pnl_col] <= 0]
-                    
-                    metrics['total_trades'] = len(trades_df)
-                    metrics['winning_trades'] = len(winning_trades)
-                    metrics['losing_trades'] = len(losing_trades)
-                    metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
-                    
-                    # Calculate profit factor
-                    total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
-                    total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
-                    metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
-                else:
-                    # Fallback if no pnl column is found
-                    metrics['total_trades'] = len(trades_df)
-                    metrics['win_rate'] = 0.0
-                    metrics['profit_factor'] = 0.0
+                metrics['total_trades'] = trades.count()
+            else:
+                metrics['total_trades'] = trades.count
+            
+            metrics['win_rate'] = trades.win_rate
+            metrics['profit_factor'] = trades.profit_factor
         except Exception as e:
             import logging
             logging.warning(f"Error calculating trade metrics: {str(e)}")

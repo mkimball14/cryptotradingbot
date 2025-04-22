@@ -518,7 +518,7 @@ if STEP_DAYS > OUT_SAMPLE_DAYS:
 
 # --- Data Parameters ---
 # Use a longer period to ensure enough data for signal generation
-TOTAL_HISTORY_DAYS = 365 # Full year of data
+TOTAL_HISTORY_DAYS = 500 # Full year of data
 WFO_END_DATE = datetime.now().strftime('%Y-%m-%d')
 WFO_START_DATE = (datetime.now() - timedelta(days=TOTAL_HISTORY_DAYS)).strftime('%Y-%m-%d')
 SYMBOL = "BTC-USD"
@@ -970,6 +970,214 @@ def optimize_parameters(data, params_space, n_trials=50, progress_callback=None,
                     logging.error(f"Required column {col} not found in data. Available columns: {data_copy.columns.tolist()}")
                     return {}, float('-inf'), []
     
+    # --- MOVED evaluate_portfolio function definition ---
+    def evaluate_portfolio(portfolio):
+        """
+        Calculate performance metrics for a portfolio.
+
+        Args:
+            portfolio: The portfolio object with trades data
+
+        Returns:
+            dict: Performance metrics
+        """
+        import numpy as np
+
+        metrics = {}
+
+        try:
+            # Basic metrics - check if attributes exist and are callable
+            # Get total_return safely
+            if hasattr(portfolio, 'total_return'):
+                if callable(getattr(portfolio, 'total_return')):
+                    metrics['total_return'] = portfolio.total_return()
+                else:
+                    # If it's a property/attribute instead of a method
+                    metrics['total_return'] = portfolio.total_return
+            else:
+                # Try alternative ways to calculate return
+                try:
+                    if hasattr(portfolio, 'final_value') and hasattr(portfolio, 'init_cash'):
+                        metrics['total_return'] = (portfolio.final_value / portfolio.init_cash) - 1
+                    else:
+                        metrics['total_return'] = 0.0
+                except:
+                    metrics['total_return'] = 0.0
+
+            # Get max_drawdown safely
+            if hasattr(portfolio, 'max_drawdown'):
+                if callable(getattr(portfolio, 'max_drawdown')):
+                    metrics['max_drawdown'] = portfolio.max_drawdown()
+                else:
+                    metrics['max_drawdown'] = portfolio.max_drawdown
+            else:
+                metrics['max_drawdown'] = 0.0
+
+            # Trading metrics
+            trades = portfolio.trades if hasattr(portfolio, 'trades') else None
+            if trades is not None and hasattr(trades, '__len__') and len(trades) > 0:
+                # metrics['total_trades'] = len(trades) # Initialize here, may be updated below
+
+                # NEW METHOD: Use vectorbt's built-in properties for win rate and profit factor
+                if hasattr(trades, 'win_rate') and hasattr(trades, 'profit_factor'):
+                    # Get trade count safely
+                    trade_count_value = 0
+                    if hasattr(trades, 'count'):
+                        if callable(trades.count):
+                            trade_count_value = trades.count()
+                        else:
+                            trade_count_value = trades.count
+                    else:
+                        # Fallback if .count is missing
+                        trade_count_value = len(trades)
+
+                    metrics['total_trades'] = trade_count_value # Update total_trades
+                    # Use the obtained count value for calculations
+                    metrics['winning_trades'] = int(trade_count_value * trades.win_rate)
+                    metrics['losing_trades'] = int(trade_count_value * (1 - trades.win_rate))
+                    metrics['win_rate'] = trades.win_rate
+                    metrics['profit_factor'] = trades.profit_factor
+                # ALTERNATIVE METHOD: Use the records_readable DataFrame
+                elif hasattr(trades, 'records_readable'):
+                    try:
+                        trades_df = trades.records_readable
+                        # Handle both 'pnl' and 'PnL' column names
+                        pnl_col = None
+                        if 'PnL' in trades_df.columns:
+                            pnl_col = 'PnL'
+                        elif 'pnl' in trades_df.columns:
+                            pnl_col = 'pnl'
+
+                        if pnl_col is not None:
+                            winning_trades = trades_df[trades_df[pnl_col] > 0]
+                            losing_trades = trades_df[trades_df[pnl_col] <= 0]
+
+                            metrics['winning_trades'] = len(winning_trades)
+                            metrics['losing_trades'] = len(losing_trades)
+                            metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
+
+                            # Calculate profit factor
+                            total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
+                            total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
+                            metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
+                        else:
+                            logging.warning("Neither 'PnL' nor 'pnl' column found in trades dataframe")
+                            metrics['winning_trades'] = 0
+                            metrics['losing_trades'] = 0
+                            metrics['win_rate'] = 0.0
+                            metrics['profit_factor'] = 0.0
+                    except Exception as e:
+                        logging.warning(f"Failed to process trades using records_readable: {e}")
+                        metrics['winning_trades'] = 0
+                        metrics['losing_trades'] = 0
+                        metrics['win_rate'] = 0.0
+                        metrics['profit_factor'] = 0.0
+                else:
+                    # Fallback to default values
+                    metrics['winning_trades'] = 0
+                    metrics['losing_trades'] = 0
+                    metrics['win_rate'] = 0.0
+                    metrics['profit_factor'] = 0.0
+            else:
+                # Default values if no trades
+                metrics['total_trades'] = 0
+                metrics['winning_trades'] = 0
+                metrics['losing_trades'] = 0
+                metrics['win_rate'] = 0.0
+                metrics['profit_factor'] = 0.0
+
+            # Risk metrics - get returns safely
+            if hasattr(portfolio, 'returns'):
+                if callable(getattr(portfolio, 'returns')):
+                    returns = portfolio.returns()
+                else:
+                    returns = portfolio.returns
+            else:
+                returns = None
+
+            # Process returns for risk metrics
+            if returns is not None:
+                try:
+                    # Convert to numpy array if it's not already
+                    returns_array = np.array(returns)
+
+                    if len(returns_array) > 0:
+                        # Annualized returns (assuming daily data)
+                        annualized_return = np.mean(returns_array) * 252
+                        annualized_vol = np.std(returns_array) * np.sqrt(252)
+                        risk_free_rate = 0.02  # 2% risk-free rate assumption
+
+                        # Sharpe ratio
+                        metrics['sharpe_ratio'] = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol != 0 else 0
+
+                        # Sortino ratio (downside risk)
+                        downside_returns = returns_array[returns_array < 0]
+                        downside_vol = np.std(downside_returns) * np.sqrt(252) if len(downside_returns) > 0 else annualized_vol
+                        metrics['sortino_ratio'] = (annualized_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0
+
+                        # Average trade
+                        if metrics['total_trades'] > 0:
+                            metrics['avg_trade_pct'] = metrics['total_return'] / metrics['total_trades']
+                        else:
+                            metrics['avg_trade_pct'] = 0.0
+                    else:
+                        metrics['sharpe_ratio'] = 0.0
+                        metrics['sortino_ratio'] = 0.0
+                        metrics['avg_trade_pct'] = 0.0
+                except Exception as e:
+                    logging.warning(f"Error processing returns: {e}")
+                    metrics['sharpe_ratio'] = 0.0
+                    metrics['sortino_ratio'] = 0.0
+                    metrics['avg_trade_pct'] = 0.0
+            else:
+                metrics['sharpe_ratio'] = 0.0
+                metrics['sortino_ratio'] = 0.0
+                metrics['avg_trade_pct'] = 0.0
+
+            # Exposure metrics
+            if hasattr(portfolio, 'cash') and hasattr(portfolio, 'value'):
+                try:
+                    cash_series = np.array(portfolio.cash)
+                    value_series = np.array(portfolio.value)
+
+                    # Average market exposure
+                    if len(cash_series) > 0 and len(value_series) > 0:
+                        exposure = 1 - (cash_series / value_series)
+                        metrics['avg_exposure'] = float(np.mean(exposure))
+                        metrics['max_exposure'] = float(np.max(exposure))
+                    else:
+                        metrics['avg_exposure'] = 0.0
+                        metrics['max_exposure'] = 0.0
+                except Exception as e:
+                    logging.warning(f"Error calculating exposure metrics: {e}")
+                    metrics['avg_exposure'] = 0.0
+                    metrics['max_exposure'] = 0.0
+            else:
+                metrics['avg_exposure'] = 0.0
+                metrics['max_exposure'] = 0.0
+
+        except Exception as e:
+            logging.error(f"Error calculating metrics: {str(e)}")
+            import traceback
+            logging.debug(traceback.format_exc())
+
+            # Return basic metrics if calculation fails
+            if 'total_return' not in metrics:
+                metrics['total_return'] = 0.0
+            if 'max_drawdown' not in metrics:
+                metrics['max_drawdown'] = 0.0
+            if 'total_trades' not in metrics:
+                metrics['total_trades'] = 0
+            if 'win_rate' not in metrics:
+                metrics['win_rate'] = 0.0
+            if 'sharpe_ratio' not in metrics:
+                metrics['sharpe_ratio'] = 0.0
+            if 'profit_factor' not in metrics:
+                metrics['profit_factor'] = 0.0
+
+        return metrics
+    # --- END MOVED evaluate_portfolio function ---
+
     def objective(trial):
         """Sample parameters and evaluate portfolio performance"""
         params = {}
@@ -1297,7 +1505,7 @@ def run_walk_forward_optimization():
     TIMEFRAME = "1d"
     LOOKBACK_DAYS = 365
     TRAIN_SIZE = 0.7  # 70% of data used for training
-    WINDOW_DAYS = 120  # Size of each WFO window
+    WINDOW_DAYS = 160  # Size of each WFO window
     STEP_DAYS = 40     # Number of days to step forward each iteration
     OUT_SAMPLE_DAYS = 40  # Number of days in out-of-sample period
     N_TRIALS = 50      # Number of optimization trials per window
@@ -2324,199 +2532,6 @@ def handle_portfolio_error(error, params):
             
     # Return true to continue optimization
     return True
-
-def evaluate_portfolio(portfolio):
-    """
-    Calculate performance metrics for a portfolio.
-    
-    Args:
-        portfolio: The portfolio object with trades data
-        
-    Returns:
-        dict: Performance metrics
-    """
-    import numpy as np
-    
-    metrics = {}
-    
-    try:
-        # Basic metrics - check if attributes exist and are callable
-        # Get total_return safely
-        if hasattr(portfolio, 'total_return'):
-            if callable(getattr(portfolio, 'total_return')):
-                metrics['total_return'] = portfolio.total_return()
-            else:
-                # If it's a property/attribute instead of a method
-                metrics['total_return'] = portfolio.total_return
-        else:
-            # Try alternative ways to calculate return
-            try:
-                if hasattr(portfolio, 'final_value') and hasattr(portfolio, 'init_cash'):
-                    metrics['total_return'] = (portfolio.final_value / portfolio.init_cash) - 1
-                else:
-                    metrics['total_return'] = 0.0
-            except:
-                metrics['total_return'] = 0.0
-        
-        # Get max_drawdown safely
-        if hasattr(portfolio, 'max_drawdown'):
-            if callable(getattr(portfolio, 'max_drawdown')):
-                metrics['max_drawdown'] = portfolio.max_drawdown()
-            else:
-                metrics['max_drawdown'] = portfolio.max_drawdown
-        else:
-            metrics['max_drawdown'] = 0.0
-        
-        # Trading metrics
-        trades = portfolio.trades if hasattr(portfolio, 'trades') else None
-        if trades is not None and hasattr(trades, '__len__') and len(trades) > 0:
-            metrics['total_trades'] = len(trades)
-            
-            # NEW METHOD: Use vectorbt's built-in properties for win rate and profit factor
-            if hasattr(trades, 'win_rate') and hasattr(trades, 'profit_factor'):
-                metrics['winning_trades'] = int(trades.count * trades.win_rate)
-                metrics['losing_trades'] = int(trades.count * (1 - trades.win_rate))
-                metrics['win_rate'] = trades.win_rate
-                metrics['profit_factor'] = trades.profit_factor
-            # ALTERNATIVE METHOD: Use the records_readable DataFrame
-            elif hasattr(trades, 'records_readable'):
-                try:
-                    trades_df = trades.records_readable
-                    # Handle both 'pnl' and 'PnL' column names
-                    pnl_col = None
-                    if 'PnL' in trades_df.columns:
-                        pnl_col = 'PnL'
-                    elif 'pnl' in trades_df.columns:
-                        pnl_col = 'pnl'
-                    
-                    if pnl_col is not None:
-                        winning_trades = trades_df[trades_df[pnl_col] > 0]
-                        losing_trades = trades_df[trades_df[pnl_col] <= 0]
-                        
-                        metrics['winning_trades'] = len(winning_trades)
-                        metrics['losing_trades'] = len(losing_trades)
-                        metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
-                        
-                        # Calculate profit factor
-                        total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
-                        total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
-                        metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
-                    else:
-                        logging.warning("Neither 'PnL' nor 'pnl' column found in trades dataframe")
-                        metrics['winning_trades'] = 0
-                        metrics['losing_trades'] = 0
-                        metrics['win_rate'] = 0.0
-                        metrics['profit_factor'] = 0.0
-                except Exception as e:
-                    logging.warning(f"Failed to process trades using records_readable: {e}")
-                    metrics['winning_trades'] = 0
-                    metrics['losing_trades'] = 0
-                    metrics['win_rate'] = 0.0
-                    metrics['profit_factor'] = 0.0
-            else:
-                # Fallback to default values
-                metrics['winning_trades'] = 0
-                metrics['losing_trades'] = 0
-                metrics['win_rate'] = 0.0
-                metrics['profit_factor'] = 0.0
-        else:
-            # Default values if no trades
-            metrics['total_trades'] = 0
-            metrics['winning_trades'] = 0
-            metrics['losing_trades'] = 0
-            metrics['win_rate'] = 0.0
-            metrics['profit_factor'] = 0.0
-        
-        # Risk metrics - get returns safely
-        if hasattr(portfolio, 'returns'):
-            if callable(getattr(portfolio, 'returns')):
-                returns = portfolio.returns()
-            else:
-                returns = portfolio.returns
-        else:
-            returns = None
-        
-        # Process returns for risk metrics
-        if returns is not None:
-            try:
-                # Convert to numpy array if it's not already
-                returns_array = np.array(returns)
-                
-                if len(returns_array) > 0:
-                    # Annualized returns (assuming daily data)
-                    annualized_return = np.mean(returns_array) * 252
-                    annualized_vol = np.std(returns_array) * np.sqrt(252)
-                    risk_free_rate = 0.02  # 2% risk-free rate assumption
-                    
-                    # Sharpe ratio
-                    metrics['sharpe_ratio'] = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol != 0 else 0
-                    
-                    # Sortino ratio (downside risk)
-                    downside_returns = returns_array[returns_array < 0]
-                    downside_vol = np.std(downside_returns) * np.sqrt(252) if len(downside_returns) > 0 else annualized_vol
-                    metrics['sortino_ratio'] = (annualized_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0
-                    
-                    # Average trade
-                    if metrics['total_trades'] > 0:
-                        metrics['avg_trade_pct'] = metrics['total_return'] / metrics['total_trades']
-                    else:
-                        metrics['avg_trade_pct'] = 0.0
-                else:
-                    metrics['sharpe_ratio'] = 0.0
-                    metrics['sortino_ratio'] = 0.0
-                    metrics['avg_trade_pct'] = 0.0
-            except Exception as e:
-                logging.warning(f"Error processing returns: {e}")
-                metrics['sharpe_ratio'] = 0.0
-                metrics['sortino_ratio'] = 0.0
-                metrics['avg_trade_pct'] = 0.0
-        else:
-            metrics['sharpe_ratio'] = 0.0
-            metrics['sortino_ratio'] = 0.0
-            metrics['avg_trade_pct'] = 0.0
-        
-        # Exposure metrics
-        if hasattr(portfolio, 'cash') and hasattr(portfolio, 'value'):
-            try:
-                cash_series = np.array(portfolio.cash)
-                value_series = np.array(portfolio.value)
-                
-                # Average market exposure
-                if len(cash_series) > 0 and len(value_series) > 0:
-                    exposure = 1 - (cash_series / value_series)
-                    metrics['avg_exposure'] = float(np.mean(exposure))
-                    metrics['max_exposure'] = float(np.max(exposure))
-                else:
-                    metrics['avg_exposure'] = 0.0
-                    metrics['max_exposure'] = 0.0
-            except Exception as e:
-                logging.warning(f"Error calculating exposure metrics: {e}")
-                metrics['avg_exposure'] = 0.0
-                metrics['max_exposure'] = 0.0
-        else:
-            metrics['avg_exposure'] = 0.0
-            metrics['max_exposure'] = 0.0
-        
-    except Exception as e:
-        logging.error(f"Error calculating metrics: {str(e)}")
-        import traceback
-        logging.debug(traceback.format_exc())
-        
-        # Return basic metrics if calculation fails
-        if 'total_return' not in metrics:
-            metrics['total_return'] = 0.0
-        if 'max_drawdown' not in metrics:
-            metrics['max_drawdown'] = 0.0
-        if 'total_trades' not in metrics:
-            metrics['total_trades'] = 0
-        if 'win_rate' not in metrics:
-            metrics['win_rate'] = 0.0
-        if 'sharpe_ratio' not in metrics:
-            metrics['sharpe_ratio'] = 0.0
-        if 'profit_factor' not in metrics:
-            metrics['profit_factor'] = 0.0
-    
-    return metrics
 
 def progress_callback(study, trial=None):
     """Callback function for Optuna to track optimization progress"""
