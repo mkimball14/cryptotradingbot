@@ -8,6 +8,9 @@ from pathlib import Path
 import argparse
 from datetime import datetime
 import itertools
+from collections import defaultdict
+import ta
+import traceback
 
 # --- Basic Setup ---
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -89,13 +92,95 @@ def create_consolidation_breakout_indicator(high, low, close, lookback_window):
     breakout_down = (close < lower_level_shifted) & is_consolidating_shifted
     return breakout_up, breakout_down
 
-def create_volume_divergence_indicator(volume, lookback_window, breakout_up, breakout_down):
-    """Calculates volume confirmation signals based on pre-calculated breakouts."""
+def create_volume_divergence_indicator(volume, lookback_window, breakout_up, breakout_down, 
+                               volume_threshold=1.1, volume_threshold_short=1.05, volume_roc_threshold=0.1,
+                               is_trending=None, is_ranging=None):
+    """Calculates volume confirmation signals based on pre-calculated breakouts.
+    
+    Args:
+        volume: Series of volume data
+        lookback_window: Window for lookback period
+        breakout_up: Boolean series indicating upward breakouts
+        breakout_down: Boolean series indicating downward breakouts
+        volume_threshold: Main volume ratio threshold
+        volume_threshold_short: Short-term volume ratio threshold
+        volume_roc_threshold: Rate of change threshold for volume
+        is_trending: Boolean series indicating trending market periods
+        is_ranging: Boolean series indicating ranging market periods
+    """
+    # Get shorter window MA for faster reaction to volume changes
+    volume_short_ma = volume.vbt.rolling_mean(window=lookback_window//2, minp=max(3, lookback_window//4))
     volume_ma = volume.vbt.rolling_mean(window=lookback_window, minp=lookback_window // 2)
     volume_ma_safe = volume_ma.replace(0, np.nan).ffill().bfill()
+    
+    # Calculate volume ratios against different lookback periods
     vol_ratio_vol = (volume / volume_ma_safe).fillna(1.0)
-    volume_confirms_up = (vol_ratio_vol > 1.5) & breakout_up
-    volume_confirms_down = (vol_ratio_vol > 1.5) & breakout_down
+    vol_ratio_short = (volume / volume_short_ma.replace(0, np.nan).ffill().bfill()).fillna(1.0)
+    
+    # Print volume ratio statistics for debugging
+    print(f"Volume ratio stats - min: {vol_ratio_vol.min():.4f}, max: {vol_ratio_vol.max():.4f}, mean: {vol_ratio_vol.mean():.4f}")
+    print(f"Short-term volume ratio - min: {vol_ratio_short.min():.4f}, max: {vol_ratio_short.max():.4f}, mean: {vol_ratio_short.mean():.4f}")
+    print(f"Base volume thresholds - main: {volume_threshold}, short-term: {volume_threshold_short}, ROC: {volume_roc_threshold}")
+    
+    # Apply market regime-based threshold adjustments if regime data is provided
+    adapted_volume_threshold = pd.Series(volume_threshold, index=volume.index)
+    adapted_volume_threshold_short = pd.Series(volume_threshold_short, index=volume.index)
+    adapted_roc_threshold = pd.Series(volume_roc_threshold, index=volume.index)
+    
+    if is_trending is not None and is_ranging is not None:
+        # Make volume thresholds more strict during trending periods (reduce false signals)
+        trending_adjustment = 1.2  # Increase threshold by 20% during trends
+        ranging_adjustment = 0.85  # Decrease threshold by 15% during ranges
+        
+        # Apply adjustments based on market regimes
+        adapted_volume_threshold[is_trending] *= trending_adjustment
+        adapted_volume_threshold[is_ranging] *= ranging_adjustment
+        
+        adapted_volume_threshold_short[is_trending] *= trending_adjustment
+        adapted_volume_threshold_short[is_ranging] *= ranging_adjustment
+        
+        # Adjust ROC threshold as well
+        adapted_roc_threshold[is_trending] *= 1.1
+        adapted_roc_threshold[is_ranging] *= 0.9
+        
+        print(f"Market regime adjustments - Trending: +20%, Ranging: -15%")
+        print(f"Adjusted volume threshold range: {adapted_volume_threshold.min():.4f} to {adapted_volume_threshold.max():.4f}")
+    
+    # Count periods where volume ratio exceeds threshold
+    high_volume_count = (vol_ratio_vol > adapted_volume_threshold).sum()
+    high_volume_short_count = (vol_ratio_short > adapted_volume_threshold_short).sum()
+    print(f"High volume periods: {high_volume_count}/{len(vol_ratio_vol)} ({high_volume_count/len(vol_ratio_vol)*100:.2f}%)")
+    print(f"High short-term volume periods: {high_volume_short_count}/{len(vol_ratio_short)} ({high_volume_short_count/len(vol_ratio_short)*100:.2f}%)")
+    
+    # Enhanced volume detection - consider multiple volume indicators
+    # 1. Relative volume compared to lookback period
+    # 2. Relative volume compared to short-term lookback
+    # 3. Rate of change in volume
+    # 4. Consecutive increasing volume bars
+    
+    # Calculate volume rate of change
+    volume_roc = volume.pct_change(3).fillna(0)  # 3-period rate of change
+    volume_increasing = volume_roc > adapted_roc_threshold  # ROC threshold
+    
+    # Detect consecutive increasing volume (2 or more bars)
+    vol_change = volume.diff().fillna(0)
+    consecutive_increasing = (vol_change > 0) & (vol_change.shift(1) > 0)
+    
+    # More sensitive volume confirmation using multiple indicators
+    volume_confirms_up = (
+        (vol_ratio_vol > adapted_volume_threshold) | 
+        (vol_ratio_short > adapted_volume_threshold_short) | 
+        volume_increasing | 
+        consecutive_increasing
+    ) & breakout_up
+    
+    volume_confirms_down = (
+        (vol_ratio_vol > adapted_volume_threshold) | 
+        (vol_ratio_short > adapted_volume_threshold_short) | 
+        volume_increasing | 
+        consecutive_increasing
+    ) & breakout_down
+    
     return volume_confirms_up, volume_confirms_down
 
 def create_market_microstructure_indicator(open, high, low, close):
@@ -108,219 +193,434 @@ def create_market_microstructure_indicator(open, high, low, close):
     selling_pressure = shadow_ratio > 0.5
     return buying_pressure, selling_pressure
 
+def create_regime_specific_exits(close, high, low, volume, 
+                             long_entries, short_entries,
+                             is_trending, is_ranging,
+                             volume_threshold, volume_threshold_short,
+                             lookback_window,
+                             trending_tp_multiplier, trending_sl_multiplier,
+                             ranging_tp_multiplier, ranging_sl_multiplier,
+                             max_bars_exit):
+    """
+    Generate exit signals based on market conditions.
+    
+    This function creates exit signals for both long and short positions based on:
+    1. Market regime (trending vs ranging)
+    2. Volatility-based stops and targets
+    3. Volume-based exhaustion signals
+    4. Time-based exits
+    
+    Args:
+        close: Series of closing prices
+        high: Series of high prices
+        low: Series of low prices
+        volume: Series of volume data
+        long_entries: Series of boolean long entry signals
+        short_entries: Series of boolean short entry signals
+        is_trending: Series of boolean trending market signals
+        is_ranging: Series of boolean ranging market signals
+        volume_threshold: Volume threshold for detecting breakouts
+        volume_threshold_short: Short-term volume threshold
+        lookback_window: Window for lookback calculations
+        trending_tp_multiplier: ATR multiplier for take profit in trending markets
+        trending_sl_multiplier: ATR multiplier for stop loss in trending markets
+        ranging_tp_multiplier: ATR multiplier for take profit in ranging markets
+        ranging_sl_multiplier: ATR multiplier for stop loss in ranging markets
+        max_bars_exit: Maximum number of bars to hold a position
+        
+    Returns:
+        Tuple of (long_exits, short_exits)
+    """
+    # Initialize exit signals
+    long_exits = pd.Series(False, index=close.index)
+    short_exits = pd.Series(False, index=close.index)
+    
+    # Calculate ATR for volatility-based exits
+    atr = vbt.ATR.run(high, low, close, window=14).atr.bfill()
+    
+    # Initialize position tracking
+    in_long_position = pd.Series(False, index=close.index)
+    in_short_position = pd.Series(False, index=close.index)
+    position_entry_price = pd.Series(0.0, index=close.index)
+    position_bars = pd.Series(0, index=close.index)
+    
+    # Process each bar
+    for i in range(1, len(close)):
+        # Skip first few bars due to lookback requirements
+        if i < lookback_window:
+            continue
+            
+        # Update position tracking
+        if long_entries.iloc[i-1]:
+            in_long_position.iloc[i] = True
+            position_entry_price.iloc[i] = close.iloc[i-1]
+            position_bars.iloc[i] = 1
+        elif short_entries.iloc[i-1]:
+            in_short_position.iloc[i] = True
+            position_entry_price.iloc[i] = close.iloc[i-1]
+            position_bars.iloc[i] = 1
+        elif in_long_position.iloc[i-1] and not long_exits.iloc[i-1]:
+            in_long_position.iloc[i] = True
+            position_entry_price.iloc[i] = position_entry_price.iloc[i-1]
+            position_bars.iloc[i] = position_bars.iloc[i-1] + 1
+        elif in_short_position.iloc[i-1] and not short_exits.iloc[i-1]:
+            in_short_position.iloc[i] = True
+            position_entry_price.iloc[i] = position_entry_price.iloc[i-1]
+            position_bars.iloc[i] = position_bars.iloc[i-1] + 1
+            
+        # Skip if not in position
+        if not in_long_position.iloc[i] and not in_short_position.iloc[i]:
+            continue
+            
+        # Get current ATR and regime state
+        current_atr = atr.iloc[i]
+        current_trending = is_trending.iloc[i]
+        current_ranging = is_ranging.iloc[i]
+        
+        # Calculate regime-specific exit levels
+        if in_long_position.iloc[i]:
+            entry_price = position_entry_price.iloc[i]
+            
+            # Calculate take profit and stop loss levels based on market regime
+            if current_trending:
+                take_profit = entry_price + (current_atr * trending_tp_multiplier)
+                stop_loss = entry_price - (current_atr * trending_sl_multiplier)
+            else:  # ranging market
+                take_profit = entry_price + (current_atr * ranging_tp_multiplier)
+                stop_loss = entry_price - (current_atr * ranging_sl_multiplier)
+                
+            # Check for price-based exits
+            if close.iloc[i] >= take_profit or close.iloc[i] <= stop_loss:
+                long_exits.iloc[i] = True
+                
+            # Check for volume exhaustion in long position (declining volume after surge)
+            volume_ma = volume.iloc[i-lookback_window:i].mean()
+            recent_volume_ma = volume.iloc[i-5:i].mean()
+            
+            # Volume exhaustion exit for longs: volume drying up after position entry
+            if current_trending and recent_volume_ma < volume_ma * 0.7:
+                long_exits.iloc[i] = True
+                
+            # Faster exits in ranging markets if the trade isn't working quickly
+            if current_ranging and close.iloc[i] < entry_price and position_bars.iloc[i] > 3:
+                long_exits.iloc[i] = True
+                
+        # Similar logic for short positions
+        if in_short_position.iloc[i]:
+            entry_price = position_entry_price.iloc[i]
+            
+            # Calculate take profit and stop loss levels based on market regime
+            if current_trending:
+                take_profit = entry_price - (current_atr * trending_tp_multiplier)
+                stop_loss = entry_price + (current_atr * trending_sl_multiplier)
+            else:  # ranging market
+                take_profit = entry_price - (current_atr * ranging_tp_multiplier)
+                stop_loss = entry_price + (current_atr * ranging_sl_multiplier)
+                
+            # Check for price-based exits
+            if close.iloc[i] <= take_profit or close.iloc[i] >= stop_loss:
+                short_exits.iloc[i] = True
+                
+            # Check for volume exhaustion in short position (declining volume after surge)
+            volume_ma = volume.iloc[i-lookback_window:i].mean()
+            recent_volume_ma = volume.iloc[i-5:i].mean()
+            
+            # Volume exhaustion exit for shorts: volume drying up after position entry
+            if current_trending and recent_volume_ma < volume_ma * 0.7:
+                short_exits.iloc[i] = True
+                
+            # Faster exits in ranging markets if the trade isn't working quickly
+            if current_ranging and close.iloc[i] > entry_price and position_bars.iloc[i] > 3:
+                short_exits.iloc[i] = True
+        
+        # Time-based exit - max holding period
+        if (in_long_position.iloc[i] and position_bars.iloc[i] >= max_bars_exit):
+            long_exits.iloc[i] = True
+        if (in_short_position.iloc[i] and position_bars.iloc[i] >= max_bars_exit):
+            short_exits.iloc[i] = True
+            
+    return long_exits, short_exits
+
+def create_rsi_signals(close, window=14, overbought=70, oversold=30, smoothing=2):
+    """
+    Create RSI-based signals.
+    
+    Args:
+        close: Series of closing prices
+        window: RSI calculation window
+        overbought: Overbought threshold
+        oversold: Oversold threshold
+        smoothing: Signal smoothing period
+        
+    Returns:
+        tuple: (long_signals, short_signals)
+    """
+    try:
+        from app.strategies.indicators.technical import calculate_rsi
+        
+        # Calculate RSI
+        rsi = calculate_rsi(pd.DataFrame({'close': close}), period=window)
+        
+        # Generate signals
+        long_signal = rsi < oversold
+        short_signal = rsi > overbought
+        
+        # Apply smoothing if needed
+        if smoothing > 1:
+            long_signal = long_signal.rolling(window=smoothing).sum() > 0
+            short_signal = short_signal.rolling(window=smoothing).sum() > 0
+            
+        return long_signal, short_signal
+    except Exception as e:
+        print(f"Error generating RSI signals: {e}")
+        return pd.Series(False, index=close.index), pd.Series(False, index=close.index)
+
+def create_bollinger_signals(close, window=20, std_dev=2.0, smoothing=2):
+    """
+    Create Bollinger Bands signals.
+    
+    Args:
+        close: Series of closing prices
+        window: Bollinger Bands window
+        std_dev: Standard deviation multiplier
+        smoothing: Signal smoothing period
+        
+    Returns:
+        tuple: (long_signals, short_signals)
+    """
+    try:
+        # Calculate Bollinger Bands
+        ma = close.rolling(window=window).mean()
+        std = close.rolling(window=window).std()
+        
+        upper_band = ma + (std * std_dev)
+        lower_band = ma - (std * std_dev)
+        
+        # Generate signals
+        long_signal = close < lower_band
+        short_signal = close > upper_band
+        
+        # Apply smoothing if needed
+        if smoothing > 1:
+            long_signal = long_signal.rolling(window=smoothing).sum() > 0
+            short_signal = short_signal.rolling(window=smoothing).sum() > 0
+            
+        return long_signal, short_signal
+    except Exception as e:
+        print(f"Error generating Bollinger Bands signals: {e}")
+        return pd.Series(False, index=close.index), pd.Series(False, index=close.index)
+
+def create_macd_signals(close, fast_period=12, slow_period=26, signal_period=9, smoothing=2):
+    """
+    Create MACD signals.
+    
+    Args:
+        close: Series of closing prices
+        fast_period: Fast EMA period
+        slow_period: Slow EMA period
+        signal_period: Signal line period
+        smoothing: Signal smoothing period
+        
+    Returns:
+        tuple: (long_signals, short_signals)
+    """
+    try:
+        # Calculate MACD components
+        fast_ema = close.ewm(span=fast_period, adjust=False).mean()
+        slow_ema = close.ewm(span=slow_period, adjust=False).mean()
+        
+        macd_line = fast_ema - slow_ema
+        signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+        
+        # Generate signals
+        long_signal = macd_line > signal_line
+        short_signal = macd_line < signal_line
+        
+        # Apply smoothing if needed
+        if smoothing > 1:
+            long_signal = long_signal.rolling(window=smoothing).sum() >= smoothing
+            short_signal = short_signal.rolling(window=smoothing).sum() >= smoothing
+            
+        return long_signal, short_signal
+    except Exception as e:
+        print(f"Error generating MACD signals: {e}")
+        return pd.Series(False, index=close.index), pd.Series(False, index=close.index)
+
 # ==============================================================================
 # Strategy Class with Simplified Interface to Match Backtest Expectations
 # ==============================================================================
 class EdgeMultiFactorStrategy:
     """
-    Edge multi-factor strategy with simplified API to match backtest expectations.
+    EdgeMultiFactorStrategy is a multi-factor strategy that combines RSI, Bollinger Bands,
+    MACD and Volume Divergence to generate buy and sell signals for trading.
     """
-    def __init__(self,
-                 lookback_window=20,
-                 vol_filter_window=100,
-                 volatility_threshold=0.5,
-                 initial_capital=3000,
-                 default_factor_weights=None,
-                 commission_pct=0.001,
-                 slippage_pct=0.0005,
-                 signal_threshold=0.3):
-
-        self.lookback_window = int(lookback_window)
-        self.vol_filter_window = int(vol_filter_window)
-        self.volatility_threshold = float(volatility_threshold)
-        self.initial_capital = float(initial_capital)
-        self.commission_pct = float(commission_pct)
-        self.slippage_pct = float(slippage_pct)
-        self.signal_threshold = float(signal_threshold)
-
-        if default_factor_weights is None:
-            self.factor_weights = {
-                'volatility_regime': 0.25,
-                'consolidation_breakout': 0.25,
-                'volume_divergence': 0.25,
-                'market_microstructure': 0.25
-            }
-        else:
-            total_weight = sum(default_factor_weights.values())
-            if not np.isclose(total_weight, 1.0):
-                print(f"Warning: Provided weights sum to {total_weight}, normalizing.")
-                self.factor_weights = {k: v / total_weight for k, v in default_factor_weights.items()}
-            else:
-                self.factor_weights = default_factor_weights
-                
-        if not (0 < self.volatility_threshold < 1):
-             raise ValueError("volatility_threshold must be between 0 and 1")
-        if self.lookback_window <= 0 or self.vol_filter_window <= 0:
-             raise ValueError("Window parameters must be positive integers")
-        if self.initial_capital <= 0:
-             raise ValueError("Initial capital must be positive")
-
-    def generate_signals(self, data: pd.DataFrame):
+    def __init__(self, **kwargs):
         """
-        Simplified generate_signals that returns a tuple matching what backtest expects.
+        Initialize the strategy with parameters.
         
         Args:
-            data: DataFrame with OHLCV data
+            **kwargs: Keyword arguments to override default parameters.
+        """
+        # Basic configuration params
+        self.symbol = kwargs.get('symbol', 'BTCUSDT')
+        self.timeframe = kwargs.get('timeframe', '1h')
+        self.lookback_window = kwargs.get('lookback_window', 10)
+        self.signal_threshold = kwargs.get('signal_threshold', 0.2)
+        self.signal_smoothing = kwargs.get('signal_smoothing', 2)
+        
+        # Factor weights
+        self.trend_weight = kwargs.get('trend_weight', 0.25)  # For RSI
+        self.momentum_weight = kwargs.get('momentum_weight', 0.25)  # For BBands
+        self.mean_reversion_weight = kwargs.get('mean_reversion_weight', 0.25)  # For MACD
+        self.volume_weight = kwargs.get('volume_weight', 0.25)  # For Volume Divergence
+        
+        # Volume parameters
+        self.volume_threshold = kwargs.get('volume_threshold', 1.5)
+        self.volume_threshold_short = kwargs.get('volume_threshold_short', 1.2)
+        
+        # RSI parameters
+        self.rsi_period = kwargs.get('rsi_period', 14)
+        
+        # Bollinger Bands parameters
+        self.bbands_period = kwargs.get('bbands_period', 20)
+        self.bbands_dev = kwargs.get('bbands_dev', 2.0)
+        
+        # MACD parameters
+        self.fast_ma_period = kwargs.get('fast_ma_period', 12)
+        self.slow_ma_period = kwargs.get('slow_ma_period', 26)
+        self.macd_signal = kwargs.get('macd_signal', 9)
+        
+        # Regime adaptation parameters
+        self.use_regime_filter = kwargs.get('use_regime_filter', True)
+        self.adx_threshold = kwargs.get('adx_threshold', 25)
+        self.ranging_signal_discount = kwargs.get('ranging_signal_discount', 0.5)
+        self.ranging_market_adjustment = kwargs.get('ranging_market_adjustment', True)
+        self.disable_shorts_in_uptrend = kwargs.get('disable_shorts_in_uptrend', False)
+        self.disable_longs_in_downtrend = kwargs.get('disable_longs_in_downtrend', False)
+        self.ranging_factor = kwargs.get('ranging_factor', 0.5)  # Factor to reduce signal strength in ranging markets
+        
+        # Exit strategy parameters
+        self.use_regime_exits = kwargs.get('use_regime_exits', True)
+        self.trending_tp_multiplier = kwargs.get('trending_tp_multiplier', 3.0)
+        self.trending_sl_multiplier = kwargs.get('trending_sl_multiplier', 2.0)
+        self.ranging_tp_multiplier = kwargs.get('ranging_tp_multiplier', 1.5)
+        self.ranging_sl_multiplier = kwargs.get('ranging_sl_multiplier', 1.0)
+        self.max_bars_exit = kwargs.get('max_bars_exit', 20)
+        
+        # Position sizing
+        self.base_capital = kwargs.get('base_capital', 10000.0)
+        self.risk_per_trade = kwargs.get('risk_per_trade', 0.01)  # 1% risk per trade
+        self.commission_pct = kwargs.get('commission_pct', 0.001)  # 0.1% trading fee
+        self.slippage_pct = kwargs.get('slippage_pct', 0.0005)    # 0.05% slippage
+        
+        # Data storage
+        self._data = None
+
+    def generate_signals(self, data):
+        """
+        Generate signals based on combined factors
+        
+        Args:
+            data (pd.DataFrame): DataFrame with OHLCV data
             
         Returns:
-            Tuple of (long_entries, short_entries, is_trending, is_ranging)
+            tuple: (long_entries, short_entries, is_trending, is_ranging)
+                - long_entries (pd.Series): Boolean series of long entry signals
+                - short_entries (pd.Series): Boolean series of short entry signals
+                - is_trending (pd.Series): Boolean series indicating trending market
+                - is_ranging (pd.Series): Boolean series indicating ranging market
         """
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        if not all(col in data.columns for col in required_cols):
-            raise ValueError(f"Data missing required columns: {set(required_cols) - set(data.columns)}")
-
-        # Store data for later use in backtest_signals
-        self._data = data.copy()
-
-        min_required_data = max(self.lookback_window, self.vol_filter_window) + 5
-        if len(data) < min_required_data:
-             print(f"Warning: Data length ({len(data)}) might be insufficient for lookbacks ({min_required_data}).")
-
-        # Calculate ADX for market regime detection
-        adx_period = 14
-        adx = vbt.ADX.run(data['high'], data['low'], data['close'], window=adx_period).adx
-
-        # Define market regimes
-        is_trending = (adx > 25).fillna(False)
-        is_ranging = (adx < 20).fillna(False)
+        # Step 1: Calculate individual factor signals
+        signals = self.calculate_factor_signals(data)
         
-        # Enhanced logging for market regimes
-        print(f"Market regimes - Trending: {is_trending.sum()}/{len(is_trending)} days, Ranging: {is_ranging.sum()}/{len(is_ranging)} days")
-
-        # Calculate individual factor signals
-        vol_signal = create_volatility_regime_indicator(
-            data['close'], 
-            lookback_window=self.lookback_window,
-            vol_filter_window=self.vol_filter_window,
-            volatility_threshold=self.volatility_threshold
-        )
+        # Step 2: Apply weights to create combined signal
+        combined_signal = self.combine_factor_signals(signals)
         
-        breakout_up, breakout_down = create_consolidation_breakout_indicator(
-            data['high'], data['low'], data['close'], 
-            lookback_window=self.lookback_window
-        )
+        # Step 3: Generate entry signals based on thresholds
+        entries = pd.Series(0, index=data.index)
         
-        volume_confirms_up, volume_confirms_down = create_volume_divergence_indicator(
-            data['volume'],
-            lookback_window=self.lookback_window,
-            breakout_up=breakout_up,
-            breakout_down=breakout_down
-        )
+        # Long signals when combined value exceeds threshold
+        long_entries = combined_signal > self.signal_threshold
         
-        buying_pressure, selling_pressure = create_market_microstructure_indicator(
-            data['open'], data['high'], data['low'], data['close']
-        )
-
-        # Debug signal components (optional)
-        print(f"Signal components - Vol: {vol_signal.sum()}, Breakout Up: {breakout_up.sum()}, " + 
-              f"Volume Up: {volume_confirms_up.sum()}, Buying: {buying_pressure.sum()}")
-        print(f"Signal components - Breakout Down: {breakout_down.sum()}, " + 
-              f"Volume Down: {volume_confirms_down.sum()}, Selling: {selling_pressure.sum()}")
-              
-        # Enhanced logging for factor triggers with percentages
-        print(f"Factor triggers - Vol: {vol_signal.sum()}/{len(vol_signal)} ({vol_signal.sum()/len(vol_signal)*100:.2f}%)")
-        print(f"Factor triggers - Breakout Up: {breakout_up.sum()}/{len(breakout_up)} ({breakout_up.sum()/len(breakout_up)*100:.2f}%)")
-        print(f"Factor triggers - Volume Up: {volume_confirms_up.sum()}/{len(volume_confirms_up)} ({volume_confirms_up.sum()/len(volume_confirms_up)*100:.2f}%)")
-        print(f"Factor triggers - Buying: {buying_pressure.sum()}/{len(buying_pressure)} ({buying_pressure.sum()/len(buying_pressure)*100:.2f}%)")
+        # Short signals when combined value is below negative threshold
+        short_entries = combined_signal < -self.signal_threshold
         
-        # Output factor triggers by date
-        if vol_signal.sum() > 0:
-            print(f"Vol signal true at: {vol_signal[vol_signal].index[:5].tolist()}")
-        if breakout_up.sum() > 0:
-            print(f"Breakout up true at: {breakout_up[breakout_up].index[:5].tolist()}")
-        if volume_confirms_up.sum() > 0:
-            print(f"Volume confirms up true at: {volume_confirms_up[volume_confirms_up].index[:5].tolist()}")
-        if buying_pressure.sum() > 0:
-            print(f"Buying pressure true at: {buying_pressure[buying_pressure].index[:5].tolist()}")
-
-        # Combine signals using weights
-        long_signal = pd.Series(0.0, index=data.index)
-        short_signal = pd.Series(0.0, index=data.index)
+        # Step 4: Detect market regime
+        is_trending = self.detect_market_regime(data)
+        is_ranging = ~is_trending
         
-        # Ensure results are float/boolean before weighting
-        long_signal += vol_signal.astype(float) * self.factor_weights.get('volatility_regime', 0)
-        long_signal += breakout_up.astype(float) * self.factor_weights.get('consolidation_breakout', 0)
-        long_signal += volume_confirms_up.astype(float) * self.factor_weights.get('volume_divergence', 0)
-        long_signal += buying_pressure.astype(float) * self.factor_weights.get('market_microstructure', 0)
+        # Apply regime filter if enabled
+        if self.use_regime_filter:
+            # In ranging markets, reduce signal strength or disable certain types of trades
+            if self.ranging_market_adjustment:
+                # Reduce signal strength in ranging markets
+                combined_signal = combined_signal.where(~is_ranging, combined_signal * self.ranging_factor)
+                
+                # Recalculate entries with adjusted signals
+                long_entries = combined_signal > self.signal_threshold
+                short_entries = combined_signal < -self.signal_threshold
+            
+            # Optional: Completely disable trades in certain regimes
+            if self.disable_shorts_in_uptrend or self.disable_longs_in_downtrend:
+                trend_direction = self.detect_trend_direction(data)
+                
+                # Disable shorts in uptrend if configured
+                if self.disable_shorts_in_uptrend:
+                    is_uptrend = trend_direction > 0
+                    short_entries = short_entries & ~is_uptrend
+                
+                # Disable longs in downtrend if configured
+                if self.disable_longs_in_downtrend:
+                    is_downtrend = trend_direction < 0
+                    long_entries = long_entries & ~is_downtrend
         
-        short_signal += vol_signal.astype(float) * self.factor_weights.get('volatility_regime', 0)
-        short_signal += breakout_down.astype(float) * self.factor_weights.get('consolidation_breakout', 0)
-        short_signal += volume_confirms_down.astype(float) * self.factor_weights.get('volume_divergence', 0)
-        short_signal += selling_pressure.astype(float) * self.factor_weights.get('market_microstructure', 0)
-        
-        # Enhanced logging for signal weights
-        print(f"Signal weights - Long: min={long_signal.min():.3f}, max={long_signal.max():.3f}, mean={long_signal.mean():.3f}")
-        print(f"Signal weights - Short: min={short_signal.min():.3f}, max={short_signal.max():.3f}, mean={short_signal.mean():.3f}")
-        print(f"Threshold for entry signals: {self.signal_threshold}")
-
-        # Generate entries based on signal threshold
-        long_entries = long_signal > self.signal_threshold
-        short_entries = short_signal > self.signal_threshold
-        
-        # Prevent simultaneous entries
-        simultaneous = long_entries & short_entries
-        long_entries[simultaneous] = False
-        short_entries[simultaneous] = False
-        
-        # Apply market regime adaptation (optional)
-        trend_up = is_trending & (data['close'] > data['close'].shift(self.lookback_window))
-        trend_down = is_trending & (data['close'] < data['close'].shift(self.lookback_window))
-        
-        # Enhanced logging for trend directions
-        print(f"Trend directions - Up: {trend_up.sum()}/{is_trending.sum()}, Down: {trend_down.sum()}/{is_trending.sum()}")
-        
-        # Fix: Create temporary boolean masks to avoid dtype incompatibility warnings
-        long_adjusted_up = (long_signal[trend_up] > (self.signal_threshold * 0.7)).astype(bool)
-        short_adjusted_up = (short_signal[trend_up] > (self.signal_threshold * 1.3)).astype(bool)
-        long_adjusted_down = (long_signal[trend_down] > (self.signal_threshold * 1.3)).astype(bool)
-        short_adjusted_down = (short_signal[trend_down] > (self.signal_threshold * 0.7)).astype(bool)
-        
-        # Apply the adjusted thresholds using loc to avoid warning
-        long_entries.loc[trend_up] = long_adjusted_up
-        short_entries.loc[trend_up] = short_adjusted_up
-        long_entries.loc[trend_down] = long_adjusted_down
-        short_entries.loc[trend_down] = short_adjusted_down
-        
-        # Log signal counts
-        print(f"Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries.")
+        # Convert to unique signals (avoid multiple entries while in position)
+        long_entries = self.process_signals_to_unique_entries_bool(long_entries)
+        short_entries = self.process_signals_to_unique_entries_bool(short_entries)
         
         return long_entries, short_entries, is_trending, is_ranging
-
-    def calculate_target_percent(self, data: pd.DataFrame, risk_fraction=0.01, atr_window=14, atr_multiple_stop=2.0):
+        
+    def calculate_target_percent(self, price_data, risk_fraction=0.01, atr_window=14, atr_multiple_stop=2.0):
         """
-        Calculates the target percent for each position based on risk.
+        Calculates the target percent for each position based on risk and ATR.
         
         Args:
-            data: DataFrame with OHLCV data
-            risk_fraction: Fraction of capital to risk per trade
-            atr_window: Window for ATR calculation
-            atr_multiple_stop: ATR multiple for stop loss distance
+            price_data (pd.DataFrame): DataFrame with OHLCV data
+            risk_fraction (float): Fraction of capital to risk per trade (e.g., 0.01 = 1%)
+            atr_window (int): Window for ATR calculation
+            atr_multiple_stop (float): Multiple of ATR for stop loss distance
             
         Returns:
             Series of target percentages
         """
-        close = data['close']
-        high = data['high']
-        low = data['low']
+        # Calculate ATR
+        try:
+            from app.strategies.indicators.technical import calculate_atr
+            atr = calculate_atr(price_data, period=atr_window)
+        except ImportError:
+            # Fallback if the import fails
+            high = price_data['high']
+            low = price_data['low']
+            close = price_data['close']
+            
+            # True Range
+            tr1 = high - low
+            tr2 = abs(high - close.shift())
+            tr3 = abs(low - close.shift())
+            
+            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = tr.rolling(window=atr_window).mean()
         
-        # Calculate ATR for volatility-based position sizing
-        atr = vbt.ATR.run(
-            high, low, close,
-            window=int(atr_window),
-            wtype='wilder'
-        ).atr.bfill().ffill()
-        
-        # Calculate stop distance in price terms
+        # Stop loss distance in price points
         stop_distance = atr * atr_multiple_stop
         
-        # Calculate percent risk (stop distance as percentage of price)
-        percent_risk = stop_distance / close
+        # Stop loss as percentage of price
+        stop_percent = stop_distance / price_data['close']
         
-        # Calculate target percentage based on risk fraction
-        # If we're risking risk_fraction (e.g., 1%) of capital
-        # And our stop is percent_risk (e.g., 2%) below entry
-        # Then position size should be risk_fraction/percent_risk of our capital
-        target_percent = risk_fraction / percent_risk
+        # Position size as percentage of capital
+        # If we're risking risk_fraction (e.g. 1%) per trade, and stop is stop_percent away,
+        # then position size should be risk_fraction / stop_percent
+        target_percent = risk_fraction / stop_percent
         
         # Cap the target percent to avoid excessive leverage
         max_target_percent = 0.25  # Maximum 25% of capital per trade
@@ -331,60 +631,445 @@ class EdgeMultiFactorStrategy:
         
         return target_percent
         
-    def backtest_signals(self, entry_signals, exit_signals=None, data=None):
+    def backtest_signals(self, df, signals_df, plot=False):
         """
         Backtest the signals using vectorbt.
         
         Args:
-            entry_signals (pd.Series): Entry signals (True/False)
-            exit_signals (pd.Series, optional): Exit signals (True/False)
-            data (pd.DataFrame, optional): Market data
+            df (pd.DataFrame): OHLCV dataframe
+            signals_df (pd.DataFrame): DataFrame containing signals and exits
+            plot (bool): Whether to plot the results
             
         Returns:
-            tuple: (Portfolio object with backtest results, metrics dictionary)
+            dict: Backtest results
         """
         try:
-            if data is None and hasattr(self, '_data'):
-                data = self._data
+            import vectorbt as vbt
+        except ImportError:
+            logger.error("vectorbt is required for backtesting. Install with 'pip install vectorbt'")
+            return None
             
-            if data is None:
-                raise ValueError("Data not provided for backtest_signals and no cached data available.")
-                
-            # Create default exit signals if not provided
-            if exit_signals is None:
-                # Simple exit after N bars
-                exit_after_bars = 10
-                exit_signals = entry_signals.shift(exit_after_bars).fillna(False)
+        price = df['close'].copy()
+        
+        # Extract signals
+        entries_long = signals_df['long_signal'].copy()
+        entries_short = signals_df['short_signal'].copy()
+        exits_long = signals_df['long_exit'].copy()
+        exits_short = signals_df['short_exit'].copy()
             
-            # Ensure signals are properly cast to boolean
-            entry_signals = entry_signals.astype(bool)
-            exit_signals = exit_signals.astype(bool)
-            
-            # Use a fixed size approach (amount per trade)
-            fixed_size = 1.0  # 1 unit per trade
-            
-            # Create a portfolio using vectorbt
-            portfolio = vbt.Portfolio.from_signals(
-                close=data['close'],
-                entries=entry_signals,
-                exits=exit_signals,
-                size=fixed_size,
-                init_cash=self.initial_capital,
-                fees=self.commission_pct,
-                slippage=self.slippage_pct
+        # Set up vectorbt portfolio
+        pf_kwargs = dict(
+            close=price,
+            size=np.abs(signals_df['target_pct'].values),
+            fees=self.params.get('trading_fee', 0.001),
+            freq='1D'  # Adjust based on your data frequency
+        )
+        
+        results = {}
+        
+        # Long strategy
+        if entries_long.sum() > 0:
+            long_pf = vbt.Portfolio.from_signals(
+                entries=entries_long,
+                exits=exits_long,
+                **pf_kwargs
             )
+            results['long'] = {
+                'total_return': long_pf.total_return(),
+                'sharpe_ratio': long_pf.sharpe_ratio(),
+                'max_drawdown': long_pf.max_drawdown(),
+                'win_rate': long_pf.win_rate() if hasattr(long_pf, 'win_rate') else None
+            }
             
-            # Calculate metrics
-            metrics = calculate_performance_metrics(portfolio)
+            if plot:
+                long_pf.plot().show()
+        
+        # Short strategy
+        if entries_short.sum() > 0:
+            short_pf = vbt.Portfolio.from_signals(
+                entries=entries_short,
+                exits=exits_short,
+                short=True,
+                **pf_kwargs
+            )
+            results['short'] = {
+                'total_return': short_pf.total_return(),
+                'sharpe_ratio': short_pf.sharpe_ratio(),
+                'max_drawdown': short_pf.max_drawdown(),
+                'win_rate': short_pf.win_rate() if hasattr(short_pf, 'win_rate') else None
+            }
             
-            return portfolio, metrics
+            if plot:
+                short_pf.plot().show()
+                
+        # Combined strategy
+        if entries_long.sum() > 0 and entries_short.sum() > 0:
+            # For combined, we can use the combined signals
+            combined_pf = vbt.Portfolio.from_signals(
+                entries=entries_long,
+                exits=exits_long,
+                short_entries=entries_short,
+                short_exits=exits_short,
+                **pf_kwargs
+            )
+            results['combined'] = {
+                'total_return': combined_pf.total_return(),
+                'sharpe_ratio': combined_pf.sharpe_ratio(),
+                'max_drawdown': combined_pf.max_drawdown(),
+                'win_rate': combined_pf.win_rate() if hasattr(combined_pf, 'win_rate') else None
+            }
             
-        except Exception as e:
-            import logging
-            logging.error(f"Error in backtest_signals: {str(e)}")
-            import traceback
-            logging.debug(traceback.format_exc())
-            return None, {}
+            if plot:
+                combined_pf.plot().show()
+                
+        return results
+
+    def generate_regime_exits(self, df, long_signals, short_signals, market_regimes):
+        """
+        Generate exit signals based on market regimes.
+        
+        Args:
+            df (pd.DataFrame): OHLCV data
+            long_signals (pd.Series): Long entry signals
+            short_signals (pd.Series): Short entry signals
+            market_regimes (pd.Series): Market regime classifications (1 for trending, 0 for ranging)
+            
+        Returns:
+            tuple: (long_exits, short_exits)
+        """
+        # Initialize empty exit signals series
+        long_exits = pd.Series(False, index=df.index)
+        short_exits = pd.Series(False, index=df.index)
+        
+        # Calculate ATR for dynamic stops
+        atr = self.calculate_atr(df, window=14)
+        
+        # Get close prices
+        close = df['close']
+        
+        # Track active positions and their entry prices
+        long_active = False
+        short_active = False
+        long_entry_price = 0
+        short_entry_price = 0
+        long_entry_idx = None
+        short_entry_idx = None
+        
+        # Iterate through dataframe to determine exits
+        for i in range(1, len(df)):
+            # Check for long entry
+            if long_signals[i] and not long_active:
+                long_active = True
+                long_entry_price = close[i]
+                long_entry_idx = i
+            
+            # Check for short entry
+            if short_signals[i] and not short_active:
+                short_active = True
+                short_entry_price = close[i]
+                short_entry_idx = i
+            
+            # Skip if no active positions
+            if not long_active and not short_active:
+                continue
+            
+            # Define regime-specific exit parameters
+            if market_regimes[i]:  # Trending regime
+                # Wider stops in trending markets, trailing stops
+                long_take_profit = 0.03  # 3% take profit in trending markets
+                long_stop_loss = 0.015   # 1.5% stop loss
+                short_take_profit = 0.03
+                short_stop_loss = 0.015
+                
+                # Add trailing stop logic for trending markets
+                if long_active and i > long_entry_idx:
+                    # Update stop loss based on trailing ATR
+                    highest_since_entry = close[long_entry_idx:i+1].max()
+                    trailing_stop = highest_since_entry - 2 * atr[i]
+                    if close[i] <= trailing_stop and highest_since_entry > long_entry_price * 1.01:
+                        long_exits[i] = True
+                        long_active = False
+                
+                if short_active and i > short_entry_idx:
+                    # Update stop loss based on trailing ATR
+                    lowest_since_entry = close[short_entry_idx:i+1].min()
+                    trailing_stop = lowest_since_entry + 2 * atr[i]
+                    if close[i] >= trailing_stop and lowest_since_entry < short_entry_price * 0.99:
+                        short_exits[i] = True
+                        short_active = False
+            else:  # Ranging regime
+                # Tighter stops in ranging markets, quicker to take profits
+                long_take_profit = 0.015  # 1.5% take profit in ranging markets
+                long_stop_loss = 0.01    # 1% stop loss
+                short_take_profit = 0.015
+                short_stop_loss = 0.01
+            
+            # Check for take profit and stop loss for long positions
+            if long_active:
+                if close[i] >= long_entry_price * (1 + long_take_profit):
+                    long_exits[i] = True
+                    long_active = False
+                elif close[i] <= long_entry_price * (1 - long_stop_loss):
+                    long_exits[i] = True
+                    long_active = False
+            
+            # Check for take profit and stop loss for short positions
+            if short_active:
+                if close[i] <= short_entry_price * (1 - short_take_profit):
+                    short_exits[i] = True
+                    short_active = False
+                elif close[i] >= short_entry_price * (1 + short_stop_loss):
+                    short_exits[i] = True
+                    short_active = False
+            
+            # Additional regime-based exits
+            if long_active:
+                # Exit long positions when entering ranging market after profit
+                if not market_regimes[i] and market_regimes[i-1] and close[i] > long_entry_price:
+                    long_exits[i] = True
+                    long_active = False
+            
+            if short_active:
+                # Exit short positions when entering ranging market after profit
+                if not market_regimes[i] and market_regimes[i-1] and close[i] < short_entry_price:
+                    short_exits[i] = True
+                    short_active = False
+        
+        return long_exits, short_exits
+
+    def detect_market_regime(self, data):
+        """
+        Detect market regime using ADX indicator
+        
+        Args:
+            data (pd.DataFrame): DataFrame with OHLCV data
+            
+        Returns:
+            pd.Series: Boolean series where True indicates trending market, False indicates ranging
+        """
+        # Calculate ADX
+        adx_values = vbt.ADX.run(data['high'], data['low'], data['close'], window=14).adx
+        
+        # Define regime thresholds
+        trending_threshold = 25  # ADX above 25 indicates trending market
+        
+        # Create regime boolean series (True = trending, False = ranging)
+        is_trending = adx_values > trending_threshold
+        
+        # Log regime statistics
+        trending_pct = is_trending.mean() * 100
+        ranging_pct = 100 - trending_pct
+        
+        logger.info(f"Market regime statistics: Trending: {trending_pct:.1f}%, Ranging: {ranging_pct:.1f}%")
+        
+        return is_trending
+        
+    def detect_trend_direction(self, data):
+        """
+        Detect trend direction using moving averages
+        
+        Args:
+            data (pd.DataFrame): DataFrame with OHLCV data
+            
+        Returns:
+            pd.Series: Series where positive values indicate uptrend, negative values indicate downtrend
+        """
+        # Calculate short and long MAs
+        short_ma = data['close'].rolling(window=20).mean()
+        long_ma = data['close'].rolling(window=50).mean()
+        
+        # Calculate trend direction (positive = uptrend, negative = downtrend)
+        trend_direction = short_ma - long_ma
+        
+        return trend_direction
+        
+    def calculate_factor_signals(self, data):
+        """
+        Calculate individual factor signals
+        
+        Args:
+            data (pd.DataFrame): DataFrame with OHLCV data
+            
+        Returns:
+            dict: Dictionary of factor signals
+        """
+        close = data['close']
+        high = data['high']
+        low = data['low']
+        volume = data['volume']
+        
+        # Generate component signals
+        rsi_long, rsi_short = create_rsi_signals(
+            close=close,
+            window=self.rsi_period,
+            overbought=70,
+            oversold=30,
+            smoothing=self.signal_smoothing
+        )
+        
+        bb_long, bb_short = create_bollinger_signals(
+            close=close,
+            window=self.bbands_period,
+            std_dev=self.bbands_dev,
+            smoothing=self.signal_smoothing
+        )
+        
+        macd_long, macd_short = create_macd_signals(
+            close=close,
+            fast_period=self.fast_ma_period,
+            slow_period=self.slow_ma_period,
+            signal_period=self.macd_signal,
+            smoothing=self.signal_smoothing
+        )
+        
+        # Get breakout signals for volume divergence
+        breakout_up, breakout_down = create_consolidation_breakout_indicator(
+            high=high,
+            low=low,
+            close=close,
+            lookback_window=self.lookback_window
+        )
+        
+        voldiv_long, voldiv_short = create_volume_divergence_indicator(
+            volume=volume,
+            lookback_window=self.lookback_window,
+            breakout_up=breakout_up,
+            breakout_down=breakout_down,
+            volume_threshold=self.volume_threshold,
+            volume_threshold_short=self.volume_threshold_short
+        )
+        
+        return {
+            'rsi_long': rsi_long,
+            'rsi_short': rsi_short,
+            'bb_long': bb_long,
+            'bb_short': bb_short,
+            'macd_long': macd_long,
+            'macd_short': macd_short,
+            'voldiv_long': voldiv_long,
+            'voldiv_short': voldiv_short
+        }
+        
+    def combine_factor_signals(self, signals):
+        """
+        Combine factor signals using weights
+        
+        Args:
+            signals (dict): Dictionary of factor signals
+            
+        Returns:
+            pd.Series: Combined signal strength (-1 to 1)
+        """
+        # Create the weighted signal
+        weights = {
+            'rsi': self.trend_weight,
+            'bb': self.momentum_weight,
+            'macd': self.mean_reversion_weight,
+            'voldiv': self.volume_weight
+        }
+        
+        # Calculate weighted average of long signals
+        long_signals = (
+            weights['rsi'] * signals['rsi_long'] +
+            weights['bb'] * signals['bb_long'] +
+            weights['macd'] * signals['macd_long'] +
+            weights['voldiv'] * signals['voldiv_long']
+        )
+        
+        # Calculate weighted average of short signals
+        short_signals = (
+            weights['rsi'] * signals['rsi_short'] +
+            weights['bb'] * signals['bb_short'] +
+            weights['macd'] * signals['macd_short'] +
+            weights['voldiv'] * signals['voldiv_short']
+        )
+        
+        # Normalize signals by the sum of weights
+        total_weight = sum(weights.values())
+        long_signals = long_signals / total_weight
+        short_signals = short_signals / total_weight
+        
+        # Combine into a single signal (-1 to 1)
+        combined_signal = long_signals - short_signals
+        
+        return combined_signal
+        
+    def process_signals_to_unique_entries_bool(self, entries):
+        """
+        Process boolean signals to ensure unique entries (no consecutive entries)
+        
+        Args:
+            entries (pd.Series): Boolean series of entry signals
+            
+        Returns:
+            pd.Series: Processed entry signals
+        """
+        # Create a copy to avoid modifying the original
+        processed = entries.copy()
+        
+        # Track current position state (False = no position, True = in position)
+        in_position = False
+        
+        for i in range(len(processed)):
+            # If we have a new entry signal
+            if processed.iloc[i]:
+                # If we're already in a position, cancel the entry
+                if in_position:
+                    processed.iloc[i] = False
+                else:
+                    # Otherwise update our position state
+                    in_position = True
+            
+            # If we have an exit signal (could add explicit exits later)
+            elif not processed.iloc[i] and in_position:
+                # Reset position state
+                in_position = False
+                
+        return processed
+
+    def run_strategy(self, df, test_mode=False):
+        """
+        Run the complete strategy including signal generation, market regime classification, 
+        and regime-specific exits.
+        
+        Args:
+            df (pd.DataFrame): OHLCV dataframe
+            test_mode (bool): If True, runs a backtest and returns results
+            
+        Returns:
+            tuple: (signals_df, market_regimes, backtest_results)
+        """
+        logger.info(f"Running strategy on {len(df)} candles")
+        
+        # Step 1: Classify market regimes
+        market_regimes = self.detect_market_regime(df)
+        
+        # Step 2: Generate entry signals
+        long_entries, short_entries, is_trending, is_ranging = self.generate_signals(df)
+        
+        # Step 3: Generate regime-specific exit signals
+        long_exits, short_exits = self.generate_regime_exits(df, long_entries, short_entries, market_regimes)
+        
+        # Step 4: Create signals dataframe
+        signals_df = pd.DataFrame({
+            'long_signal': long_entries,
+            'short_signal': short_entries,
+            'long_exit': long_exits,
+            'short_exit': short_exits,
+            'market_regime': market_regimes
+        }, index=df.index)
+        
+        # Step 5: Calculate target percentages
+        target_pct = self.calculate_target_percent(df)
+        signals_df['target_pct'] = target_pct
+        
+        # Step 6: Run backtest if in test mode
+        results = None
+        if test_mode:
+            logger.info("Running backtest")
+            results = self.backtest_signals(df, signals_df)
+            
+        return signals_df, market_regimes, results
 
 def calculate_performance_metrics(portfolio):
     """
@@ -466,12 +1151,48 @@ if __name__ == "__main__":
     parser.add_argument('--start_date', type=str, default='2023-01-01', help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end_date', type=str, default=datetime.now().strftime('%Y-%m-%d'), help='End date (YYYY-MM-DD)')
     parser.add_argument('--granularity', type=str, default='1h', help='Data granularity (e.g., 1h, 4h, 1d)')
-    parser.add_argument('--lookback', type=int, default=15, help='Lookback window for factors')
-    parser.add_argument('--vol_thresh', type=float, default=0.7, help='Volatility ratio threshold')
+    parser.add_argument('--lookback', type=int, default=None, help='Lookback window for factors (overrides profile)')
+    parser.add_argument('--vol_thresh', type=float, default=None, help='Volatility ratio threshold (overrides profile)')
     parser.add_argument('--plot', action='store_true', help='Generate and show plot')
     
+    # Add parameter profile support
+    parser.add_argument('--profile', type=str, default='optimized_hourly', 
+                        help='Parameter profile name from config/strategy_params.json')
+    parser.add_argument('--list_profiles', action='store_true', 
+                        help='List available parameter profiles and exit')
+    
     args = parser.parse_args()
-
+    
+    # Import the parameter loader
+    try:
+        from scripts.strategies.param_loader import load_strategy_params, list_available_profiles, get_profile_description
+    except ImportError:
+        # If we're running from the strategies directory
+        import sys
+        sys.path.append(str(ROOT_DIR / 'scripts' / 'strategies'))
+        try:
+            from param_loader import load_strategy_params, list_available_profiles, get_profile_description
+        except ImportError:
+            print("Could not import param_loader. Using default parameters.")
+            load_strategy_params = lambda profile, file=None: {
+                "lookback_window": 20,
+                "vol_filter_window": 100,
+                "volatility_threshold": 0.5,
+                "signal_threshold": 0.3,
+            }
+            list_available_profiles = lambda: []
+            get_profile_description = lambda profile: ""
+    
+    # List available profiles if requested
+    if args.list_profiles:
+        print("\nAvailable Parameter Profiles:")
+        profiles = list_available_profiles()
+        
+        for profile in profiles:
+            desc = get_profile_description(profile)
+            print(f"- {profile}: {desc}")
+        sys.exit(0)
+    
     # --- Data Fetching ---
     granularity_seconds = GRANULARITY_MAP_SECONDS.get(args.granularity.lower())
     if granularity_seconds is None:
@@ -488,56 +1209,64 @@ if __name__ == "__main__":
     print(f"Data fetched successfully. Shape: {price_data.shape}")
     price_data.index = pd.to_datetime(price_data.index, utc=True)
 
+    # --- Load Parameters from Profile ---
+    params = load_strategy_params(args.profile)
+    
+    # Override parameters from command line if provided
+    if args.lookback is not None:
+        params["lookback_window"] = args.lookback
+    if args.vol_thresh is not None:
+        params["volatility_threshold"] = args.vol_thresh
+    
     # --- Strategy Initialization ---
     print("Initializing fixed EdgeMultiFactorStrategy...")
+    print(f"Using parameter profile: {args.profile}")
+    print(f"Parameters: lookback_window={params['lookback_window']}, " + 
+          f"vol_filter_window={params.get('vol_filter_window', 100)}, " +
+          f"volatility_threshold={params['volatility_threshold']}, " +
+          f"signal_threshold={params.get('signal_threshold', 0.3)}, " +
+          f"volume_threshold={params.get('volume_threshold', 1.1)}, " +
+          f"volume_threshold_short={params.get('volume_threshold_short', 1.05)}, " +
+          f"volume_roc_threshold={params.get('volume_roc_threshold', 0.1)}")
+          
     strategy = EdgeMultiFactorStrategy(
-        lookback_window=args.lookback,
-        vol_filter_window=50,  # Reduced from 100 for faster signal generation
-        volatility_threshold=args.vol_thresh,
-        initial_capital=3000,
-        default_factor_weights={
-            'volatility_regime': 0.25,
-            'consolidation_breakout': 0.25,
-            'volume_divergence': 0.25,
-            'market_microstructure': 0.25
-        }
+        lookback_window=params["lookback_window"],
+        vol_filter_window=params.get("vol_filter_window", 100),
+        volatility_threshold=params["volatility_threshold"],
+        initial_capital=params.get("initial_capital", 3000),
+        default_factor_weights=params.get("default_factor_weights", None),
+        signal_threshold=params.get("signal_threshold", 0.3),
+        volume_threshold=params.get("volume_threshold", 1.1),
+        volume_threshold_short=params.get("volume_threshold_short", 1.05),
+        volume_roc_threshold=params.get("volume_roc_threshold", 0.1)
     )
 
     # --- Signal Generation --- 
     print("Generating signals...")
-    long_entries, short_entries, is_trending, is_ranging = strategy.generate_signals(price_data)
+    signals_df, market_regimes, results = strategy.run_strategy(price_data)
     
-    if long_entries.sum() + short_entries.sum() == 0:
+    if signals_df['long_signal'].sum() + signals_df['short_signal'].sum() == 0:
         print("No entry signals generated.")
         sys.exit(0)
     
     # --- Calculate Target Percentage Size ---
     print("Calculating target percentage size...")
-    target_pct = strategy.calculate_target_percent(
-        price_data,
-        risk_fraction=0.01,
-        atr_window=14,
-        atr_multiple_stop=2.0
-    )
+    target_pct = strategy.calculate_target_percent(price_data)
     
     # --- Results ---
-    print(f"Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries.")
-    print(f"Trending periods: {is_trending.sum()} days")
-    print(f"Ranging periods: {is_ranging.sum()} days")
+    print(f"Generated {signals_df['long_signal'].sum()} long entries and {signals_df['short_signal'].sum()} short entries.")
+    print(f"Trending periods: {market_regimes.mean() * 100:.2f}%")
     
     # --- Backtest the strategy ---
     print("Backtesting the strategy...")
-    portfolio, metrics = strategy.backtest_signals(long_entries, data=price_data)
-    
-    # --- Display metrics ---
-    if portfolio is not None:
+    if results is not None:
         print("\nBacktest Results:")
-        print(f"Total Return: {metrics['total_return']:.2%}")
-        print(f"Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
-        print(f"Max Drawdown: {metrics['max_drawdown']:.2%}")
-        print(f"Total Trades: {metrics['total_trades']}")
-        print(f"Win Rate: {metrics['win_rate']:.2%}")
-        print(f"Profit Factor: {metrics['profit_factor']:.2f}")
+        print(f"Total Return: {results['total_return']:.2%}")
+        print(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+        print(f"Max Drawdown: {results['max_drawdown']:.2%}")
+        print(f"Total Trades: {results['num_trades']}")
+        print(f"Win Rate: {results['win_rate']:.2%}")
+        print(f"Profit Factor: {results['profit_factor']:.2f}")
     else:
         print("Backtest failed.")
     
@@ -551,19 +1280,18 @@ if __name__ == "__main__":
         # Plot price and signals
         plt.subplot(2, 1, 1)
         plt.plot(price_data.index, price_data['close'], label='Close Price')
-        plt.scatter(price_data.index[long_entries], 
-                    price_data.loc[long_entries, 'close'],
+        plt.scatter(price_data.index[signals_df['long_signal'] > 0], 
+                    price_data.loc[signals_df['long_signal'] > 0, 'close'],
                     color='green', marker='^', label='Long Entry')
-        plt.scatter(price_data.index[short_entries], 
-                    price_data.loc[short_entries, 'close'],
+        plt.scatter(price_data.index[signals_df['short_signal'] > 0], 
+                    price_data.loc[signals_df['short_signal'] > 0, 'close'],
                     color='red', marker='v', label='Short Entry')
         plt.title('Price and Signals')
         plt.legend()
         
         # Plot trending and ranging periods
         plt.subplot(2, 1, 2)
-        plt.plot(price_data.index, is_trending, label='Trending', color='blue')
-        plt.plot(price_data.index, is_ranging, label='Ranging', color='orange')
+        plt.plot(price_data.index, market_regimes, label='Market Regimes', color='blue')
         plt.title('Market Regimes')
         plt.legend()
         

@@ -1,0 +1,119 @@
+{
+  "optimized_hourly": {
+    "description": "Optimized parameters based on testing, emphasizing market microstructure",
+    "lookback_window": 20,
+    "vol_filter_window": 100,
+    "volatility_threshold": 0.8,
+    "signal_threshold": 0.1,
+    "default_factor_weights": {
+      "volatility_regime": 0.25,
+      "consolidation_breakout": 0.25,
+      "volume_divergence": 0.1,
+      "market_microstructure": 0.4
+    }
+  },
+  "conservative": {
+    "description": "More conservative parameters with higher signal threshold to reduce false positives",
+    "lookback_window": 20,
+    "vol_filter_window": 100,
+    "volatility_threshold": 0.8,
+    "signal_threshold": 0.25,
+    "default_factor_weights": {
+      "volatility_regime": 0.25,
+      "consolidation_breakout": 0.2,
+      "volume_divergence": 0.15,
+      "market_microstructure": 0.4
+    }
+  },
+  "trend_follower": {
+    "description": "Parameters optimized for trending markets with ADX filter",
+    "lookback_window": 20,
+    "vol_filter_window": 75,
+    "volatility_threshold": 0.7,
+    "signal_threshold": 0.15,
+    "adx_threshold": 25,
+    "default_factor_weights": {
+      "volatility_regime": 0.3,
+      "consolidation_breakout": 0.3,
+      "volume_divergence": 0.2,
+      "market_microstructure": 0.2
+    }
+  },
+  "shorter_lookback": {
+    "description": "More reactive parameters with shorter lookback windows",
+    "lookback_window": 12,
+    "vol_filter_window": 50,
+    "volatility_threshold": 0.75,
+    "signal_threshold": 0.15,
+    "default_factor_weights": {
+      "volatility_regime": 0.2,
+      "consolidation_breakout": 0.2,
+      "volume_divergence": 0.2,
+      "market_microstructure": 0.4
+    }
+  },
+  "volume_focused": {
+    "description": "Parameters focused on volume confirmation with enhanced sensitivity",
+    "lookback_window": 15,
+    "vol_filter_window": 60,
+    "volatility_threshold": 0.7,
+    "signal_threshold": 0.15,
+    "default_factor_weights": {
+      "volatility_regime": 0.2,
+      "consolidation_breakout": 0.15,
+      "volume_divergence": 0.4,
+      "market_microstructure": 0.25
+    }
+  },
+  "enhanced_volume": {
+    "description": "Parameters optimized for the enhanced volume detection algorithm with multiple confirmation sources",
+    "lookback_window": 12,
+    "vol_filter_window": 48,
+    "volatility_threshold": 0.75,
+    "signal_threshold": 0.15,
+    "volume_threshold": 1.1,
+    "volume_threshold_short": 1.05,
+    "volume_roc_threshold": 0.1,
+    "default_factor_weights": {
+      "volatility_regime": 0.2,
+      "consolidation_breakout": 0.2,
+      "volume_divergence": 0.35,
+      "market_microstructure": 0.25
+    }
+  },
+  "regime_adaptive": {
+    "signal_threshold": 0.2,
+    "long_threshold": 0.2,
+    "short_threshold": 0.2,
+    "ma_lookback": 20,
+    "rsi_lookback": 14,
+    "volume_divergence_lookback": 15,
+    "adx_lookback": 14,
+    "adx_trend_threshold": 25,
+    "bbw_lookback": 20,
+    "ma_crossover_lookback": {
+      "fast": 8,
+      "slow": 21
+    },
+    "weight_price_action": 0.2,
+    "weight_bbw": 0.1,
+    "weight_rsi": 0.15,
+    "weight_ma_crossover": 0.15,
+    "weight_volume_divergence": 0.3,
+    "weight_adx": 0.1,
+    "regime_trending_tp_multiplier": 2.5,
+    "regime_trending_sl_multiplier": 1.5,
+    "regime_ranging_tp_multiplier": 1.2,
+    "regime_ranging_sl_multiplier": 1.0,
+    "max_bars_in_trade": 20,
+    "enable_regime_adaptation": true,
+    "price_momentum_lookback": 10,
+    "volatility_lookback": 20,
+    "atr_lookback": 14,
+    "enable_volume_enhanced_detection": true,
+    "volume_short_ma": 3,
+    "volume_roc_lookback": 5,
+    "consecutive_volume_bars": 3,
+    "volume_breakout_threshold": 1.1
+  }
+} 

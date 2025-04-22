@@ -12,6 +12,7 @@ graph TD
     F[scheduled_optimization.py] --> B
     F --> D
     G[backtest_edge_strategy.py] --> A
+    H[test_enhanced_volume.py] --> A
 ```
 
 ## Core Components
@@ -29,7 +30,8 @@ class EdgeMultiFactorStrategy:
 - Implements core trading logic
 - Manages technical indicators (RSI, Bollinger Bands, etc.)
 - Handles position sizing and risk management
-- Used by: `wfo_edge_strategy.py`, `backtest_edge_strategy.py`
+- Features enhanced volume detection system
+- Used by: `wfo_edge_strategy.py`, `backtest_edge_strategy.py`, `test_enhanced_volume.py`
 
 ### 2. Walk-Forward Optimization (`wfo_edge_strategy.py`)
 **Purpose:** Parameter optimization and strategy validation
@@ -117,6 +119,20 @@ def analyze_performance():
 - Analyzes performance metrics
 - Uses: `edge_multi_factor_fixed.py`
 
+### 8. Enhanced Volume Test (`test_enhanced_volume.py`)
+**Purpose:** Test enhanced volume detection
+```python
+def main():
+    # Test enhanced volume detection
+    
+def plot_comparison():
+    # Compare enhanced and original volume
+```
+- Tests enhanced volume detection algorithm
+- Compares to original volume detection
+- Creates visualization of results
+- Uses: `edge_multi_factor_fixed.py`
+
 ## Data Flow
 
 1. **Strategy Development Flow:**
@@ -152,6 +168,15 @@ def analyze_performance():
    wfo_edge_strategy.py (Implementation)
    ```
 
+4. **Volume Detection Test Flow:**
+   ```
+   edge_multi_factor_fixed.py (Enhanced Volume Detection)
+   ↓
+   test_enhanced_volume.py (Comparison Testing)
+   ↓
+   enhanced_vs_original_volume.png (Visual Analysis)
+   ```
+
 ## Key Interactions
 
 1. **Parameter Optimization Chain:**
@@ -172,11 +197,17 @@ def analyze_performance():
    - `enhanced_parameter_suggestions.py` implements AI suggestions
    - `scheduled_optimization.py` automates the process
 
+4. **Volume Detection Enhancement Chain:**
+   - `edge_multi_factor_fixed.py` implements enhanced volume detection
+   - `test_enhanced_volume.py` validates the enhancement
+   - Parameter profiles in `config/strategy_params.json` store configurations
+   - Documentation in `docs/enhanced_volume_detection.md` explains the feature
+
 ## Configuration Dependencies
 
 All components rely on these configuration sources:
 - `.env` file for API keys and credentials
-- `config/optimized_strategy_params.json` for current parameters
+- `config/strategy_params.json` for parameter profiles including `enhanced_volume`
 - `vectorbtpro` settings for backtesting configuration
 
 ## Error Handling and Logging
@@ -192,6 +223,7 @@ Each component implements:
 Test files validate:
 - Strategy logic (`test_edge_multi_factor_fixed.py`)
 - AI assistance (`test_edge_assistant.py`)
+- Volume detection (`test_enhanced_volume.py`)
 - Optimization processes (various test files)
 
 ## Future Enhancements
@@ -200,4 +232,7 @@ Planned improvements:
 1. Enhanced market regime detection
 2. More sophisticated AI parameter suggestions
 3. Improved optimization algorithms
-4. Better performance metrics and visualization 
+4. Better performance metrics and visualization
+5. Adaptive volume thresholds based on market conditions
+6. Time-based filtering for volume signals
+7. Improved exit strategies based on volume patterns 
