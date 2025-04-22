@@ -24,12 +24,27 @@ var/
 # Virtual Environment
 venv/
 ENV/
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.pydevproject
+.settings/
+.classpath
+*.code-workspace
 
 # OS
 .DS_Store
@@ -39,6 +54,8 @@ ENV/
 .Trashes
 ehthumbs.db
 Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
 # Project specific
 knowledge/
@@ -46,9 +63,9 @@ vectorbt.pro/
 *.log
 *.csv
 *checkpoint.pt
-
-# Exclude specific test files if needed
-# test_*.py
+__temp__/
+temp/
+tmp/
 
 # Logs and databases
 *.log
@@ -57,6 +74,13 @@ vectorbt.pro/
 logs/
 *.pid
 *.seed
+*.sqlite3
+*.log.*
+log/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Trading system specific
 data/
@@ -75,6 +99,8 @@ strategy_cache/
 *.trades
 trade_history/
 position_logs/
+analysis_results/
+test_results/
 
 # Sensitive keys and secrets
 *.pem
@@ -95,22 +121,51 @@ cdp_api_key.json
 config.local.json
 api_credentials.json
 exchange_keys.json
+*password*
+*credential*
+*secret*
+*token*
+*apikey*
+.npmrc
+.yarnrc
+*.key
+*.pgp
+*.gpg
+*.asc
+auth.json
+.netrc
 
 # OS specific
 *.bak
 *.tmp
 *.temp
+*~
+*.swp
+*.swo
+*.swn
+.*.sw*
+.~*#
+*.orig
+*.rej
 
 # Documentation
 docs/_build/
 site/
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/
 
 # Jupyter Notebooks
 .ipynb_checkpoints
 *.ipynb
+.jupyter/
+.ipython/
 
 # Dependency directories
 node_modules/
+jspm_packages/
+bower_components/
 
 # Editor directories and files
 *.suo
@@ -118,16 +173,39 @@ node_modules/
 *.njsproj
 *.sln
 *.sw?
+.history/
+.vscode-test/
+*.workspace
+.vs/
 
 # Installer Files
 Miniconda3-latest-MacOSX-arm64.sh
 Miniconda3-latest-MacOSX-x86_64.sh
+*.exe
+*.msi
+*.dmg
+*.pkg
+*.deb
+*.rpm
 
 # Performance and profiling
 *.prof
 *.stats
 profiling/
 performance_logs/
+.coverage
+coverage/
+htmlcov/
+.tox/
+.nox/
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
 
 # AI and model files
 *.h5
@@ -137,3 +215,34 @@ model_checkpoints/
 *.onnx
 *.tflite
 *.pt
+*.pth
+*.weights
+*.pb
+saved_models/
+pretrained/
+.torch/
+.keras/
+
+# Cache directories
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+__pycache__/
+.ruff_cache/
+.cache
+.cython/
+.pytest_cache/
+
+# Local development
+local_settings.py
+instance/
+.webassets-cache/
+celerybeat-schedule
+celerybeat.pid
+*.sage.py
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
