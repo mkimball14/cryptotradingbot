@@ -1,0 +1,8 @@
+---
+description: Requirements for using Sequential Thinking MCP for coding, debugging, and planning tasks
+globs: "**/*.{js,ts,py,html,css,md}"
+alwaysApply: true
+---
+
+# Sequential Thinking Usage Requirements
+
