@@ -3,6 +3,44 @@ description: Requirements for using Sequential Thinking MCP for coding, debuggin
 globs: "**/*.{js,ts,py,html,css,md}"
 alwaysApply: true
 ---
-
 # Sequential Thinking Usage Requirements
+
+- **Always Use Sequential Thinking MCP for Complex Tasks**
+  - Any task that requires multiple steps of analysis
+  - Problem-solving that benefits from progressive refinement
+  - Tasks where initial solutions may need revision
+
+- **Coding Tasks**
+  - **DO** use Sequential Thinking for algorithm design
+  - **DO** use Sequential Thinking for optimizing code
+  - **DO** use Sequential Thinking for refactoring
+
+- **Debugging Tasks**
+  - **DO** use Sequential Thinking for systematic debugging
+  - **DO** revise hypotheses when new information emerges
+  - **DO** branch debugging paths when multiple causes are possible
+
+- **Planning Tasks**
+  - **DO** use Sequential Thinking for architectural design
+  - **DO** use Sequential Thinking for feature planning
+  - **DO** use Sequential Thinking for implementation strategies
+
+- **Integration with Other Tools**
+  - Use Sequential Thinking before using file editing tools
+  - Combine with codebase search for comprehensive analysis
+  - Use before running terminal commands for task planning
+  - Integrate with debugging tools for systematic troubleshooting
+
+- **Documentation Requirements**
+  - Document final thought sequences in code comments for complex implementations
+  - Include references to thought process in PR descriptions
+  - Use sequential thinking outcomes to document decision-making rationale
+  - Preserve key insights from sequential thinking sessions
+
+- **Implementation Best Practices**
+  - Start with a reasonable estimate of required thoughts
+  - Adjust total thoughts as complexity becomes apparent
+  - Use branching for exploring alternative approaches
+  - Use revision for correcting earlier assumptions
+  - Ensure final thoughts lead to actionable conclusions
 

@@ -1,1 +1,106 @@
- 
+# VectorBT Pro Environment Setup and Activation
+
+- **AI Chat Environment Requirements**
+  - Every new Cursor AI chat session must:
+    1. Use the vectorbtpro virtual environment
+    2. Have access to all project dependencies
+    3. Maintain consistent environment settings
+  
+  - **Required Environment Check**:
+    ```python
+    # Verify at start of each chat session:
+    import sys
+    import os
+    
+    def verify_venv():
+        """Verify virtual environment is active and properly configured"""
+        venv_path = os.environ.get('VIRTUAL_ENV')
+        if not venv_path or 'venv' not in venv_path:
+            print("WARNING: Virtual environment not activated!")
+            return False
+        return True
+    
+    if not verify_venv():
+        # Activate virtual environment
+        activate_script = "./venv/bin/activate"  # Unix/macOS
+        if os.name == 'nt':  # Windows
+            activate_script = ".\\venv\\Scripts\\activate"
+        print(f"Please activate the virtual environment: source {activate_script}")
+    ```
+
+- **Required Environment Setup**
+  - Activate the vectorbtpro virtual environment before running any scripts
+  ```bash
+  # On Unix/macOS
+  source venv/bin/activate
+  
+  # On Windows
+  .\venv\Scripts\activate
+  ```
+
+- **Environment Verification**
+  - Verify vectorbtpro is properly installed and activated:
+  ```python
+  import vectorbtpro as vbt
+  print(vbt.__version__)  # Should show your installed version
+  ```
+
+- **Common Issues and Solutions**
+  - If vectorbtpro import fails:
+    ```bash
+    # Reinstall vectorbtpro in the virtual environment
+    pip install --upgrade vectorbtpro
+    
+    # Verify installation
+    pip list | grep vectorbtpro
+    ```
+  
+  - If license validation fails:
+    ```bash
+    # Set your license key in .env file
+    VECTORBT_LICENSE_KEY=your_license_key_here
+    ```
+
+- **Development Workflow**
+  - Always ensure virtual environment is activated before:
+    - Starting a new Cursor AI chat session
+    - Running any Python scripts
+    - Installing new dependencies
+    - Running tests or optimizations
+    - Starting Jupyter notebooks
+
+- **IDE Integration**
+  - Configure IDE to use the virtual environment:
+    - Set Python interpreter path to `venv/bin/python`
+    - Update environment variables from .env file
+    - Restart IDE after environment changes
+
+- **Dependency Management**
+  - Install dependencies within the virtual environment:
+  ```bash
+  pip install -r requirements.txt
+  ```
+  
+  - Update requirements.txt when adding new dependencies:
+  ```bash
+  pip freeze > requirements.txt
+  ```
+
+- **AI Chat Session Management**
+  - Before starting any code-related discussion:
+    1. Verify environment is activated
+    2. Check vectorbtpro import works
+    3. Confirm all required dependencies are available
+  
+  - For new chat sessions:
+    ```python
+    # Standard environment verification
+    import sys
+    import vectorbtpro as vbt
+    
+    print(f"Python: {sys.version}")
+    print(f"VectorBT Pro: {vbt.__version__}")
+    print(f"Environment: {sys.prefix}")
+    ```
+
+Follow these guidelines to ensure consistent vectorbtpro functionality across all development tasks and AI chat sessions. 

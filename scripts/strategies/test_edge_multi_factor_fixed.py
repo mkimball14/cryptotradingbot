@@ -298,47 +298,51 @@ class TestEdgeMultiFactorFixed(unittest.TestCase):
         breakout_up_s1.iloc[25] = True # Breakout occurs at the volume spike
         breakout_down_s1 = pd.Series(False, index=dates)
 
-        vol_conf_up1, vol_conf_down1 = create_volume_divergence_indicator(
+        vol_conf_up1, vol_conf_down1, vol_strength1 = create_volume_divergence_indicator(
             volume_s, lookback_window_s, breakout_up_s1, breakout_down_s1
         )
         self.assertTrue(vol_conf_up1.iloc[25], "Volume should confirm breakout up at index 25")
         self.assertFalse(vol_conf_up1.iloc[:25].any(), "No confirmation before index 25 (Up)")
         self.assertFalse(vol_conf_up1.iloc[26:].any(), "No confirmation after index 25 (Up)")
         self.assertFalse(vol_conf_down1.any(), "No confirmation down when breakout is up")
+        self.assertIsInstance(vol_strength1, pd.Series, "Volume strength should be a pandas Series")
 
         # --- Case 2: Breakout Up WITHOUT high volume --- #
         breakout_up_s2 = pd.Series(False, index=dates)
         breakout_up_s2.iloc[20] = True # Breakout occurs during low volume
         breakout_down_s2 = pd.Series(False, index=dates)
 
-        vol_conf_up2, vol_conf_down2 = create_volume_divergence_indicator(
+        vol_conf_up2, vol_conf_down2, vol_strength2 = create_volume_divergence_indicator(
             volume_s, lookback_window_s, breakout_up_s2, breakout_down_s2
         )
         self.assertFalse(vol_conf_up2.any(), "Volume should NOT confirm breakout up with low volume")
         self.assertFalse(vol_conf_down2.any(), "No confirmation down")
+        self.assertIsInstance(vol_strength2, pd.Series, "Volume strength should be a pandas Series")
 
         # --- Case 3: Breakout Down WITH high volume --- #
         breakout_up_s3 = pd.Series(False, index=dates)
         breakout_down_s3 = pd.Series(False, index=dates)
         breakout_down_s3.iloc[25] = True # Breakdown occurs at the volume spike
 
-        vol_conf_up3, vol_conf_down3 = create_volume_divergence_indicator(
+        vol_conf_up3, vol_conf_down3, vol_strength3 = create_volume_divergence_indicator(
             volume_s, lookback_window_s, breakout_up_s3, breakout_down_s3
         )
         self.assertTrue(vol_conf_down3.iloc[25], "Volume should confirm breakout down at index 25")
         self.assertFalse(vol_conf_down3.iloc[:25].any(), "No confirmation before index 25 (Down)")
         self.assertFalse(vol_conf_down3.iloc[26:].any(), "No confirmation after index 25 (Down)")
         self.assertFalse(vol_conf_up3.any(), "No confirmation up when breakout is down")
+        self.assertIsInstance(vol_strength3, pd.Series, "Volume strength should be a pandas Series")
 
         # --- Case 4: High Volume WITHOUT breakout --- #
         breakout_up_s4 = pd.Series(False, index=dates)
         breakout_down_s4 = pd.Series(False, index=dates)
 
-        vol_conf_up4, vol_conf_down4 = create_volume_divergence_indicator(
+        vol_conf_up4, vol_conf_down4, vol_strength4 = create_volume_divergence_indicator(
             volume_s, lookback_window_s, breakout_up_s4, breakout_down_s4
         )
         self.assertFalse(vol_conf_up4.any(), "Volume should NOT confirm if there is no breakout up signal")
         self.assertFalse(vol_conf_down4.any(), "Volume should NOT confirm if there is no breakout down signal")
+        self.assertIsInstance(vol_strength4, pd.Series, "Volume strength should be a pandas Series")
 
     def test_create_market_microstructure_indicator(self):
         """Test the market microstructure (candle shadow) indicator function."""

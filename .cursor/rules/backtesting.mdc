@@ -1,0 +1,110 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Backtesting Environment Requirements
+
+- **Python Version and Virtual Environment**
+  - **DO** use Python 3.11 for all backtesting scripts
+  - **DO** use the `vectorbtpro` conda environment
+  ```bash
+  # ✅ DO: Run backtesting scripts with correct environment
+  conda activate vectorbtpro
+  python scripts/strategies/your_script.py
+  
+  # ❌ DON'T: Use system Python or other virtual environments
+  python3 scripts/strategies/your_script.py  # Wrong - might use wrong Python version
+  ```
+
+- **Environment Verification**
+  - **DO** verify Python version before running scripts:
+  ```python
+  # Add to the top of backtesting scripts
+  import sys
+  if not (sys.version_info.major == 3 and sys.version_info.minor == 11):
+      raise RuntimeError("This script requires Python 3.11")
+  ```
+
+- **VectorBT Pro Requirements**
+  - **DO** verify vectorbtpro is installed in the environment
+  ```python
+  # Add to scripts using vectorbtpro
+  try:
+      import vectorbtpro as vbt
+  except ImportError:
+      raise ImportError(
+          "vectorbtpro not found. Please activate the correct environment:\n"
+          "conda activate vectorbtpro"
+      )
+  ```
+
+- **IDE Configuration**
+  - **DO** configure IDE to use Python 3.11 from conda vectorbtpro environment
+  - **DO** set the Python interpreter path to:
+    ```
+    /usr/local/Caskroom/miniconda/base/envs/vectorbtpro/bin/python
+    ```
+
+- **Script Headers**
+  - **DO** include environment requirements in script docstrings:
+  ```python
+  """
+  Strategy Name: Example Strategy
+  
+  Environment Requirements:
+  - Python 3.11
+  - conda environment: vectorbtpro
+  - Required packages: vectorbtpro, pandas, numpy
+  
+  To run:
+  conda activate vectorbtpro
+  python scripts/strategies/example_strategy.py
+  """
+  ```
+
+- **Testing Requirements**
+  - **DO** run all tests in the vectorbtpro environment
+  - **DO** include environment checks in test setup
+  ```python
+  # In test files
+  def test_environment():
+      assert sys.version_info.major == 3
+      assert sys.version_info.minor == 11
+      assert 'vectorbtpro' in sys.modules
+  ```
+
+- **Debugging Configuration**
+  - **DO** configure debug settings to use Python 3.11
+  - **DO** set up launch configurations to activate vectorbtpro environment
+  ```json
+  {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: Strategy Debug",
+        "type": "python",
+        "request": "launch",
+        "program": "${file}",
+        "python": "/usr/local/Caskroom/miniconda/base/envs/vectorbtpro/bin/python"
+      }
+    ]
+  }
+  ```
+
+- **Common Issues and Solutions**
+  - If script fails with module not found:
+    1. Verify conda environment is active
+    2. Check Python version with `python --version`
+    3. Confirm vectorbtpro installation with `pip list | grep vectorbt`
+  
+  - If wrong Python version is used:
+    1. Deactivate any active virtual environments
+    2. Activate vectorbtpro environment
+    3. Verify Python version before running script
+
+- **Best Practices**
+  - Keep separate requirements.txt for vectorbtpro environment
+  - Document any additional dependencies
+  - Use environment-specific settings in configuration files
+  - Include environment setup in project README

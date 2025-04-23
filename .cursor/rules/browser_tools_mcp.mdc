@@ -1,1 +1,77 @@
- 
+# Browser Tools MCP Usage Guidelines
+
+- **Debugging API Interactions**
+  - **DO** use browser tools to monitor network calls when testing API connections
+    ```typescript
+    // After making an API call, check network logs
+    await client.getMarketData();
+    // Use mcp_browser_tools_getNetworkLogs to verify request/response
+    ```
+  - **DON'T** rely solely on console logs for debugging
+    ```typescript
+    // ❌ DON'T: Rely only on console logs
+    console.log("API Response:", response);
+    ```
+
+- **WebSocket Monitoring**
+  - **DO** use network logs to verify WebSocket connections
+    ```typescript
+    // After establishing WebSocket connection, verify in browser tools
+    await websocketClient.connect();
+    // Use mcp_browser_tools_getNetworkLogs to check WebSocket handshake
+    ```
+  - **DO** monitor WebSocket message flow in real-time
+    ```typescript
+    // When debugging WebSocket messages
+    // Use mcp_browser_tools_getConsoleLogs to monitor message flow
+    ```
+
+- **Performance Monitoring**
+  - **DO** use performance audit for CPU-intensive operations
+    ```typescript
+    // Before optimizing trading algorithms
+    // Run mcp_browser_tools_runPerformanceAudit to identify bottlenecks
+    ```
+  - **DO** monitor memory usage for potential leaks
+    ```typescript
+    // For long-running operations
+    // Use debugger mode to track memory consumption over time
+    ```
+
+- **Error Tracking**
+  - **DO** collect and analyze console errors during testing
+    ```typescript
+    // After test runs
+    // Use mcp_browser_tools_getConsoleErrors to identify and categorize errors
+    ```
+  - **DO** use detailed network error tracking for API failures
+    ```typescript
+    // When troubleshooting API integration issues
+    // Use mcp_browser_tools_getNetworkErrors to diagnose connection problems
+    ```
+
+- **Debugging Workflow**
+  - Start with `mcp_browser_tools_wipeLogs` to clear previous logs
+  - Run the operation being debugged
+  - Use appropriate log retrieval based on issue type:
+    - API issues: `mcp_browser_tools_getNetworkLogs`
+    - JS errors: `mcp_browser_tools_getConsoleErrors`
+    - Data flow: `mcp_browser_tools_getConsoleLogs`
+  - For persistent issues, use `mcp_browser_tools_runDebuggerMode`
+  - Document findings and solutions for future reference
+
+- **Debug Mode vs Audit Mode**
+  - Use Debug Mode for:
+    - API connection issues
+    - WebSocket message problems
+    - Trading execution errors
+  - Use Audit Mode for:
+    - Performance optimization
+    - Memory usage monitoring
+    - Best practices compliance
+  
+- **Best Practices**
+  - Clear logs before each debug session
+  - Use screenshots to document visual issues
+  - Combine console and network logs for comprehensive analysis
+  - Document common error patterns and solutions 

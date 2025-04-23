@@ -48,3 +48,33 @@ lmdbm>=0.0.1
 # For LLM API interactions 
 litellm>=0.12.0
 sentence-transformers>=2.2.2  # For VectorBT embeddings and ChatVBT functionality
+
+# Core data processing and analysis
+pandas>=1.5.0
+numpy>=1.23.0
+scipy>=1.11.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Trading and backtesting
+vectorbtpro>=0.25.0  # For backtesting
+
+# Data sources
+yfinance>=0.2.31     # Yahoo Finance data
+python-coinbase-advanced>=0.1.2  # Coinbase Advanced Trading API
+
+# Authentication and security
+cryptography>=41.0.0
+pyjwt>=2.8.0
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+tqdm>=4.66.0
+
+# Development tools
+ipykernel>=6.25.0     # For Jupyter notebook support
+black>=23.7.0         # Code formatting
+mypy>=1.5.0           # Type checking

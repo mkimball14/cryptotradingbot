@@ -1,1 +1,47 @@
- 
+# Crypto Trading Bot Project Context
+
+- **Project Overview**
+  - Cryptocurrency trading bot using VectorBT Pro
+  - Implements walk-forward optimization (WFO)
+  - Uses AI-assisted strategy optimization
+  - Supports live trading via Coinbase Advanced API
+
+- **Key Components**
+  1. Edge Multi-Factor Strategy (`scripts/strategies/edge_multi_factor_fixed.py`)
+     - Main trading strategy implementation
+     - Combines multiple technical indicators
+     - Handles position sizing and risk management
+
+  2. WFO Implementation (`scripts/strategies/wfo_edge_strategy.py`)
+     - Walk-forward optimization logic
+     - Parameter optimization using Optuna
+     - Performance metric calculation
+
+  3. Strategy Assistant (`scripts/strategies/edge_strategy_assistant.py`)
+     - AI-powered strategy enhancement
+     - Parameter suggestions and validation
+     - Market regime analysis
+
+  4. Live Trading System (`scripts/live_trading/`)
+     - Real-time trading execution
+     - WebSocket market data handling
+     - Order management and monitoring
+
+- **File Creation Guidelines**
+  1. New strategy files go in: `scripts/strategies/`
+  2. Live trading components go in: `scripts/live_trading/`
+  3. Analysis tools go in: `scripts/analysis/`
+  4. Tests go in appropriate `tests/` subdirectory
+  5. Configuration files go in: `config/`
+
+- **Dependency Management**
+  - All requirements in: `requirements.txt`
+  - Virtual environment in: `venv/`
+  - Environment variables in: `.env`
+
+- **Task Management**
+  - Use task-master for development workflow
+  - Task definitions in: `tasks/tasks.json`
+  - Task files in: `tasks/` directory
+
+Follow these guidelines when suggesting file locations or creating new components. 

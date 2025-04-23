@@ -1,1 +1,166 @@
- 
+# GitHub MCP Usage Guidelines
+
+- **Repository Management**
+  - **DO** use GitHub MCP for creating structured repositories
+    ```typescript
+    // When creating a new component repository
+    const result = await mcp_github_create_repository({
+      name: "crypto-bot-exchange-adapters",
+      description: "Exchange API adapters for crypto trading bot",
+      private: true,
+      autoInit: true
+    });
+    ```
+  - **DO** maintain consistent repository structure
+    ```typescript
+    // Standard repository structure
+    const directories = [
+      "src/adapters",
+      "src/common",
+      "src/utils",
+      "tests",
+      "docs",
+      "examples"
+    ];
+    ```
+
+- **Code Management**
+  - **DO** use multi-file operations for related changes
+    ```typescript
+    // For related file changes
+    const result = await mcp_github_push_files({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      branch: "feature/binance-adapter",
+      message: "Implement Binance adapter with authentication",
+      files: [
+        {
+          path: "src/adapters/binance/client.ts",
+          content: binanceClientCode
+        },
+        {
+          path: "src/adapters/binance/auth.ts",
+          content: binanceAuthCode
+        },
+        {
+          path: "src/adapters/binance/websocket.ts",
+          content: binanceWebsocketCode
+        }
+      ]
+    });
+    ```
+  - **DO** provide descriptive commit messages
+    ```typescript
+    // For meaningful commit messages
+    const result = await mcp_github_create_or_update_file({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      path: "src/strategies/macd-crossover.ts",
+      content: strategyCode,
+      message: "Implement MACD crossover strategy with position sizing and stop-loss",
+      branch: "feature/macd-strategy"
+    });
+    ```
+
+- **Collaboration Workflow**
+  - **DO** use feature branches for new capabilities
+    ```typescript
+    // For new feature development
+    const result = await mcp_github_create_branch({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      branch: "feature/ethereum-support",
+      from_branch: "main"
+    });
+    ```
+  - **DO** use pull requests for code review
+    ```typescript
+    // When ready for review
+    const result = await mcp_github_create_pull_request({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      title: "Add support for Ethereum trading",
+      body: "Implements Ethereum trading support with:\n- Market data streaming\n- Order creation and management\n- Position tracking\n- Unit and integration tests",
+      head: "feature/ethereum-support",
+      base: "main"
+    });
+    ```
+
+- **Issue Management**
+  - **DO** use structured issue creation
+    ```typescript
+    // For bug reporting
+    const result = await mcp_github_create_issue({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      title: "WebSocket reconnection fails during high market volatility",
+      body: "## Description\nThe WebSocket connection fails to reconnect during periods of high market volatility.\n\n## Steps to Reproduce\n1. Run the bot with BTC-USD trading enabled\n2. Wait for high volume trading period\n3. Observe connection logs\n\n## Expected Behavior\nConnection should automatically reconnect\n\n## Actual Behavior\nConnection attempts fail after 3 retries",
+      labels: ["bug", "websocket", "high-priority"]
+    });
+    ```
+  - **DO** use issues for feature planning
+    ```typescript
+    // For feature planning
+    const result = await mcp_github_create_issue({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      title: "Implement risk management module",
+      body: "## Objective\nCreate a risk management module to enforce position limits and prevent over-exposure.\n\n## Requirements\n- Maximum position size limits\n- Per-exchange exposure limits\n- Daily loss limits\n- Integration with existing order execution\n\n## Acceptance Criteria\n- Unit tests for all risk rules\n- Documentation of risk parameters\n- Integration tests with trading engine",
+      labels: ["enhancement", "risk-management"]
+    });
+    ```
+
+- **Code Search**
+  - **DO** use targeted search queries
+    ```typescript
+    // For specific implementation patterns
+    const result = await mcp_github_search_code({
+      q: "reconnectInterval repo:username/crypto-trading-bot path:src/websocket language:typescript"
+    });
+    ```
+  - **DO** search for security patterns
+    ```typescript
+    // For security auditing
+    const result = await mcp_github_search_code({
+      q: "api_secret repo:username/crypto-trading-bot"
+    });
+    ```
+
+- **Documentation**
+  - **DO** maintain documentation in repositories
+    ```typescript
+    // For documentation updates
+    const result = await mcp_github_create_or_update_file({
+      owner: "username",
+      repo: "crypto-trading-bot",
+      path: "docs/exchange-integration.md",
+      content: documentationContent,
+      message: "Update exchange integration documentation with authentication requirements",
+      branch: "main"
+    });
+    ```
+  - **DO** include API documentation
+    ```typescript
+    // Structure for API documentation
+    const apiDocTemplate = `
+    # Exchange API Integration
+    
+    ## Authentication
+    
+    ## Endpoints
+    
+    ## Rate Limits
+    
+    ## WebSocket Feeds
+    
+    ## Error Handling
+    `;
+    ```
+
+- **Best Practices**
+  - Create feature branches for all new development
+  - Use consistent commit message formats
+  - Perform code reviews through pull requests
+  - Track bugs and features through issues
+  - Maintain up-to-date documentation
+  - Use meaningful branch names that reflect purpose 

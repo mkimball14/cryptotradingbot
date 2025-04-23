@@ -1,1 +1,123 @@
- 
+# File Group Definitions
+
+## Strategy Groups
+
+- **@core** - Core Strategy Files:
+  ```
+  scripts/strategies/edge_multi_factor_fixed.py
+  scripts/strategies/edge_strategy_assistant.py
+  scripts/strategies/wfo_edge_strategy.py
+  ```
+
+- **@opt** - Optimization Files:
+  ```
+  scripts/strategies/enhanced_parameter_suggestions.py
+  scripts/strategies/chat_optimize_edge_strategy.py
+  scripts/strategies/scheduled_optimization.py
+  ```
+
+- **@test** - Test Files:
+  ```
+  scripts/strategies/test_edge_multi_factor_fixed.py
+  scripts/strategies/test_edge_assistant.py
+  tests/strategies/*
+  ```
+
+- **@analysis** - Analysis Files:
+  ```
+  scripts/strategies/backtest_edge_strategy.py
+  scripts/analysis/*
+  ```
+
+## Documentation Groups
+
+- **@docs** - Documentation Files:
+  ```
+  docs/strategy_architecture.md
+  scripts/strategies/README.md
+  ```
+
+## Configuration Groups
+
+- **@config** - Configuration Files:
+  ```
+  config/optimized_strategy_params.json
+  .env
+  ```
+
+## Common File Combinations
+
+- **@strategy-core** - Strategy Development:
+  ```
+  @core
+  @docs
+  config/optimized_strategy_params.json
+  ```
+
+- **@optimization** - Optimization Work:
+  ```
+  @opt
+  scripts/strategies/wfo_edge_strategy.py
+  config/optimized_strategy_params.json
+  ```
+
+- **@testing** - Testing Setup:
+  ```
+  @test
+  @core
+  tests/strategies/*
+  ```
+
+## Usage Examples
+
+1. **For Strategy Development:**
+   ```python
+   """
+   Working on core strategy:
+   @strategy-core
+   Current file: edge_multi_factor_fixed.py
+   """
+   ```
+
+2. **For Optimization Work:**
+   ```python
+   """
+   Working on parameter optimization:
+   @optimization
+   Current file: enhanced_parameter_suggestions.py
+   """
+   ```
+
+3. **For Testing:**
+   ```python
+   """
+   Working on strategy tests:
+   @testing
+   Current file: test_edge_multi_factor_fixed.py
+   """
+   ```
+
+## Directory Shortcuts
+
+- **@strategies**: `scripts/strategies/`
+- **@live**: `scripts/live_trading/`
+- **@tests**: `tests/`
+- **@docs**: `docs/`
+- **@config**: `config/`
+
+## Best Practices
+
+1. **Use Group References:**
+   - Reference file groups instead of individual files when possible
+   - Use the most specific group for your current task
+   - Include documentation group when relevant
+
+2. **Context Management:**
+   - Start sessions with appropriate group context
+   - Include related groups when switching tasks
+   - Reference documentation groups for guidance
+
+3. **File Operations:**
+   - Verify target directory using shortcuts
+   - Include all relevant groups in dependency checks
+   - Reference configuration groups when needed 

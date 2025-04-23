@@ -41,7 +41,23 @@ except ImportError:
             logger.error(f"Could not import data fetching functions: {e}")
             sys.exit(1)
 
+# Import strategy and parameter loader
 from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
+try:
+    from scripts.strategies.param_loader import load_strategy_params, list_available_profiles
+    logger.info("Using param_loader from strategies module.")
+except ImportError:
+    try:
+        from param_loader import load_strategy_params, list_available_profiles
+        logger.info("Using param_loader from current directory.")
+    except ImportError as e:
+        logger.error(f"Could not import param_loader: {e}")
+        # Define a simple function as fallback
+        def load_strategy_params(profile_name="default"):
+            return {}
+        
+        def list_available_profiles():
+            return []
 
 # Define parameters - Use results from latest TSL optimization
 # OR load from best_edge_params.json if available
@@ -82,6 +98,8 @@ def main():
     parser.add_argument('--end_date', type=str, default=end_date, help='End date')
     parser.add_argument('--granularity', type=str, default=granularity_str, help='Granularity')
     parser.add_argument('--initial_capital', type=float, default=initial_capital, help='Initial capital')
+    parser.add_argument('--profile', type=str, default=None, help='Parameter profile name from config/strategy_params.json')
+    parser.add_argument('--list_profiles', action='store_true', help='List available parameter profiles and exit')
     parser.add_argument('--lookback', type=int, default=lookback_window, help='Factor lookback')
     parser.add_argument('--vol_thresh', type=float, default=volatility_threshold, help='Volatility threshold')
     parser.add_argument('--tsl_stop', type=float, default=tsl_stop, help='Trailing Stop Loss % (0 to disable)')
@@ -94,6 +112,41 @@ def main():
     
     args = parser.parse_args()
     
+    # List available profiles if requested
+    if args.list_profiles:
+        profiles = list_available_profiles()
+        if profiles:
+            print("\nAvailable Parameter Profiles:")
+            for profile in profiles:
+                print(f"- {profile}")
+        else:
+            print("\nNo parameter profiles found or param_loader not available.")
+        return
+    
+    # Load parameters from profile if specified
+    factor_weights = optimal_factor_weights.copy()
+    if args.profile:
+        profile_params = load_strategy_params(args.profile)
+        if profile_params:
+            logger.info(f"Loaded parameters from profile: {args.profile}")
+            
+            # Override default parameters with those from the profile
+            if 'lookback_window' in profile_params:
+                args.lookback = profile_params['lookback_window']
+            if 'volatility_threshold' in profile_params:
+                args.vol_thresh = profile_params['volatility_threshold']
+            if 'trending_tp_multiplier' in profile_params and profile_params['trending_tp_multiplier'] > 0:
+                args.tp_stop = profile_params['trending_tp_multiplier'] / 10  # Rough conversion
+            if 'trending_sl_multiplier' in profile_params:
+                args.atr_multiple_sl = profile_params['trending_sl_multiplier']
+            if 'volume_threshold' in profile_params:
+                logger.info(f"Using volume threshold from profile: {profile_params['volume_threshold']}")
+            if 'default_factor_weights' in profile_params:
+                factor_weights = profile_params['default_factor_weights']
+                logger.info(f"Using factor weights from profile: {factor_weights}")
+        else:
+            logger.warning(f"Profile '{args.profile}' not found or empty, using default parameters.")
+    
     current_granularity_seconds = GRANULARITY_MAP_SECONDS.get(args.granularity.lower())
     if current_granularity_seconds is None:
         logger.error(f"Invalid granularity: {args.granularity}")
@@ -105,7 +158,7 @@ def main():
     logger.info(f"  Granularity: {args.granularity}")
     logger.info(f"  Lookback Window: {args.lookback}")
     logger.info(f"  Volatility Threshold: {args.vol_thresh}")
-    logger.info(f"  Factor Weights: {optimal_factor_weights}") 
+    logger.info(f"  Factor Weights: {factor_weights}") 
     logger.info(f"  SL ATR Multiple: {args.atr_multiple_sl}")
     logger.info(f"  Trailing Stop Loss: {args.tsl_stop*100:.1f}%")
     logger.info(f"  Take Profit: {args.tp_stop*100:.1f}%")
@@ -122,15 +175,26 @@ def main():
     logger.info(f"Data fetched successfully. Shape: {price_data.shape}")
     price_data.index = pd.to_datetime(price_data.index, utc=True)
 
-    # Create strategy instance
-    strategy = EdgeMultiFactorStrategy(
-        lookback_window=args.lookback,
-        volatility_threshold=args.vol_thresh,
-        initial_capital=args.initial_capital,
-        default_factor_weights=optimal_factor_weights,
-        commission_pct=0.001,
-        slippage_pct=0.0005
-    )
+    # Create strategy instance with parameter profile settings if available
+    strategy_params = {
+        'lookback_window': args.lookback,
+        'volatility_threshold': args.vol_thresh,
+        'initial_capital': args.initial_capital,
+        'default_factor_weights': factor_weights,
+        'commission_pct': 0.001,
+        'slippage_pct': 0.0005
+    }
+    
+    # Add additional parameters from profile if they exist
+    if args.profile:
+        profile_params = load_strategy_params(args.profile)
+        # Add all keys from profile_params that aren't already set
+        for key, value in profile_params.items():
+            if key not in ['description', 'default_factor_weights'] and key not in strategy_params:
+                strategy_params[key] = value
+                logger.info(f"Added parameter from profile: {key}={value}")
+
+    strategy = EdgeMultiFactorStrategy(**strategy_params)
 
     # Generate Signals
     logger.info("Generating signals...")

@@ -1,1 +1,131 @@
- 
+# Sequential Thinking MCP Usage Guidelines
+
+- **Trading Strategy Development**
+  - **DO** use sequential thinking for complex strategy design
+    ```typescript
+    // When designing trading strategies
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "First, we need to analyze the core components of an EMA crossover strategy",
+      thoughtNumber: 1,
+      totalThoughts: 7,
+      nextThoughtNeeded: true
+    });
+    ```
+  - **DO** break down strategies into discrete components
+    ```typescript
+    // Strategy component breakdown
+    const components = [
+      "Market data collection",
+      "Indicator calculation",
+      "Signal generation",
+      "Risk management",
+      "Order execution",
+      "Performance tracking"
+    ];
+    ```
+
+- **Debugging Complex Issues**
+  - **DO** use sequential thinking for systematic debugging
+    ```typescript
+    // For complex debugging
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Let's analyze why the WebSocket connection is dropping during high volume periods",
+      thoughtNumber: 1,
+      totalThoughts: 5,
+      nextThoughtNeeded: true
+    });
+    ```
+  - **DO** revise previous thoughts when new information emerges
+    ```typescript
+    // When revising a hypothesis
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Based on the network logs, the issue isn't WebSocket instability but rate limiting",
+      thoughtNumber: 3,
+      totalThoughts: 5,
+      nextThoughtNeeded: true,
+      isRevision: true,
+      revisesThought: 2
+    });
+    ```
+
+- **Algorithm Analysis**
+  - **DO** use sequential thinking for algorithm optimization
+    ```typescript
+    // For algorithm performance analysis
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Let's analyze the time complexity of our current indicator calculation methods",
+      thoughtNumber: 1,
+      totalThoughts: 4,
+      nextThoughtNeeded: true
+    });
+    ```
+  - **DO** explore multiple optimization pathways
+    ```typescript
+    // For exploring alternatives
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Let's explore caching intermediate results to improve performance",
+      thoughtNumber: 2,
+      totalThoughts: 5,
+      nextThoughtNeeded: true,
+      branchFromThought: 1,
+      branchId: "caching"
+    });
+    ```
+
+- **Risk Management Planning**
+  - **DO** use sequential thinking for comprehensive risk analysis
+    ```typescript
+    // For risk management planning
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "First, identify all potential risk factors in automated trading",
+      thoughtNumber: 1,
+      totalThoughts: 6,
+      nextThoughtNeeded: true
+    });
+    ```
+  - **DO** analyze risk mitigation strategies
+    ```typescript
+    // For risk mitigation
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Let's evaluate position sizing algorithms to limit exposure",
+      thoughtNumber: 3,
+      totalThoughts: 6,
+      nextThoughtNeeded: true
+    });
+    ```
+
+- **Architecture Planning**
+  - **DO** use sequential thinking for system architecture design
+    ```typescript
+    // For architecture planning
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Let's analyze the core components needed for a scalable trading system",
+      thoughtNumber: 1,
+      totalThoughts: 8,
+      nextThoughtNeeded: true
+    });
+    ```
+  - **DO** evaluate architectural tradeoffs
+    ```typescript
+    // For architectural decisions
+    const result = await mcp_sequential_thinking_sequentialthinking({
+      thought: "Comparing microservice vs monolithic architecture for our trading system",
+      thoughtNumber: 2,
+      totalThoughts: 8,
+      nextThoughtNeeded: true
+    });
+    ```
+
+- **Sequential Thinking Best Practices**
+  - Start with an appropriate number of estimated thoughts
+  - Be willing to adjust total thoughts as complexity becomes apparent
+  - Use branching for exploring alternatives
+  - Use revision for correcting earlier assumptions
+  - Document final thought sequences for complex solutions
+  - Reference previous thought sequences in related problems
+  
+- **Documentation Integration**
+  - Record key insights from sequential thinking sessions
+  - Integrate conclusions into project documentation
+  - Use thought sequences to document decision-making process
+  - Link sequential thinking outcomes to implemented solutions 

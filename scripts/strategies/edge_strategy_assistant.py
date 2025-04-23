@@ -10,18 +10,22 @@ import requests
 from typing import Dict, List, Union, Any, Optional, Tuple
 from pathlib import Path
 from dotenv import load_dotenv
+import vectorbtpro as vbt
 
-# Add project root to path
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(ROOT_DIR))
+# Add project root to Python path to enable absolute imports
+current_dir = Path(__file__).parent
+project_root = current_dir.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.append(str(project_root))
+
+from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("edge_strategy_assistant")
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv(verbose=True)
@@ -89,7 +93,7 @@ def parse_llm_json(response):
 def save_metrics(metrics_data):
     """Save performance metrics to a jsonl file."""
     try:
-        metrics_file = os.path.join(ROOT_DIR, "data/metrics/chat_metrics.jsonl")
+        metrics_file = os.path.join(project_root, "data/metrics/chat_metrics.jsonl")
         os.makedirs(os.path.dirname(metrics_file), exist_ok=True)
         with open(metrics_file, 'a') as f:
             f.write(json.dumps(metrics_data) + '\n')
@@ -318,7 +322,7 @@ def chat_with_vectorbt(prompt: str, model=None, temperature=0.7, max_tokens=1500
     
     # Check cache first if enabled
     if use_cache:
-        cache_file = os.path.join(ROOT_DIR, "data/cache/chat_cache.json")
+        cache_file = os.path.join(project_root, "data/cache/chat_cache.json")
         cache_key = f"{prompt}_{model}_{temperature}_{max_tokens}".replace(" ", "_")[:100]  # Keep key reasonable length
         
         if os.path.exists(cache_file):
@@ -1028,95 +1032,448 @@ class EnhancedEdgeStrategy(EdgeStrategy):
                 "timestamp": pd.Timestamp.now().isoformat()
             }
 
-def create_portfolio(data, params, debug=False):
+def normalize_data(data):
     """
-    Create a portfolio using the edge strategy with the given parameters.
+    Normalize data to ensure it's in the expected format.
     
     Args:
-        data: Market data (DataFrame or dictionary)
-        params: Strategy parameters
-        debug: Whether to print debug information
+        data (pd.DataFrame or dict): Input data that needs normalization
         
     Returns:
-        tuple: (portfolio, success_flag)
+        pd.DataFrame: Normalized DataFrame with OHLCV columns
+    """
+    # If data is a dictionary, convert to DataFrame
+    if isinstance(data, dict):
+        data = pd.DataFrame(data)
+    
+    # Ensure column names are lowercase
+    data.columns = [col.lower() for col in data.columns]
+    
+    # Ensure we have all required columns
+    required_cols = ['open', 'high', 'low', 'close', 'volume']
+    
+    # If only 'close' is available, fill in other columns
+    if 'close' in data.columns and not all(col in data.columns for col in required_cols):
+        for col in ['open', 'high', 'low']:
+            if col not in data.columns:
+                data[col] = data['close']
+        
+        # If volume is missing, add a column of ones
+        if 'volume' not in data.columns:
+            data['volume'] = 1.0
+    
+    # Make sure we have at least the close column
+    if 'close' not in data.columns:
+        raise ValueError("Data must have at least a 'close' column")
+    
+    # If DataFrame has irregular index, reindex to ensure proper date sequence
+    if isinstance(data.index, pd.DatetimeIndex) and data.index.has_duplicates:
+        logger.warning("Data has duplicate timestamps, reindexing...")
+        data = data.groupby(data.index).last()
+    
+    return data
+
+def create_portfolio(ticker_data: Union[pd.DataFrame, Dict], params: Dict[str, Any]) -> Tuple[Optional[vbt.Portfolio], bool]:
+    """
+    Create a portfolio using the EdgeStrategy with the given parameters.
+    
+    Parameters:
+        ticker_data: DataFrame or Dictionary with OHLCV data
+        params: Strategy parameters
+        
+    Returns:
+        Tuple (Portfolio object or None, success flag)
     """
     try:
-        # Check if data is valid
-        if data is None:
-            logger.error("Insufficient data for portfolio creation")
+        # --- Start: Ensure data_normalized is a DataFrame --- 
+        if isinstance(ticker_data, dict):
+            # Convert dictionary to DataFrame
+            try:
+                df = pd.DataFrame(ticker_data)
+                # Ensure index is DatetimeIndex if possible
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    # Attempt to convert index if it looks like dates
+                    try:
+                        df.index = pd.to_datetime(df.index)
+                    except Exception:
+                        logger.error("Could not convert dict index to DatetimeIndex.")
+                        return None, False
+                data_normalized = df
+            except ValueError as e:
+                logger.error(f"Error converting dict to DataFrame: {e}. Check data structure.")
+                # Log the keys of the dict to help debug
+                logger.debug(f"Dictionary keys: {list(ticker_data.keys())}")
+                # Log lengths of arrays if they exist
+                for k, v in ticker_data.items():
+                    if hasattr(v, '__len__'):
+                        logger.debug(f"Length of {k}: {len(v)}")
+                return None, False
+        elif isinstance(ticker_data, pd.DataFrame):
+            data_normalized = ticker_data.copy()
+        else:
+            logger.error(f"Unsupported data type for ticker_data: {type(ticker_data)}")
+            return None, False
+
+        # Ensure columns are lowercase
+        data_normalized.columns = [col.lower() for col in data_normalized.columns]
+
+        # Verify required columns exist
+        required_cols = ['open', 'high', 'low', 'close']
+        if not all(col in data_normalized.columns for col in required_cols):
+            logger.error(f"DataFrame missing required columns. Has: {data_normalized.columns.tolist()}")
             return None, False
             
-        # Convert dictionary to DataFrame if needed
-        import pandas as pd
-        if isinstance(data, dict):
-            # Create DataFrame from dictionary of Series
-            df = pd.DataFrame({k: v for k, v in data.items() if isinstance(v, (pd.Series, pd.DataFrame))})
-        else:
-            # Make a copy to avoid modifying the original
-            df = data.copy()
+        # --- End: Ensure data_normalized is a DataFrame --- 
         
-        # Ensure all required columns are present and numeric
-        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        # --- Start: Parameter Validation ---
+        # Validate and clean parameters to prevent extreme values
+        init_cash_amount = float(params.get('initial_capital', 10000))
+        init_cash_amount = max(1000, min(init_cash_amount, 1000000))  # Limit to reasonable range
         
-        # Standardize column names (convert to lowercase)
-        df.columns = [col.lower() for col in df.columns]
+        commission_pct = float(params.get('commission_pct', 0.001))
+        commission_pct = max(0.0001, min(commission_pct, 0.01))  # 0.01% to 1%
         
-        for col in required_columns:
-            if col not in df.columns:
-                # Try to find a case-insensitive match
-                if isinstance(data, dict) and col.capitalize() in data:
-                    df[col] = data[col.capitalize()]
-                else:
-                    matching_cols = [c for c in df.columns if c.lower() == col.lower()]
-                    if matching_cols:
-                        df[col] = df[matching_cols[0]]
+        slippage_pct = float(params.get('slippage_pct', 0.0005))
+        slippage_pct = max(0.0001, min(slippage_pct, 0.005))  # 0.01% to 0.5%
+        
+        # Get and validate stop loss percentage
+        sl_pct = float(params.get('stop_loss_pct', 0.02))
+        sl_pct = max(0.005, min(sl_pct, 0.15))  # 0.5% to 15%
+        
+        # Get and validate risk per trade
+        risk_fraction = float(params.get('risk_per_trade', 0.01))
+        risk_fraction = max(0.001, min(risk_fraction, 0.05))  # 0.1% to 5%
+        
+        # Create a cleaned parameters dictionary
+        strategy_params = {
+            'initial_capital': init_cash_amount,
+            'commission_pct': commission_pct,
+            'slippage_pct': slippage_pct,
+            'risk_per_trade': risk_fraction,
+            'stop_loss_pct': sl_pct
+        }
+        
+        # Add other parameters with validation
+        for key, value in params.items():
+            if key not in strategy_params and key != 'size_pct':  # Don't duplicate already processed params
+                # Handle numeric parameters
+                if isinstance(value, (int, float)):
+                    # Apply some basic limits to prevent extreme values
+                    if key in ['lookback_window', 'vol_filter_window', 'rsi_window', 'bb_window']:
+                        strategy_params[key] = max(5, min(int(value), 100))  # 5 to 100
+                    elif key in ['volatility_threshold', 'volatility_lower', 'volatility_upper']:
+                        strategy_params[key] = max(0.001, min(float(value), 0.5))  # 0.1% to 50%
+                    elif key in ['size_pct', 'tp_pct', 'tsl_stop', 'tp_stop', 'atr_multiple_sl']:
+                        strategy_params[key] = max(0.001, min(float(value), 0.5))  # 0.1% to 50%
                     else:
-                        logger.error(f"Missing required column: {col}")
-                        return None, False
-            
-            # Convert to numeric and handle any errors
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+                        strategy_params[key] = value
+                else:
+                    strategy_params[key] = value
+        # --- End: Parameter Validation ---
         
-        # Check for NaN values
-        if df[required_columns].isna().any().any():
-            logger.warning("Data contains NaN values. Filling with forward fill method.")
-            df[required_columns] = df[required_columns].fillna(method='ffill')
-            # After filling, check again for any remaining NaNs
-            if df[required_columns].isna().any().any():
-                logger.error("Data still contains NaN values after filling")
-                return None, False
-        
-        # Apply edge strategy with parameters
-        from scripts.strategies.edge_multi_factor_fixed import EdgeMultiFactorStrategy
-        
-        # Convert parameters to appropriate types if needed
-        strategy_params = params.copy()
-        
-        # Create the strategy
+        # --- Start: Handle parameter mapping aliases ---
+        # If 'lookback_window' is missing but 'bb_window' exists, use it
+        if 'lookback_window' not in strategy_params and 'bb_window' in strategy_params:
+             strategy_params['lookback_window'] = strategy_params.pop('bb_window') # Use bb_window and remove it
+        # Ensure a default lookback_window if neither is present
+        if 'lookback_window' not in strategy_params:
+             strategy_params['lookback_window'] = 20
+             
+        # Ensure a default vol_filter_window if not present
+        if 'vol_filter_window' not in strategy_params:
+             strategy_params['vol_filter_window'] = 100
+             
+        # Ensure a default volatility_threshold if not present
+        if 'volatility_threshold' not in strategy_params:
+             # Check if volatility_lower is present as an alternative
+             if 'volatility_lower' in strategy_params:
+                 strategy_params['volatility_threshold'] = strategy_params.pop('volatility_lower')
+             else:
+                 strategy_params['volatility_threshold'] = 0.5
+                 
+        # Remove potential alias keys if they were used and mapped
+        strategy_params.pop('bb_window', None)
+        strategy_params.pop('volatility_lower', None)
+        # --- End: Handle parameter mapping aliases ---
+
+        # --- Start: Debug Logging ---
+        logger.debug(f"Attempting to initialize EdgeMultiFactorStrategy with params: {strategy_params}")
+        logger.debug(f"Data shape before run_strategy: {data_normalized.shape}")
+        logger.debug(f"Data index type: {type(data_normalized.index)}")
+        logger.debug(f"Data NaN check:\n{data_normalized.isna().sum()}")
+        # --- End: Debug Logging ---
+
+        # Initialize strategy and generate signals
         strategy = EdgeMultiFactorStrategy(**strategy_params)
         
-        # Run the strategy to get entry/exit signals
-        # --- Unpack all four return values --- (Regime masks not used here yet)
-        entry_signals, exit_signals, is_trending, is_ranging = strategy.generate_signals(df)
-        # -------------------------------------
+        # Run the strategy to generate signals
+        signals_df, market_regimes, _ = strategy.run_strategy(data_normalized, test_mode=False) # Run strategy without backtest here
         
-        # Check if any signals were generated
-        if entry_signals.sum() == 0:
-            logger.warning(f"No entry signals generated with parameters: {params}")
-            return None, False
+        # Check if signals were generated
+        if signals_df is None or signals_df.empty:
+            logger.warning(f"No entry signals generated for params: {strategy_params}. Returning empty portfolio.")
+            # Create an empty portfolio manually to avoid potential from_signals bug
+            # Need initial capital to create the portfolio context
+            portfolio = vbt.Portfolio.from_holding(data_normalized['close'], init_cash=init_cash_amount)
+            return portfolio, True # Return empty portfolio and success=True
             
-        # Create portfolio from signals
-        portfolio, metrics = strategy.backtest_signals(entry_signals, exit_signals)
+        # Extract entries and exits
+        entries = signals_df['long_signal']
+        exits = signals_df['long_exit']
         
-        # Debug info if requested
-        if debug:
-            if portfolio is not None:
-                logger.debug(f"Portfolio metrics: {metrics}")
+        # Check if there are no entry signals
+        if entries.sum() == 0:
+            logger.warning(f"No entry signals generated for params: {strategy_params}. Returning empty portfolio.")
+            # Create an empty portfolio manually to avoid potential from_signals bug
+            portfolio = vbt.Portfolio.from_holding(data_normalized['close'], init_cash=init_cash_amount)
+            return portfolio, True # Return empty portfolio and success=True
+        
+        # --- Start: Try Different Position Sizing Methods ---
+        # First method: Risk-based position sizing
+        try:
+            # Calculate stop loss distance with a minimum threshold to prevent division by very small numbers
+            stop_distance = data_normalized['close'] * sl_pct
+            
+            # Add a minimum stop distance to prevent division by near-zero values
+            min_stop_distance = data_normalized['close'] * 0.005  # Minimum 0.5% stop distance
+            stop_distance = np.maximum(stop_distance, min_stop_distance)
+            
+            # Calculate risk per trade allowed
+            cash_at_risk = init_cash_amount * risk_fraction
+            
+            # Calculate size based on risk (size in units of base currency)
+            # Avoid division by zero for stop_distance
+            position_size_amount = (cash_at_risk / stop_distance.replace(0, np.nan)).fillna(0)
+            
+            # Ensure size is within reasonable limits
+            # Set a maximum position size to prevent extreme values
+            max_size = init_cash_amount * 0.25 / data_normalized['close']  # Max 25% of capital
+            position_size_amount = np.minimum(position_size_amount, max_size)
+            
+            # Ensure size is non-negative and finite
+            position_size_amount = position_size_amount.clip(lower=0)
+            position_size_amount = position_size_amount.replace([np.inf, -np.inf], 0).fillna(0)
+            
+            logger.debug(f"Risk-based sizing - min: {position_size_amount.min()}, max: {position_size_amount.max()}, mean: {position_size_amount.mean()}")
+            
+            # Check if we should use CustomPortfolio for SL/TP
+            use_custom_portfolio = sl_pct > 0 or strategy_params.get('tp_pct', 0) > 0
+            
+            # Create portfolio using risk-based sizing
+            try:
+                if use_custom_portfolio:
+                    try:
+                        # Import the CustomPortfolio class
+                        from scripts.portfolio.custom_portfolio import CustomPortfolio
+                        
+                        # Get take profit percentage if available
+                        tp_pct = strategy_params.get('tp_pct', 0)
+                        
+                        # Create portfolio with CustomPortfolio
+                        portfolio = CustomPortfolio.from_signals(
+                            close=data_normalized['close'],
+                            entries=entries,
+                            exits=exits,
+                            size=position_size_amount.astype(np.float64),
+                            size_type='amount',
+                            init_cash=init_cash_amount,
+                            fees=commission_pct,
+                            slippage=slippage_pct,
+                            freq='1D',
+                            stop_loss=sl_pct,
+                            take_profit=tp_pct
+                        )
+                        
+                        logger.info("Successfully created portfolio with CustomPortfolio for SL/TP")
+                    except ImportError as e:
+                        logger.warning(f"Could not import CustomPortfolio: {e}, falling back to standard Portfolio")
+                        # Fall back to standard Portfolio
+                        portfolio = vbt.Portfolio.from_signals(
+                            data_normalized['close'],
+                            entries=entries,
+                            exits=exits,
+                            size=position_size_amount.astype(np.float64),
+                            size_type='amount',
+                            init_cash=init_cash_amount,
+                            fees=commission_pct,
+                            slippage=slippage_pct,
+                            freq='1D'
+                        )
+                else:
+                    # Use standard Portfolio without SL/TP
+                    portfolio = vbt.Portfolio.from_signals(
+                        data_normalized['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=position_size_amount.astype(np.float64),
+                        size_type='amount',
+                        init_cash=init_cash_amount,
+                        fees=commission_pct,
+                        slippage=slippage_pct,
+                        freq='1D'
+                    )
+                
+                if portfolio is not None and hasattr(portfolio, 'trades') and portfolio.trades.count() > 0:
+                    logger.info("Successfully created portfolio with risk-based sizing")
+                    return portfolio, True
+                else:
+                    logger.warning("Risk-based sizing created empty portfolio, falling back to fixed percentage")
+                    # Fall through to next method
+            except Exception as e:
+                logger.warning(f"Risk-based sizing failed with error: {str(e)}, falling back to fixed percentage")
+                # Fall through to next method
+        
+        except Exception as e:
+            logger.warning(f"Error calculating risk-based position size: {str(e)}, falling back to fixed percentage")
+            # Fall through to next method
+            
+        # Second method: Fixed percentage sizing
+        try:
+            # Use a fixed percentage of capital for each trade
+            fixed_pct = params.get('size_pct', 0.1)  # Default to 10% of capital
+            fixed_pct = max(0.01, min(fixed_pct, 0.25))  # Limit to 1% - 25% range
+            
+            logger.debug(f"Trying fixed percentage sizing with {fixed_pct:.1%} of capital")
+            
+            # Check if we should use CustomPortfolio for SL/TP
+            use_custom_portfolio = sl_pct > 0 or strategy_params.get('tp_pct', 0) > 0
+            
+            if use_custom_portfolio:
+                try:
+                    # Import the CustomPortfolio class
+                    from scripts.portfolio.custom_portfolio import CustomPortfolio
+                    
+                    # Get take profit percentage if available
+                    tp_pct = strategy_params.get('tp_pct', 0)
+                    
+                    # Create portfolio with CustomPortfolio
+                    portfolio = CustomPortfolio.from_signals(
+                        close=data_normalized['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=fixed_pct,
+                        size_type='value',
+                        init_cash=init_cash_amount,
+                        fees=commission_pct,
+                        slippage=slippage_pct,
+                        freq='1D',
+                        stop_loss=sl_pct,
+                        take_profit=tp_pct
+                    )
+                    
+                    logger.info("Successfully created portfolio with CustomPortfolio for SL/TP using fixed percentage")
+                except ImportError as e:
+                    logger.warning(f"Could not import CustomPortfolio: {e}, falling back to standard Portfolio")
+                    # Fall back to standard Portfolio
+                    portfolio = vbt.Portfolio.from_signals(
+                        data_normalized['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=fixed_pct,
+                        size_type='value',
+                        init_cash=init_cash_amount,
+                        fees=commission_pct,
+                        slippage=slippage_pct,
+                        freq='1D'
+                    )
             else:
-                logger.debug("Portfolio creation failed")
+                # Use standard Portfolio without SL/TP
+                portfolio = vbt.Portfolio.from_signals(
+                    data_normalized['close'],
+                    entries=entries,
+                    exits=exits,
+                    size=fixed_pct,
+                    size_type='value',
+                    init_cash=init_cash_amount,
+                    fees=commission_pct,
+                    slippage=slippage_pct,
+                    freq='1D'
+                )
             
-        return portfolio, True
+            if portfolio is not None and hasattr(portfolio, 'trades') and portfolio.trades.count() > 0:
+                logger.info("Successfully created portfolio with fixed percentage sizing")
+                return portfolio, True
+            else:
+                logger.warning("Fixed percentage sizing created empty portfolio, falling back to fixed unit size")
+                # Fall through to next method
+        except Exception as e:
+            logger.warning(f"Fixed percentage sizing failed with error: {str(e)}, falling back to fixed unit size")
+            # Fall through to next method
         
+        # Third method: Fixed unit size as last resort
+        try:
+            # Use fixed unit amount (e.g., 0.1 BTC per trade)
+            logger.debug("Trying fixed unit sizing as last resort")
+            
+            # Check if we should use CustomPortfolio for SL/TP
+            use_custom_portfolio = sl_pct > 0 or strategy_params.get('tp_pct', 0) > 0
+            
+            if use_custom_portfolio:
+                try:
+                    # Import the CustomPortfolio class
+                    from scripts.portfolio.custom_portfolio import CustomPortfolio
+                    
+                    # Get take profit percentage if available
+                    tp_pct = strategy_params.get('tp_pct', 0)
+                    
+                    # Create portfolio with CustomPortfolio
+                    portfolio = CustomPortfolio.from_signals(
+                        close=data_normalized['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=0.1,  # Fixed unit amount
+                        size_type='amount',
+                        init_cash=init_cash_amount,
+                        fees=commission_pct,
+                        slippage=slippage_pct,
+                        freq='1D',
+                        stop_loss=sl_pct,
+                        take_profit=tp_pct
+                    )
+                    
+                    logger.info("Successfully created portfolio with CustomPortfolio for SL/TP using fixed unit size")
+                except ImportError as e:
+                    logger.warning(f"Could not import CustomPortfolio: {e}, falling back to standard Portfolio")
+                    # Fall back to standard Portfolio
+                    portfolio = vbt.Portfolio.from_signals(
+                        data_normalized['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=0.1,  # Fixed unit amount
+                        size_type='amount',
+                        init_cash=init_cash_amount,
+                        fees=commission_pct,
+                        slippage=slippage_pct,
+                        freq='1D'
+                    )
+            else:
+                # Use standard Portfolio without SL/TP
+                portfolio = vbt.Portfolio.from_signals(
+                    data_normalized['close'],
+                    entries=entries,
+                    exits=exits,
+                    size=0.1,  # Fixed unit amount
+                    size_type='amount',
+                    init_cash=init_cash_amount,
+                    fees=commission_pct,
+                    slippage=slippage_pct,
+                    freq='1D'
+                )
+            
+            logger.info("Successfully created portfolio with fixed unit sizing")
+            return portfolio, True
+        except Exception as e:
+            logger.error(f"Fixed unit sizing also failed: {str(e)}")
+            # Last resort: Return an empty portfolio
+            logger.warning("All portfolio creation methods failed, returning empty portfolio")
+            try:
+                empty_portfolio = vbt.Portfolio.from_holding(data_normalized['close'], init_cash=init_cash_amount)
+                return empty_portfolio, True
+            except Exception as e2:
+                logger.error(f"Even creating empty portfolio failed: {str(e2)}")
+                return None, False
+        # --- End: Try Different Position Sizing Methods ---
+    
     except Exception as e:
         logger.error(f"Error creating portfolio: {str(e)}")
         import traceback

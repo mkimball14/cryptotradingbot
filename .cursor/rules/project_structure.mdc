@@ -1,1 +1,59 @@
- 
+# Project Structure and Organization
+
+- **Root Directory Structure**
+  ```
+  crypto_bot/
+  ├── scripts/
+  │   ├── strategies/      # Trading strategy implementations
+  │   ├── live_trading/    # Live trading system components
+  │   └── analysis/        # Analysis and reporting tools
+  ├── data/                # Data storage and management
+  ├── tests/               # Test files
+  ├── config/              # Configuration files
+  ├── tasks/               # Task management files
+  ├── docs/                # Documentation
+  └── notebooks/           # Jupyter notebooks
+  ```
+
+- **Strategy Files Location**
+  - All strategy files must be in `scripts/strategies/`
+  - Example: `scripts/strategies/wfo_edge_strategy.py`
+
+- **Live Trading Components**
+  - All live trading files must be in `scripts/live_trading/`
+  - Example: `scripts/live_trading/run_trading_system.py`
+
+- **Configuration Files**
+  - Store all config files in `config/`
+  - Example: `config/optimized_strategy_params.json`
+
+- **Task Management**
+  - Task files belong in `tasks/`
+  - Example: `tasks/tasks.json`
+
+- **Test Organization**
+  - Unit tests: `tests/unit/`
+  - Integration tests: `tests/integration/`
+  - Strategy tests: `tests/strategies/`
+
+- **Data Management**
+  - Market data: `data/market/`
+  - Backtest results: `data/backtest/`
+  - Optimization results: `data/optimization/`
+
+- **File Naming Conventions**
+  - Use snake_case for Python files
+  - Use descriptive prefixes:
+    - `test_` for test files
+    - `wfo_` for walk-forward optimization
+    - `live_` for live trading components
+
+- **Module Dependencies**
+  ```
+  strategies/
+  └── edge_strategy_assistant.py  # Base strategy assistant
+  └── edge_multi_factor_fixed.py  # Multi-factor strategy
+  └── wfo_edge_strategy.py        # WFO implementation
+  ```
+
+Follow these guidelines for all file operations and new feature implementations. 

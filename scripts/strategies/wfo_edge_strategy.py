@@ -16,6 +16,7 @@ from concurrent.futures import ProcessPoolExecutor
 import inspect
 from dotenv import load_dotenv
 import time
+import pandas_ta as ta  # Add at the top of the file with other imports
 
 # Import create_portfolio from edge_strategy_assistant
 try:
@@ -23,6 +24,13 @@ try:
 except ModuleNotFoundError:
     # Handle case when file is run directly from the strategies directory
     from edge_strategy_assistant import create_portfolio
+
+# Import CandlestickPatternStrategy
+try:
+    from scripts.strategies.candlestick_pattern_strategy import CandlestickPatternStrategy
+except ModuleNotFoundError:
+    # Handle case when file is run directly from the strategies directory
+    from candlestick_pattern_strategy import CandlestickPatternStrategy
 
 # Add dotenv import and loading
 load_dotenv(verbose=True)
@@ -537,10 +545,14 @@ SLIPPAGE_PCT = 0.0005
 RISK_FRACTION = 0.01      # Fraction of capital to risk per trade for sizing
 ATR_WINDOW_SIZING = 14    # ATR period used in sizing calculation
 
+# --- Strategy Selection ---
+STRATEGY_TYPE = "candlestick"  # Options: "edge_multi_factor", "candlestick"
+
 # --- Optimization Parameters ---
 OPTIMIZATION_METRIC = 'sharpe_ratio' # e.g., 'sharpe_ratio', 'total_return', 'max_drawdown'
-# Use more targeted parameter ranges based on domain knowledge
-PARAM_GRID = {
+
+# Define parameter grids for different strategy types
+EDGE_MULTI_FACTOR_PARAM_GRID = {
     # RSI parameters
     'rsi_window': (5, 25, 1),      # Wider range with smaller values included
     'rsi_entry': (20, 40, 2),      # Go lower on entry threshold to catch more oversold conditions
@@ -561,15 +573,23 @@ PARAM_GRID = {
     # Position sizing
     'risk_per_trade': [0.005, 0.01, 0.015, 0.02, 0.03]  # More sizing options
 }
-FACTOR_NAMES = ['volatility_regime', 'consolidation_breakout', 'volume_divergence', 'market_microstructure']
-# Reduce weight combinations to speed up processing
-weight_options = [
-    # Equal weights
-    {'volatility_regime': 0.25, 'consolidation_breakout': 0.25, 'volume_divergence': 0.25, 'market_microstructure': 0.25},
-    # Emphasis on volatility regime
-    {'volatility_regime': 0.6, 'consolidation_breakout': 0.2, 'volume_divergence': 0.1, 'market_microstructure': 0.1}
-]
-WEIGHT_COMBINATIONS = weight_options
+
+CANDLESTICK_PARAM_GRID = {
+    # Candlestick pattern parameters
+    'lookback_periods': [20, 30, 50],
+    'min_strength': [0.005, 0.01, 0.02, 0.05],
+    'use_strength': [True, False],
+    'use_confirmation': [True, False],
+    'confirmation_window': [2, 3, 5],
+    
+    # Risk management parameters
+    'stop_loss_pct': [0.02, 0.03, 0.05],
+    'take_profit_pct': [0.04, 0.06, 0.1],
+    'risk_per_trade': [0.01, 0.02, 0.03]
+}
+
+# Use the appropriate parameter grid based on strategy type
+PARAM_GRID = CANDLESTICK_PARAM_GRID if STRATEGY_TYPE == "candlestick" else EDGE_MULTI_FACTOR_PARAM_GRID
 
 # --- Performance Optimization Settings ---
 # Set to True to enable parallel processing (significantly faster)
@@ -639,1082 +659,712 @@ def generate_weight_combinations(factors: List[str], num_steps: int) -> List[Dic
     return list(unique_combos_dict.values())
 
 
+def extract_candle_patterns(df: pd.DataFrame, pattern_list: List[str] = None) -> pd.DataFrame:
+    """
+    Extract candle patterns from OHLCV data using pandas_ta.
+    
+    Args:
+        df: DataFrame with open, high, low, close columns
+        pattern_list: List of patterns to identify. If None, all patterns will be extracted.
+            Available patterns: 'doji', 'hammer', 'inverted_hammer', 'hanging_man', 
+            'shooting_star', 'engulfing', 'morning_star', 'evening_star', etc.
+            Or use 'all' to get all available patterns.
+    
+    Returns:
+        DataFrame with candle pattern signals (1 for bullish, -1 for bearish, 0 for none)
+    """
+    # Create a copy of the input DataFrame
+    result_df = df.copy()
+    
+    try:
+        # Convert column names to lowercase if needed
+        required_cols = ['open', 'high', 'low', 'close']
+        rename_map = {}
+        for col in required_cols:
+            if col not in df.columns and col.upper() in df.columns:
+                rename_map[col.upper()] = col
+        
+        if rename_map:
+            # Create a temporary DataFrame with lowercase columns
+            temp_df = df.rename(columns=rename_map)
+        else:
+            temp_df = df.copy()
+            
+        # Ensure required columns exist
+        missing_cols = [col for col in required_cols if col not in temp_df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+            
+        # Handle pattern_list input
+        if pattern_list is None or 'all' in pattern_list:
+            # Run cdl_pattern for all available patterns
+            patterns = temp_df.ta.cdl_pattern(name="all")
+        else:
+            # Run for specific patterns
+            patterns = pd.DataFrame(index=temp_df.index)
+            for pattern in pattern_list:
+                pattern_result = temp_df.ta.cdl_pattern(name=pattern)
+                if not pattern_result.empty:
+                    for col in pattern_result.columns:
+                        patterns[col] = pattern_result[col]
+        
+        # Merge the patterns with the result DataFrame
+        if not patterns.empty:
+            for col in patterns.columns:
+                result_df[col] = patterns[col]
+                
+        return result_df
+        
+    except Exception as e:
+        wfo_logger.error(f"Error extracting candle patterns: {str(e)}")
+        # Return the original DataFrame if there's an error
+        return result_df
+
+
+def get_candle_pattern_strength(df: pd.DataFrame, lookback: int = 20) -> pd.DataFrame:
+    """
+    Calculate the strength of candle patterns based on historical reliability.
+    
+    Args:
+        df: DataFrame with candle pattern signals and price data
+        lookback: Number of past occurrences to analyze for each pattern
+    
+    Returns:
+        DataFrame with pattern strength metrics
+    """
+    result_df = df.copy()
+    
+    try:
+        # Get all pattern columns
+        pattern_cols = [col for col in df.columns if col.startswith('CDL')]
+        
+        if not pattern_cols:
+            wfo_logger.warning("No candle pattern columns found. Run extract_candle_patterns first.")
+            return result_df
+            
+        # Create forward returns for 1, 3, and 5 days
+        try:
+            result_df['return_1d'] = df['close'].pct_change(1).shift(-1)
+            result_df['return_3d'] = df['close'].pct_change(3).shift(-3)
+            result_df['return_5d'] = df['close'].pct_change(5).shift(-5)
+        except Exception as e:
+            wfo_logger.warning(f"Error calculating returns: {e}. Using default strength values.")
+            # Set default strength values
+            for pattern in pattern_cols:
+                strength_col = f"{pattern}_strength"
+                result_df[strength_col] = df[pattern].abs() * 0.01  # Simple default strength
+            return result_df
+        
+        # Calculate pattern strength for each pattern
+        for pattern in pattern_cols:
+            # Create columns for pattern strength
+            strength_col = f"{pattern}_strength"
+            result_df[strength_col] = 0.0
+            
+            # Process each day
+            for i in range(lookback, len(df)):
+                # Get the current pattern value
+                current_value = df[pattern].iloc[i]
+                
+                # Skip if no pattern detected
+                if current_value == 0:
+                    continue
+                    
+                # Get historical pattern occurrences (same sign)
+                hist_window = df[pattern].iloc[i-lookback:i]
+                hist_indices = hist_window[hist_window == current_value].index
+                
+                if len(hist_indices) > 0:
+                    try:
+                        # Calculate the average return after pattern
+                        if current_value > 0:  # Bullish pattern
+                            avg_return_1d = df.loc[hist_indices, 'return_1d'].mean()
+                            avg_return_3d = df.loc[hist_indices, 'return_3d'].mean()
+                            avg_return_5d = df.loc[hist_indices, 'return_5d'].mean()
+                        else:  # Bearish pattern
+                            avg_return_1d = -df.loc[hist_indices, 'return_1d'].mean()
+                            avg_return_3d = -df.loc[hist_indices, 'return_3d'].mean()
+                            avg_return_5d = -df.loc[hist_indices, 'return_5d'].mean()
+                        
+                        # Handle NaN values
+                        avg_return_1d = 0.0 if pd.isna(avg_return_1d) else avg_return_1d
+                        avg_return_3d = 0.0 if pd.isna(avg_return_3d) else avg_return_3d
+                        avg_return_5d = 0.0 if pd.isna(avg_return_5d) else avg_return_5d
+                        
+                        # Calculate weighted strength based on returns
+                        weighted_strength = (
+                            0.5 * avg_return_1d + 
+                            0.3 * avg_return_3d + 
+                            0.2 * avg_return_5d
+                        )
+                        
+                        # Account for frequency
+                        frequency = len(hist_indices) / lookback
+                        
+                        # Calculate final strength
+                        strength = weighted_strength * frequency * abs(current_value)
+                        
+                        # Store the strength value
+                        result_df.loc[df.index[i], strength_col] = strength
+                    except Exception as inner_e:
+                        # If calculation fails, use a default strength value
+                        default_strength = abs(current_value) * 0.01  # Simple default based on pattern value
+                        result_df.loc[df.index[i], strength_col] = default_strength
+        
+        return result_df
+        
+    except Exception as e:
+        wfo_logger.error(f"Error calculating candle pattern strength: {str(e)}")
+        # Return the original DataFrame with default strength values if available
+        for pattern in [col for col in df.columns if col.startswith('CDL')]:
+            strength_col = f"{pattern}_strength"
+            if strength_col not in result_df.columns:
+                result_df[strength_col] = df[pattern].abs() * 0.01  # Simple default strength
+        return result_df
+
+
+def generate_candle_pattern_signals(df: pd.DataFrame, min_strength: float = 0.01, 
+                                    use_strength: bool = True) -> Tuple[pd.Series, pd.Series]:
+    """
+    Generate trading signals based on candle patterns and their strength.
+    
+    Args:
+        df: DataFrame with candle pattern signals and strength metrics
+        min_strength: Minimum strength threshold for generating signals
+        use_strength: Whether to use pattern strength for signal generation
+    
+    Returns:
+        Tuple containing (buy_signals, sell_signals)
+    """
+    try:
+        # Get all pattern columns
+        pattern_cols = [col for col in df.columns if col.startswith('CDL')]
+        strength_cols = [col for col in df.columns if col.endswith('_strength')]
+        
+        if not pattern_cols:
+            wfo_logger.warning("No candle pattern columns found. Run extract_candle_patterns first.")
+            return pd.Series(False, index=df.index), pd.Series(False, index=df.index)
+            
+        # Initialize signal series
+        buy_signals = pd.Series(False, index=df.index)
+        sell_signals = pd.Series(False, index=df.index)
+        
+        if use_strength and strength_cols:
+            # Using pattern strength for signals
+            
+            # Calculate net pattern strength
+            df['net_bullish_strength'] = 0.0
+            df['net_bearish_strength'] = 0.0
+            
+            for pattern in pattern_cols:
+                strength_col = f"{pattern}_strength"
+                if strength_col in df.columns:
+                    # Add to bullish strength if pattern is bullish and strength is positive
+                    bullish_mask = (df[pattern] > 0) & (df[strength_col] > 0)
+                    df.loc[bullish_mask, 'net_bullish_strength'] += df.loc[bullish_mask, strength_col]
+                    
+                    # Add to bearish strength if pattern is bearish and strength is positive
+                    bearish_mask = (df[pattern] < 0) & (df[strength_col] > 0)
+                    df.loc[bearish_mask, 'net_bearish_strength'] += df.loc[bearish_mask, strength_col]
+            
+            # Generate signals based on net strength
+            buy_signals = df['net_bullish_strength'] > min_strength
+            sell_signals = df['net_bearish_strength'] > min_strength
+            
+        else:
+            # Using raw pattern signals
+            for pattern in pattern_cols:
+                # Add buy signals for bullish patterns
+                buy_signals = buy_signals | (df[pattern] > 0)
+                
+                # Add sell signals for bearish patterns
+                sell_signals = sell_signals | (df[pattern] < 0)
+        
+        return buy_signals, sell_signals
+        
+    except Exception as e:
+        wfo_logger.error(f"Error generating candle pattern signals: {str(e)}")
+        return pd.Series(False, index=df.index), pd.Series(False, index=df.index)
+
+
+def optimize_pattern_signal_parameters(df: pd.DataFrame, 
+                                      test_length: int = 252,
+                                      min_trades: int = 10) -> Dict[str, Any]:
+    """
+    Optimize parameters for candle pattern signal generation.
+    
+    Args:
+        df: DataFrame with candle pattern signals and price data
+        test_length: Number of days to use for testing
+        min_trades: Minimum number of trades required for valid optimization
+    
+    Returns:
+        Dictionary of optimized parameters
+    """
+    try:
+        # Split data into train and test
+        train_df = df.iloc[:-test_length]
+        test_df = df.iloc[-test_length:]
+        
+        # Define parameter ranges to test
+        min_strength_values = [0.005, 0.01, 0.02, 0.03, 0.05, 0.1]
+        lookback_values = [10, 20, 30, 50, 100]
+        
+        # Initialize best parameters and metrics
+        best_params = {
+            'min_strength': 0.01,
+            'lookback': 20,
+            'use_strength': True
+        }
+        best_sharpe = -np.inf
+        
+        # Test each parameter combination
+        for min_strength in min_strength_values:
+            for lookback in lookback_values:
+                for use_strength in [True, False]:
+                    # Generate strength metrics on training data
+                    train_with_strength = get_candle_pattern_strength(train_df, lookback=lookback)
+                    
+                    # Apply to test data (simulating real-world scenario)
+                    test_with_strength = get_candle_pattern_strength(test_df, lookback=lookback)
+                    
+                    # Generate signals on test data
+                    buy_signals, sell_signals = generate_candle_pattern_signals(
+                        test_with_strength, 
+                        min_strength=min_strength,
+                        use_strength=use_strength
+                    )
+                    
+                    # Count number of signals
+                    num_buys = buy_signals.sum()
+                    num_sells = sell_signals.sum()
+                    
+                    # Skip if too few trades
+                    if num_buys + num_sells < min_trades:
+                        continue
+                    
+                    # Calculate returns based on signals
+                    # Simple implementation: buy on buy signal, sell on sell signal, hold otherwise
+                    positions = pd.Series(0, index=test_df.index)
+                    positions[buy_signals] = 1
+                    positions[sell_signals] = -1
+                    
+                    # Calculate daily returns
+                    daily_returns = test_df['close'].pct_change() * positions.shift(1)
+                    
+                    # Skip if not enough data points
+                    if daily_returns.count() < 20:
+                        continue
+                    
+                    # Calculate Sharpe ratio (annualized)
+                    sharpe = daily_returns.mean() / daily_returns.std() * np.sqrt(252)
+                    
+                    # Update best parameters if better Sharpe
+                    if pd.notna(sharpe) and sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_params = {
+                            'min_strength': min_strength,
+                            'lookback': lookback,
+                            'use_strength': use_strength,
+                            'sharpe': sharpe,
+                            'num_buys': num_buys,
+                            'num_sells': num_sells
+                        }
+        
+        wfo_logger.info(f"Optimized candle pattern parameters: {best_params}")
+        return best_params
+        
+    except Exception as e:
+        wfo_logger.error(f"Error optimizing pattern signal parameters: {str(e)}")
+        return {
+            'min_strength': 0.01,
+            'lookback': 20,
+            'use_strength': True
+        }
+
+def create_portfolio_for_strategy(data, entries, exits, init_cash=INITIAL_CAPITAL, size=None, stop_loss=None, take_profit=None, direction='long'):
+    """
+    Create a portfolio for a trading strategy using either vectorbt's Portfolio or our CustomPortfolio.
+    
+    Args:
+        data: DataFrame with at least 'close' column
+        entries: Series of entry signals
+        exits: Series of exit signals
+        init_cash: Initial capital
+        size: Optional size series
+        stop_loss: Stop loss percentage as decimal
+        take_profit: Take profit percentage as decimal
+        direction: 'long' or 'short'
+        
+    Returns:
+        Portfolio object or CustomPortfolio object
+    """
+    try:
+        # Ensure we have a DataFrame
+        if not isinstance(data, pd.DataFrame):
+            logger.error("Data must be a DataFrame")
+            return None
+            
+        # Ensure we have a close column
+        if 'close' not in data.columns:
+            logger.error("'close' column required in data")
+            return None
+        
+        # Ensure entries and exits are proper boolean Series
+        if not isinstance(entries, pd.Series):
+            entries = pd.Series(entries, index=data.index)
+        if not isinstance(exits, pd.Series):
+            exits = pd.Series(exits, index=data.index)
+        
+        # Convert to numpy boolean arrays for vectorbt compatibility
+        entries = entries.astype(np.bool_)
+        exits = exits.astype(np.bool_)
+        
+        # Direction handling - ensure it's in the format VectorBT expects
+        # VectorBT uses 1 for long direction and -1 for short
+        direction_value = 1 if direction == 'long' else -1
+        
+        # Determine how to create the portfolio based on the version and requirements
+        try:
+            # First check if we should use CustomPortfolio
+            if stop_loss is not None or take_profit is not None:
+                # Import the CustomPortfolio class
+                try:
+                    from scripts.portfolio.custom_portfolio import CustomPortfolio
+                    logger.debug(f"Creating CustomPortfolio with SL={stop_loss}, TP={take_profit}")
+                    
+                    # Create CustomPortfolio with stop loss and take profit
+                    portfolio = CustomPortfolio.from_signals(
+                        close=data['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=size,
+                        size_type='amount' if size is not None else 'value',
+                        init_cash=init_cash,
+                        fees=COMMISSION_PCT/100,
+                        slippage=SLIPPAGE_PCT/100,
+                        freq=get_vbt_freq_str(GRANULARITY_STR),
+                        direction=direction_value,  # Use numeric direction
+                        stop_loss=stop_loss,
+                        take_profit=take_profit
+                    )
+                    logger.debug(f"Successfully created CustomPortfolio with SL/TP")
+                except ImportError as e:
+                    logger.warning(f"Could not import CustomPortfolio class: {e}, falling back to standard Portfolio")
+                    # Fall back to standard Portfolio if CustomPortfolio can't be imported
+                    portfolio = vbt.Portfolio.from_signals(
+                        close=data['close'],
+                        entries=entries,
+                        exits=exits,
+                        size=size,
+                        size_type='amount' if size is not None else 'value',
+                        init_cash=init_cash,
+                        fees=COMMISSION_PCT/100,
+                        slippage=SLIPPAGE_PCT/100,
+                        freq=get_vbt_freq_str(GRANULARITY_STR),
+                        direction=direction_value  # Use numeric direction
+                    )
+            else:
+                # Use standard vectorbt Portfolio without stop loss/take profit
+                logger.debug("Creating standard vectorbt Portfolio")
+                
+                portfolio = vbt.Portfolio.from_signals(
+                    close=data['close'],
+                    entries=entries,
+                    exits=exits,
+                    size=size,
+                    size_type='amount' if size is not None else 'value',
+                    init_cash=init_cash,
+                    fees=COMMISSION_PCT/100,
+                    slippage=SLIPPAGE_PCT/100,
+                    freq=get_vbt_freq_str(GRANULARITY_STR),
+                    direction=direction_value  # Use numeric direction
+                )
+            
+            logger.debug(f"Successfully created portfolio")
+            return portfolio
+            
+        except Exception as e:
+            logger.error(f"Error creating portfolio: {str(e)}")
+            # Fallback to basic vectorbt Portfolio without stop loss/take profit
+            try:
+                logger.debug("Attempting fallback to basic vectorbt Portfolio")
+                portfolio = vbt.Portfolio.from_signals(
+                    close=data['close'],
+                    entries=entries,
+                    exits=exits,
+                    init_cash=init_cash,
+                    fees=COMMISSION_PCT/100,
+                    slippage=SLIPPAGE_PCT/100,
+                    freq=get_vbt_freq_str(GRANULARITY_STR),
+                    direction=direction_value  # Use numeric direction
+                )
+                return portfolio
+            except Exception as fallback_error:
+                logger.error(f"Fallback portfolio creation also failed: {str(fallback_error)}")
+                return None
+            
+    except Exception as e:
+        logger.error(f"Error in create_portfolio_for_strategy: {str(e)}")
+        return None
+
 def create_pf_for_params(data, params, init_cash=INITIAL_CAPITAL):
     """
-    Create portfolio for specified parameters.
+    Create a vectorbt Portfolio object with the given parameters.
     
     Args:
-        data: DataFrame containing OHLCV data and indicators
+        data: DataFrame with OHLCV data
         params: Dictionary of strategy parameters
         init_cash: Initial capital
         
     Returns:
-        Portfolio object or None if creation fails
+        vectorbt.Portfolio or None: Portfolio object or None if creation failed
     """
     try:
-        import pandas as pd
-        
-        # Handle different data types
-        if isinstance(data, pd.DataFrame):
-            # Make a copy to avoid modifying the original
+        # Ensure we have a DataFrame
+        if not isinstance(data, pd.DataFrame):
+            if isinstance(data, dict):
+                df = pd.DataFrame(data)
+            else:
+                logging.error("Data is not a DataFrame or dictionary")
+                return None
+        else:
             df = data.copy()
             
-            # Ensure column names are standardized to lowercase
-            df.columns = [col.lower() for col in df.columns]
-            
-            # Check if we have all required columns
-            required_cols = ['open', 'high', 'low', 'close', 'volume']
-            for col in required_cols:
-                if col not in df.columns:
-                    # Try to find a case-insensitive match
-                    matching_cols = [c for c in df.columns if c.lower() == col.lower()]
-                    if matching_cols:
-                        df[col] = df[matching_cols[0]]
-                    else:
-                        logging.error(f"Required column {col} not found. Available columns: {df.columns.tolist()}")
-                        return None
-        elif isinstance(data, dict):
-            # For dictionary data, create a DataFrame with standardized column names
-            df = {}
-            column_map = {
-                'open': ['open', 'Open', 'OPEN'],
-                'high': ['high', 'High', 'HIGH'],
-                'low': ['low', 'Low', 'LOW'],
-                'close': ['close', 'Close', 'CLOSE'],
-                'volume': ['volume', 'Volume', 'VOLUME']
-            }
-            
-            # Try to find matching columns
-            for std_col, variants in column_map.items():
-                found = False
-                for variant in variants:
-                    if variant in data:
-                        df[std_col] = data[variant]
-                        found = True
-                        break
-                
-                if not found:
-                    logging.error(f"Required column {std_col} not found in data dictionary")
-                    return None
-            
-            # Include any additional indicators from the data dictionary
-            for key, value in data.items():
-                if key.lower() not in ['open', 'high', 'low', 'close', 'volume']:
-                    df[key.lower()] = value
-        else:
-            logging.error(f"Unsupported data type: {type(data)}")
-            return None
+        # Ensure we have the necessary OHLCV columns
+        required_columns = ['open', 'high', 'low', 'close', 'volume']
+        for col in required_columns:
+            if col not in df.columns:
+                logging.error(f"Missing required column: {col}")
+                return None
         
-        # Convert parameters to the format expected by EdgeMultiFactorStrategy
-        edge_strategy_params = {}
+        # Extract parameters
+        rsi_window = int(params.get('rsi_window', 14))
+        rsi_entry = float(params.get('rsi_entry', 30))
+        rsi_exit = float(params.get('rsi_exit', 70))
         
-        # Parameter mapping from wfo parameter space to EdgeMultiFactorStrategy parameters
-        if 'lookback_window' not in params:
-            # Use bb_window as lookback_window if present
-            if 'bb_window' in params:
-                edge_strategy_params['lookback_window'] = params['bb_window']
-            else:
-                edge_strategy_params['lookback_window'] = 20  # default
-                
-        if 'vol_filter_window' not in params:
-            edge_strategy_params['vol_filter_window'] = 100  # default
-            
-        if 'volatility_threshold' not in params:
-            # Use volatility_lower as the threshold if present
-            if 'volatility_lower' in params:
-                edge_strategy_params['volatility_threshold'] = params['volatility_lower']
-            else:
-                edge_strategy_params['volatility_threshold'] = 0.5  # default
+        bb_window = int(params.get('bb_window', 20))
+        bb_dev = float(params.get('bb_dev', 2.0))
         
-        # Set any other parameters that are directly used by EdgeMultiFactorStrategy
-        edge_strategy_params['initial_capital'] = init_cash
-        edge_strategy_params['commission_pct'] = params.get('commission_pct', 0.001)
-        edge_strategy_params['slippage_pct'] = params.get('slippage_pct', 0.0005)
+        vol_window = int(params.get('vol_window', 20))
+        vol_threshold = float(params.get('vol_threshold', 0.5))
         
-        # Add any additional parameters that might be directly transferable
-        for key, value in params.items():
-            if key in ['lookback_window', 'vol_filter_window', 'volatility_threshold', 
-                      'initial_capital', 'commission_pct', 'slippage_pct']:
-                edge_strategy_params[key] = value
+        sl_pct = float(params.get('sl_pct', 0.05))
+        tp_pct = float(params.get('tp_pct', 0.1))
         
-        # Use our standardized create_portfolio function
-        portfolio, success = create_portfolio(df, edge_strategy_params)
+        risk_per_trade = float(params.get('risk_per_trade', 0.02))
         
-        if not success or portfolio is None:
-            logging.error(f"Failed to create portfolio with params: {params}")
-            return None
-            
-        return portfolio
+        commission_pct = float(params.get('commission_pct', COMMISSION_PCT))
+        slippage_pct = float(params.get('slippage_pct', SLIPPAGE_PCT))
         
-    except Exception as e:
-        logging.error(f"Error creating portfolio: {str(e)}")
-        import traceback
-        logging.debug(traceback.format_exc())
-        return None
-
-# =============================================================================
-# Parallel Optimization Functions
-# =============================================================================
-def evaluate_params(data, params, init_cash=INITIAL_CAPITAL):
-    """
-    Evaluate a set of parameters and return the objective value.
-    
-    Args:
-        data: Dictionary with OHLCV data
-        params: Dictionary of strategy parameters
-        init_cash: Initial capital
+        # Calculate indicators
+        # RSI
+        rsi = vbt.RSI.run(df['close'], window=rsi_window).rsi
         
-    Returns:
-        float: Objective value (Sharpe ratio or -inf if invalid)
-    """
-    try:
-        # Log parameters for debugging
-        logging.debug(f"Evaluating parameters: {params}")
+        # Bollinger Bands
+        bb = vbt.BollingerBands.run(df['close'], window=bb_window, alpha=bb_dev)
         
-        # Create portfolio with parameters
-        pf = create_pf_for_params(data, params, init_cash=init_cash)
+        # Volatility (using 'close' prices and standard deviation)
+        df['volatility'] = df['close'].pct_change().rolling(window=vol_window).std()
         
-        if pf is None:
-            logging.debug(f"Portfolio creation failed for params: {params}")
-            return -float('inf')
+        # Generate entry signals
+        # Long entry: RSI below entry threshold and price below lower BB, with volatility above threshold
+        long_entry = (rsi < rsi_entry) & (df['close'] < bb.lower) & (df['volatility'] > vol_threshold)
         
-        # Extract portfolio metrics
-        stats = pf.stats()
+        # Exit signals: RSI above exit threshold or price above upper BB
+        long_exit = (rsi > rsi_exit) | (df['close'] > bb.upper)
         
-        # Get relevant metrics for filtering
-        total_trades = stats['total_trades']
-        total_closed_trades = stats['total_closed_trades']
-        win_rate = stats['win_rate']
-        sharpe_ratio = stats['sharpe_ratio']
-        max_dd = stats['max_drawdown']
-        profit_factor = stats.get('profit_factor', 0)
-        
-        # More relaxed filtering - Accept portfolios with fewer trades and lower metrics
-        min_trades = 3         # Reduced from 5
-        min_win_rate = 0.25    # Reduced from 0.3
-        min_sharpe = 0.2       # Reduced from 0.5
-        max_dd_allowed = 0.3   # Increased from 0.2
-        min_profit_factor = 1.0 # Reduced from 1.5
-        
-        # Filter valid portfolios
-        if total_trades < min_trades:
-            logging.debug(f"Rejected: too few trades {total_trades} < {min_trades}")
-            return -float('inf')
-        if win_rate < min_win_rate:
-            logging.debug(f"Rejected: win rate too low {win_rate:.2f} < {min_win_rate:.2f}")
-            return -float('inf')
-        if sharpe_ratio < min_sharpe:
-            logging.debug(f"Rejected: Sharpe ratio too low {sharpe_ratio:.2f} < {min_sharpe:.2f}")
-            return -float('inf')
-        if max_dd > max_dd_allowed:
-            logging.debug(f"Rejected: Max drawdown too high {max_dd:.2f} > {max_dd_allowed:.2f}")
-            return -float('inf')
-        if profit_factor < min_profit_factor:
-            logging.debug(f"Rejected: Profit factor too low {profit_factor:.2f} < {min_profit_factor:.2f}")
-            return -float('inf')
-        
-        # For valid portfolio, log metrics
-        logging.info(f"Valid portfolio: trades={total_trades}, win_rate={win_rate:.2f}, sharpe={sharpe_ratio:.2f}, max_dd={max_dd:.2f}, profit_factor={profit_factor:.2f}")
-        
-        # Use Sharpe ratio as the objective value
-        return sharpe_ratio
-    
-    except Exception as e:
-        logging.error(f"Error evaluating parameters: {str(e)}")
-        return -float('inf')
-
-# =============================================================================
-# Main WFO Function
-# =============================================================================
-
-def get_optimization_advice_from_chat_model():
-    """Use the VectorBT Pro chat model to get optimization advice."""
-    chat_model = get_chat_model()
-    if chat_model is None:
-        return None
-    
-    query = """
-    I'm running a Walk-Forward Optimization process for a trading strategy using VectorBT Pro. 
-    Please provide advice on how to make the optimization process faster and more efficient.
-    Specifically, I need tips on:
-    1. Parameter grid design to reduce combinations while maintaining effectiveness
-    2. Data preprocessing that can speed up calculations
-    3. Signal generation optimizations
-    4. Any other performance tips for VectorBT Pro
-    """
-    
-    try:
-        advice = ask_chat_model(query)
-        return advice
-    except Exception as e:
-        wfo_logger.error(f"Error getting optimization advice: {e}")
-        return None
-
-def prepare_data_efficiently(data):
-    """
-    Prepare data efficiently for faster signal generation and backtesting.
-    
-    - Uses NumPy arrays where possible
-    - Precomputes common values
-    - Ensures optimal data types
-    """
-    if data.empty:
-        return data
-        
-    # Ensure data is sorted by index
-    data = data.sort_index()
-    
-    # Convert to more efficient dtypes
-    float_cols = ['open', 'high', 'low', 'close']
-    for col in float_cols:
-        if col in data.columns:
-            data[col] = data[col].astype(np.float64)
-    
-    if 'volume' in data.columns:
-        data['volume'] = data['volume'].astype(np.float64)
-    
-    # Precompute common values
-    data['returns'] = data['close'].pct_change()
-    data['log_returns'] = np.log(data['close'] / data['close'].shift(1))
-    data['hl_range'] = (data['high'] - data['low']) / data['close'].replace(0, np.nan)
-    
-    return data
-
-def filter_valid_portfolios(portfolios, param_combinations):
-    """Filter out invalid portfolios based on performance metrics."""
-    valid_indices = []
-    valid_portfolios = []
-    valid_params = []
-    
-    for i, pf in enumerate(portfolios):
-        if pf is None:
-            continue
-        
-        try:
-            # Get basic metrics
-            metrics = pf.metrics()
-            total_trades = metrics['total_trades']
-            win_rate = metrics['win_rate'] if total_trades > 0 else 0
-            sharpe_ratio = metrics['sharpe_ratio']
-            max_dd = metrics['max_drawdown']
-            
-            # Apply less strict filtering criteria
-            if (total_trades >= MIN_TOTAL_TRADES and 
-                win_rate >= MIN_WIN_RATE and 
-                sharpe_ratio >= MIN_SHARPE_RATIO and
-                max_dd >= MAX_DRAWDOWN):
-                
-                valid_indices.append(i)
-                valid_portfolios.append(pf)
-                valid_params.append(param_combinations[i])
-                
-                # Log more details about the valid portfolio
-                wfo_logger.info(f"Valid portfolio found: Sharpe={sharpe_ratio:.2f}, Win Rate={win_rate:.2f}, Trades={total_trades}, Max DD={max_dd:.2f}")
-        except Exception as e:
-            wfo_logger.warning(f"Could not evaluate portfolio at index {i}: {str(e)}")
-    
-    return valid_portfolios, valid_params, valid_indices
-
-def optimize_parameters(data, params_space, n_trials=50, progress_callback=None, initial_params: Optional[Dict[str, Any]] = None):
-    """
-    Optimize strategy parameters using Optuna.
-    
-    Args:
-        data (pd.DataFrame or dict): OHLCV data with indicators
-        params_space (dict): Parameter space for optimization
-        n_trials (int): Number of optimization trials
-        progress_callback (callable, optional): Callback for progress updates
-        
-    Returns:
-        tuple: (best_params, best_score, trial_history)
-    """
-    import optuna
-    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-    import multiprocessing
-    import signal
-    import numpy as np
-    import pandas as pd
-    
-    # Store details of all trials
-    trial_history = []
-    
-    # Set custom signal handler for graceful interruption
-    original_sigint_handler = signal.getsignal(signal.SIGINT)
-    
-    def sigint_handler(sig, frame):
-        logging.warning("Received interrupt signal. Finishing current trial and stopping optimization.")
-        signal.signal(signal.SIGINT, original_sigint_handler)
-    
-    # Set signal handler
-    signal.signal(signal.SIGINT, sigint_handler)
-    
-    # Prepare data for optimization
-    # Check if data is a dictionary or DataFrame
-    if isinstance(data, dict):
-        # Keep data as-is for dictionary input, no need to convert columns to lowercase
-        data_copy = data
-    else:
-        # For DataFrame input, standardize column names
-        data_copy = data.copy()
-        data_copy.columns = [col.lower() for col in data_copy.columns]
-        
-        # Ensure we have the expected columns for DataFrame
-        required_cols = ['open', 'high', 'low', 'close', 'volume']
-        for col in required_cols:
-            if col not in data_copy.columns:
-                # Try to find a case-insensitive match
-                matching_cols = [c for c in data_copy.columns if c.lower() == col.lower()]
-                if matching_cols:
-                    data_copy[col] = data_copy[matching_cols[0]]
-                else:
-                    logging.error(f"Required column {col} not found in data. Available columns: {data_copy.columns.tolist()}")
-                    return {}, float('-inf'), []
-    
-    # --- MOVED evaluate_portfolio function definition ---
-    def evaluate_portfolio(portfolio):
-        """
-        Calculate performance metrics for a portfolio.
-
-        Args:
-            portfolio: The portfolio object with trades data
-
-        Returns:
-            dict: Performance metrics
-        """
-        import numpy as np
-
-        metrics = {}
-
-        try:
-            # Basic metrics - check if attributes exist and are callable
-            # Get total_return safely
-            if hasattr(portfolio, 'total_return'):
-                if callable(getattr(portfolio, 'total_return')):
-                    metrics['total_return'] = portfolio.total_return()
-                else:
-                    # If it's a property/attribute instead of a method
-                    metrics['total_return'] = portfolio.total_return
-            else:
-                # Try alternative ways to calculate return
-                try:
-                    if hasattr(portfolio, 'final_value') and hasattr(portfolio, 'init_cash'):
-                        metrics['total_return'] = (portfolio.final_value / portfolio.init_cash) - 1
-                    else:
-                        metrics['total_return'] = 0.0
-                except:
-                    metrics['total_return'] = 0.0
-
-            # Get max_drawdown safely
-            if hasattr(portfolio, 'max_drawdown'):
-                if callable(getattr(portfolio, 'max_drawdown')):
-                    metrics['max_drawdown'] = portfolio.max_drawdown()
-                else:
-                    metrics['max_drawdown'] = portfolio.max_drawdown
-            else:
-                metrics['max_drawdown'] = 0.0
-
-            # Trading metrics
-            trades = portfolio.trades if hasattr(portfolio, 'trades') else None
-            if trades is not None and hasattr(trades, '__len__') and len(trades) > 0:
-                # metrics['total_trades'] = len(trades) # Initialize here, may be updated below
-
-                # NEW METHOD: Use vectorbt's built-in properties for win rate and profit factor
-                if hasattr(trades, 'win_rate') and hasattr(trades, 'profit_factor'):
-                    # Get trade count safely
-                    trade_count_value = 0
-                    if hasattr(trades, 'count'):
-                        if callable(trades.count):
-                            trade_count_value = trades.count()
-                        else:
-                            trade_count_value = trades.count
-                    else:
-                        # Fallback if .count is missing
-                        trade_count_value = len(trades)
-
-                    metrics['total_trades'] = trade_count_value # Update total_trades
-                    # Use the obtained count value for calculations
-                    metrics['winning_trades'] = int(trade_count_value * trades.win_rate)
-                    metrics['losing_trades'] = int(trade_count_value * (1 - trades.win_rate))
-                    metrics['win_rate'] = trades.win_rate
-                    metrics['profit_factor'] = trades.profit_factor
-                # ALTERNATIVE METHOD: Use the records_readable DataFrame
-                elif hasattr(trades, 'records_readable'):
-                    try:
-                        trades_df = trades.records_readable
-                        # Handle both 'pnl' and 'PnL' column names
-                        pnl_col = None
-                        if 'PnL' in trades_df.columns:
-                            pnl_col = 'PnL'
-                        elif 'pnl' in trades_df.columns:
-                            pnl_col = 'pnl'
-
-                        if pnl_col is not None:
-                            winning_trades = trades_df[trades_df[pnl_col] > 0]
-                            losing_trades = trades_df[trades_df[pnl_col] <= 0]
-
-                            metrics['winning_trades'] = len(winning_trades)
-                            metrics['losing_trades'] = len(losing_trades)
-                            metrics['win_rate'] = len(winning_trades) / len(trades_df) if len(trades_df) > 0 else 0
-
-                            # Calculate profit factor
-                            total_profit = winning_trades[pnl_col].sum() if len(winning_trades) > 0 else 0
-                            total_loss = abs(losing_trades[pnl_col].sum()) if len(losing_trades) > 0 else 0
-                            metrics['profit_factor'] = total_profit / total_loss if total_loss > 0 else (1.0 if total_profit > 0 else 0.0)
-                        else:
-                            logging.warning("Neither 'PnL' nor 'pnl' column found in trades dataframe")
-                            metrics['winning_trades'] = 0
-                            metrics['losing_trades'] = 0
-                            metrics['win_rate'] = 0.0
-                            metrics['profit_factor'] = 0.0
-                    except Exception as e:
-                        logging.warning(f"Failed to process trades using records_readable: {e}")
-                        metrics['winning_trades'] = 0
-                        metrics['losing_trades'] = 0
-                        metrics['win_rate'] = 0.0
-                        metrics['profit_factor'] = 0.0
-                else:
-                    # Fallback to default values
-                    metrics['winning_trades'] = 0
-                    metrics['losing_trades'] = 0
-                    metrics['win_rate'] = 0.0
-                    metrics['profit_factor'] = 0.0
-            else:
-                # Default values if no trades
-                metrics['total_trades'] = 0
-                metrics['winning_trades'] = 0
-                metrics['losing_trades'] = 0
-                metrics['win_rate'] = 0.0
-                metrics['profit_factor'] = 0.0
-
-            # Risk metrics - get returns safely
-            if hasattr(portfolio, 'returns'):
-                if callable(getattr(portfolio, 'returns')):
-                    returns = portfolio.returns()
-                else:
-                    returns = portfolio.returns
-            else:
-                returns = None
-
-            # Process returns for risk metrics
-            if returns is not None:
-                try:
-                    # Convert to numpy array if it's not already
-                    returns_array = np.array(returns)
-
-                    if len(returns_array) > 0:
-                        # Annualized returns (assuming daily data)
-                        annualized_return = np.mean(returns_array) * 252
-                        annualized_vol = np.std(returns_array) * np.sqrt(252)
-                        risk_free_rate = 0.02  # 2% risk-free rate assumption
-
-                        # Sharpe ratio
-                        metrics['sharpe_ratio'] = (annualized_return - risk_free_rate) / annualized_vol if annualized_vol != 0 else 0
-
-                        # Sortino ratio (downside risk)
-                        downside_returns = returns_array[returns_array < 0]
-                        downside_vol = np.std(downside_returns) * np.sqrt(252) if len(downside_returns) > 0 else annualized_vol
-                        metrics['sortino_ratio'] = (annualized_return - risk_free_rate) / downside_vol if downside_vol != 0 else 0
-
-                        # Average trade
-                        if metrics['total_trades'] > 0:
-                            metrics['avg_trade_pct'] = metrics['total_return'] / metrics['total_trades']
-                        else:
-                            metrics['avg_trade_pct'] = 0.0
-                    else:
-                        metrics['sharpe_ratio'] = 0.0
-                        metrics['sortino_ratio'] = 0.0
-                        metrics['avg_trade_pct'] = 0.0
-                except Exception as e:
-                    logging.warning(f"Error processing returns: {e}")
-                    metrics['sharpe_ratio'] = 0.0
-                    metrics['sortino_ratio'] = 0.0
-                    metrics['avg_trade_pct'] = 0.0
-            else:
-                metrics['sharpe_ratio'] = 0.0
-                metrics['sortino_ratio'] = 0.0
-                metrics['avg_trade_pct'] = 0.0
-
-            # Exposure metrics
-            if hasattr(portfolio, 'cash') and hasattr(portfolio, 'value'):
-                try:
-                    cash_series = np.array(portfolio.cash)
-                    value_series = np.array(portfolio.value)
-
-                    # Average market exposure
-                    if len(cash_series) > 0 and len(value_series) > 0:
-                        exposure = 1 - (cash_series / value_series)
-                        metrics['avg_exposure'] = float(np.mean(exposure))
-                        metrics['max_exposure'] = float(np.max(exposure))
-                    else:
-                        metrics['avg_exposure'] = 0.0
-                        metrics['max_exposure'] = 0.0
-                except Exception as e:
-                    logging.warning(f"Error calculating exposure metrics: {e}")
-                    metrics['avg_exposure'] = 0.0
-                    metrics['max_exposure'] = 0.0
-            else:
-                metrics['avg_exposure'] = 0.0
-                metrics['max_exposure'] = 0.0
-
-        except Exception as e:
-            logging.error(f"Error calculating metrics: {str(e)}")
-            import traceback
-            logging.debug(traceback.format_exc())
-
-            # Return basic metrics if calculation fails
-            if 'total_return' not in metrics:
-                metrics['total_return'] = 0.0
-            if 'max_drawdown' not in metrics:
-                metrics['max_drawdown'] = 0.0
-            if 'total_trades' not in metrics:
-                metrics['total_trades'] = 0
-            if 'win_rate' not in metrics:
-                metrics['win_rate'] = 0.0
-            if 'sharpe_ratio' not in metrics:
-                metrics['sharpe_ratio'] = 0.0
-            if 'profit_factor' not in metrics:
-                metrics['profit_factor'] = 0.0
-
-        return metrics
-    # --- END MOVED evaluate_portfolio function ---
-
-    def objective(trial):
-        """Sample parameters and evaluate portfolio performance"""
-        params = {}
-        for param_name, param_range in params_space.items():
-            if isinstance(param_range, tuple) and len(param_range) == 2:
-                if isinstance(param_range[0], int) and isinstance(param_range[1], int):
-                    params[param_name] = trial.suggest_int(param_name, param_range[0], param_range[1])
-                else:
-                    params[param_name] = trial.suggest_float(param_name, param_range[0], param_range[1])
-            elif isinstance(param_range, list):
-                params[param_name] = trial.suggest_categorical(param_name, param_range)
-        
-        try:
-            # Use create_pf_for_params function to create the portfolio
-            portfolio = create_pf_for_params(data_copy, params)
-            
-            # Check if portfolio creation was successful
-            if portfolio is None or not hasattr(portfolio, 'trades') or len(portfolio.trades) == 0:
-                logging.warning(f"No valid portfolio created with parameters: {params}")
-                return float('-inf')
-            
-            # Calculate performance metrics
-            metrics = evaluate_portfolio(portfolio)
-            
-            # Filter based on minimum requirements
-            min_trades = 3
-            min_win_rate = 0.30
-            min_sharpe = 0.1
-            max_drawdown_limit = -0.25  # -25% maximum drawdown allowed
-            
-            total_trades = metrics['total_trades']
-            win_rate = metrics['win_rate']
-            sharpe_ratio = metrics['sharpe_ratio']
-            max_drawdown = metrics['max_drawdown']
-            profit_factor = metrics['profit_factor']
-            
-            # Log all portfolio metrics for debugging
-            logging.debug(f"Portfolio metrics: Trades={total_trades}, Win Rate={win_rate:.2f}, "
-                          f"Sharpe={sharpe_ratio:.2f}, Max DD={max_drawdown:.2f}, PF={profit_factor:.2f}")
-            
-            # Filter invalid portfolios
-            if total_trades < min_trades:
-                logging.debug(f"Rejected: Insufficient trades ({total_trades} < {min_trades})")
-                return float('-inf')
-            
-            if win_rate < min_win_rate:
-                logging.debug(f"Rejected: Low win rate ({win_rate:.2f} < {min_win_rate:.2f})")
-                return float('-inf')
-            
-            if sharpe_ratio < min_sharpe:
-                logging.debug(f"Rejected: Low Sharpe ratio ({sharpe_ratio:.2f} < {min_sharpe:.2f})")
-                return float('-inf')
-            
-            if max_drawdown < max_drawdown_limit:
-                logging.debug(f"Rejected: Excessive drawdown ({max_drawdown:.2f} < {max_drawdown_limit:.2f})")
-                return float('-inf')
-            
-            # Calculate score based on multiple metrics (weighted average)
-            # This formula prioritizes Sharpe ratio and win rate
-            score = (
-                0.4 * sharpe_ratio +               # 40% weight to Sharpe ratio
-                0.3 * win_rate +                   # 30% weight to win rate 
-                0.1 * (1 + max_drawdown) +         # 10% weight to drawdown (less negative is better)
-                0.2 * min(profit_factor, 3.0)/3.0  # 20% weight to profit factor (capped at 3.0)
-            )
-            
-            # Penalize excessive drawdowns
-            if max_drawdown < -0.15:  # More than 15% drawdown
-                score *= (1 + max_drawdown)  # Reduce score for high drawdowns
-            
-            # Store trial details for later analysis
-            trial_details = {
-                'params': params,
-                'metrics': metrics,
-                'score': score
-            }
-            trial_history.append(trial_details)
-            
-            # Log successful evaluation
-            logging.info(f"Valid portfolio: score={score:.4f}, return={metrics['total_return']:.4f}, "
-                         f"sharpe={metrics['sharpe_ratio']:.2f}, trades={metrics['total_trades']}, "
-                         f"win_rate={metrics['win_rate']:.2f}, drawdown={metrics['max_drawdown']:.2f}")
-            
-            return score
-            
-        except Exception as e:
-            logging.error(f"Error evaluating parameters {params}: {str(e)}")
-            import traceback
-            logging.debug(traceback.format_exc())
-            return float('-inf')
-    
-    try:
-        # Create Optuna study
-        study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler())
-        
-        # Enqueue initial parameters if provided
-        if initial_params:
-            try:
-                # Ensure initial_params keys match params_space
-                valid_initial_params = {k: v for k, v in initial_params.items() if k in params_space}
-                # Ensure values are within defined ranges/categories if possible (basic check)
-                for k, v in valid_initial_params.items():
-                    p_range = params_space[k]
-                    if isinstance(p_range, tuple) and len(p_range) == 2:
-                         if not (p_range[0] <= v <= p_range[1]):
-                             logger.warning(f"Initial param {k}={v} out of range {p_range}, clamping.")
-                             valid_initial_params[k] = max(p_range[0], min(v, p_range[1]))
-                    elif isinstance(p_range, list) and v not in p_range:
-                         logger.warning(f"Initial param {k}={v} not in categorical list {p_range}, removing.")
-                         del valid_initial_params[k]
-                
-                if valid_initial_params:
-                     logger.info(f"Enqueuing initial parameters as first trial: {valid_initial_params}")
-                     study.enqueue_trial(valid_initial_params)
-                else:
-                     logger.warning("Provided initial_params were invalid or empty after validation.")
-            except Exception as e_enqueue:
-                 logger.error(f"Error enqueuing initial trial: {e_enqueue}")
-
-        # Number of processes to use
-        n_jobs = min(multiprocessing.cpu_count() - 1, 4)  # Leave 1 CPU free, max 4
-        n_jobs = max(1, n_jobs)  # At least 1 job
-        
-        # Log optimization details
-        logging.info(f"Starting parameter optimization with {n_trials} trials using {n_jobs} parallel workers")
-        
-        # Progress tracking
-        last_progress = 0
-        
-        def progress_monitor(study, trial):
-            nonlocal last_progress
-            progress = int(100 * (trial.number + 1) / n_trials)
-            
-            # Only log when progress increases by at least 10%
-            if progress >= last_progress + 10 or trial.number == n_trials - 1:
-                logging.info(f"Optimization progress: {progress}% ({trial.number + 1}/{n_trials} trials)")
-                last_progress = progress
-                
-                # Update callback if provided
-                if progress_callback:
-                    progress_callback(progress)
-                    
-            # Log best score so far
-            if study.best_trial and study.best_trial.value > float('-inf'):
-                if trial.number % 10 == 0 or trial.number == n_trials - 1:
-                    logging.info(f"Current best score: {study.best_value:.4f} (trial #{study.best_trial.number})")
-        
-        try:
-            # Try parallel optimization first
-            study.optimize(
-                objective, 
-                n_trials=n_trials,
-                n_jobs=n_jobs,
-                callbacks=[progress_monitor]
-            )
-        except (KeyboardInterrupt, Exception) as e:
-            logging.warning(f"Parallel optimization failed or interrupted: {str(e)}. Switching to sequential execution.")
-            # Fall back to sequential optimization
-            remaining_trials = max(0, n_trials - len(study.trials))
-            if remaining_trials > 0:
-                logging.info(f"Continuing with {remaining_trials} remaining trials in sequential mode")
-                study.optimize(
-                    objective,
-                    n_trials=remaining_trials,
-                    callbacks=[progress_monitor]
-                )
-        
-        # Restore original signal handler
-        signal.signal(signal.SIGINT, original_sigint_handler)
-        
-        # Check if any valid trials were found
-        valid_trials = [t for t in study.trials if t.value > float('-inf')]
-        
-        if not valid_trials:
-            logging.critical("No valid parameter sets found during optimization!")
-            # Return reasonable defaults instead of failing
-            default_params = {param: (param_range[0] + param_range[1]) / 2 if isinstance(param_range, tuple) else param_range[0]
-                              for param, param_range in params_space.items()}
-            return default_params, float('-inf'), trial_history
-        
-        # Get best parameters
-        best_params = study.best_params
-        best_score = study.best_value
-        
-        # Log optimization results
-        logging.info(f"Optimization completed. Best score: {best_score:.4f}")
-        logging.info(f"Best parameters: {best_params}")
-        logging.info(f"Valid trials: {len(valid_trials)}/{len(study.trials)}")
-        
-        return best_params, best_score, trial_history
-    
-    except Exception as e:
-        logging.error(f"Error during optimization: {str(e)}")
-        import traceback
-        logging.debug(traceback.format_exc())
-        
-        # Return defaults in case of failure
-        default_params = {param: (param_range[0] + param_range[1]) / 2 if isinstance(param_range, tuple) else param_range[0]
-                          for param, param_range in params_space.items()}
-        return default_params, float('-inf'), trial_history
-
-def get_relaxed_parameter_space(params_space):
-    """
-    Create a more relaxed parameter space to increase chances of finding valid parameters.
-    
-    Args:
-        params_space: Original parameter space
-        
-    Returns:
-        Dictionary with relaxed parameter ranges
-    """
-    relaxed_space = {}
-    
-    # For each parameter, expand its range to be more inclusive
-    for param_name, param_range in params_space.items():
-        if isinstance(param_range, tuple) and len(param_range) == 2:
-            if 'rsi_lower' in param_name:
-                # Allow higher RSI values for buy signals
-                relaxed_space[param_name] = (param_range[0], min(param_range[1] + 10, 40))
-            elif 'rsi_upper' in param_name:
-                # Allow lower RSI values for sell signals
-                relaxed_space[param_name] = (max(param_range[0] - 10, 60), param_range[1])
-            elif 'bb_alpha' in param_name or 'bb_dev' in param_name:
-                # Wider Bollinger Bands for more signals
-                relaxed_space[param_name] = (max(param_range[0] - 0.5, 0.5), param_range[1] + 0.5)
-            elif 'stop_loss' in param_name or 'sl_pct' in param_name:
-                # Allow larger stop losses
-                relaxed_space[param_name] = (param_range[0], min(param_range[1] * 1.5, 0.2))
-            elif 'take_profit' in param_name or 'tp_pct' in param_name:
-                # Allow smaller take profits
-                relaxed_space[param_name] = (max(param_range[0] * 0.5, 0.01), param_range[1])
-            elif 'size_pct' in param_name or 'risk_per_trade' in param_name:
-                # Allow smaller position sizes
-                relaxed_space[param_name] = (max(param_range[0] * 0.5, 0.01), param_range[1])
-            else:
-                # Default: expand range by 20% on both ends
-                range_size = param_range[1] - param_range[0]
-                relaxed_space[param_name] = (
-                    max(param_range[0] - range_size * 0.2, 0), 
-                    param_range[1] + range_size * 0.2
-                )
-        else:
-            # For categorical or other types, keep as is
-            relaxed_space[param_name] = param_range
-    
-    logging.info(f"Created relaxed parameter space: {relaxed_space}")
-    return relaxed_space
-
-def check_portfolio_validity(metrics):
-    """
-    Check if a portfolio meets minimum performance requirements.
-    
-    Args:
-        metrics: Dictionary of portfolio metrics
-        
-    Returns:
-        Tuple of (is_valid, reason)
-    """
-    # Minimum requirements for a valid portfolio
-    min_trades = 2  # At least 2 trades
-    min_win_rate = 0.2  # At least 20% win rate
-    min_sharpe = 0.1  # At least 0.1 Sharpe ratio
-    max_drawdown = 0.4  # Maximum 40% drawdown
-    min_profit_factor = 0.8  # At least 0.8 profit factor
-    
-    # Check each criterion
-    if metrics['total_trades'] < min_trades:
-        return False, f"Insufficient trades: {metrics['total_trades']} < {min_trades}"
-    
-    if metrics['win_rate'] < min_win_rate:
-        return False, f"Low win rate: {metrics['win_rate']:.2f} < {min_win_rate}"
-    
-    if metrics['sharpe_ratio'] < min_sharpe:
-        return False, f"Low Sharpe ratio: {metrics['sharpe_ratio']:.2f} < {min_sharpe}"
-    
-    if abs(metrics['max_drawdown']) > max_drawdown:
-        return False, f"High drawdown: {abs(metrics['max_drawdown']):.2f} > {max_drawdown}"
-    
-    if metrics['profit_factor'] < min_profit_factor:
-        return False, f"Low profit factor: {metrics['profit_factor']:.2f} < {min_profit_factor}"
-    
-    return True, "Valid portfolio"
-
-def run_walk_forward_optimization():
-    """
-    Run the walk-forward optimization process.
-    """
-    import pandas as pd
-    import numpy as np
-    import time
-    import json
-    from datetime import datetime, timedelta
-    import os
-
-    # Configure chat provider if available
-    chat_provider = None
-    try:
-        chat_provider = setup_chat_provider()
-    except Exception as e:
-        logging.warning(f"Chat provider setup failed: {e}. Continuing without chat features.")
-
-    # Define parameter grid for optimization
-    params_space = {
-        # RSI parameters
-        'rsi_lower': (20, 40),  # Buy signal RSI threshold
-        'rsi_upper': (60, 80),  # Sell signal RSI threshold
-        
-        # Bollinger Bands parameters
-        'bb_window': (10, 30),  # Window for BB calculation
-        'bb_alpha': (1.5, 2.5),  # Number of standard deviations
-        
-        # Volatility parameters (ATR-based)
-        'volatility_lower': (0.005, 0.03),  # Min volatility for entry
-        'volatility_upper': (0.02, 0.1),    # Max volatility for entry
-        
-        # Money management
-        'stop_loss_pct': (0.02, 0.10),      # Stop loss percentage
-        'take_profit_pct': (0.03, 0.15),    # Take profit percentage
-        'size_pct': (0.1, 0.5),             # Position size as % of capital
-        'max_holdings': (1, 3)              # Maximum positions allowed
-    }
-
-    # Settings for walk-forward optimization
-    SYMBOL = "BTC/USD"
-    TIMEFRAME = "1d"
-    LOOKBACK_DAYS = 365
-    TRAIN_SIZE = 0.7  # 70% of data used for training
-    WINDOW_DAYS = 160  # Size of each WFO window
-    STEP_DAYS = 40     # Number of days to step forward each iteration
-    OUT_SAMPLE_DAYS = 40  # Number of days in out-of-sample period
-    N_TRIALS = 50      # Number of optimization trials per window
-
-    # Check if STEP_DAYS > OUT_SAMPLE_DAYS which would lead to gaps
-    if STEP_DAYS > OUT_SAMPLE_DAYS:
-        logging.warning(f"STEP_DAYS ({STEP_DAYS}) > OUT_SAMPLE_DAYS ({OUT_SAMPLE_DAYS}). This will cause out-of-sample periods to overlap.")
-
-    # Load data
-    try:
-        data = load_data(SYMBOL, TIMEFRAME, LOOKBACK_DAYS)
-        if data is None or len(data['close']) < 2:
-            logging.error("Failed to load sufficient data")
-            return False
-        
-        # Handle any NaN values
-        for key in data:
-            if isinstance(data[key], (pd.Series, pd.DataFrame)) and data[key].isna().any().any():
-                logging.warning(f"NaN values found in {key}, filling with forward fill")
-                data[key] = data[key].ffill().bfill()
-                
-        logging.info(f"Successfully loaded {len(data['close'])} bars of data for {SYMBOL}")
-    except Exception as e:
-        logging.error(f"Error loading data: {e}")
-        return False
-
-    # Create sliding windows for walk-forward optimization
-    dates = data['close'].index
-    total_days = (dates[-1] - dates[0]).days
-    
-    # Calculate number of windows based on total days and step size
-    num_windows = max(1, (total_days - WINDOW_DAYS) // STEP_DAYS + 1)
-    logging.info(f"Creating {num_windows} WFO splits with training size {TRAIN_SIZE}")
-    
-    # Initialize lists to store results
-    all_params = []
-    oos_portfolios = []
-    
-    # Process each window
-    for i in range(num_windows):
-        # Define the window boundaries
-        start_idx = i * STEP_DAYS
-        end_idx = min(start_idx + WINDOW_DAYS, len(dates) - 1)
-        
-        # Skip if window is too small
-        if end_idx - start_idx < 30:
-            logging.warning(f"Window {i+1} too small, skipping")
-            continue
-            
-        # Extract window data
-        window_start = dates[start_idx]
-        window_end = dates[end_idx]
-        window_data = {}
-        
-        for key, values in data.items():
-            # Filter based on dates for Series and DataFrames
-            if isinstance(values, (pd.Series, pd.DataFrame)):
-                mask = (values.index >= window_start) & (values.index <= window_end)
-                window_data[key] = values.loc[mask]
-            else:
-                window_data[key] = values
-        
-        # Split into training and testing sets
-        split_idx = int(len(window_data['close']) * TRAIN_SIZE)
-        if split_idx <= 10:
-            logging.warning(f"Training set for window {i+1} too small, skipping")
-            continue
-            
-        train_data = {}
-        test_data = {}
-        
-        for key, values in window_data.items():
-            if isinstance(values, (pd.Series, pd.DataFrame)):
-                train_data[key] = values.iloc[:split_idx]
-                test_data[key] = values.iloc[split_idx:]
-            else:
-                train_data[key] = values
-                test_data[key] = values
-        
-        # Log split information
-        logging.info(f"Split {i+1}: Training size: {len(train_data['close'])}, Testing size: {len(test_data['close'])}")
-        logging.info(f"Split {i+1}: Training dates: {train_data['close'].index[0]} to {train_data['close'].index[-1]}")
-        logging.info(f"Split {i+1}: Testing dates: {test_data['close'].index[0]} to {test_data['close'].index[-1]}")
-        
-        # --- Load suggested parameters as initial guess ---
-        loaded_initial_params = None
-        params_filepath = Path("config/optimized_strategy_params.json")
-        if params_filepath.exists():
-            try:
-                with open(params_filepath, 'r') as f:
-                    loaded_initial_params = json.load(f)
-                logging.info(f"Loaded initial parameters from {params_filepath} for WFO window {i+1}")
-            except Exception as e_load:
-                logging.warning(f"Could not load initial parameters from {params_filepath}: {e_load}")
-        else:
-            logging.info(f"No optimized parameter file found at {params_filepath}, starting optimization from scratch for window {i+1}.")
-        # --- End loading suggested parameters ---
-
-        # Optimize parameters on training data
-        logging.info(f"Optimizing parameters for split {i+1} with {N_TRIALS} trials")
-        start_time = time.time()
-        
-        best_params, best_score, trial_history = optimize_parameters(
-            train_data, 
-            params_space, 
-            n_trials=N_TRIALS,
-            initial_params=loaded_initial_params # Pass loaded params
+        # Generate position sizing based on risk per trade
+        size = calculate_position_size(
+            signal=long_entry,
+            price=df['close'],
+            stop_loss_pct=sl_pct,
+            risk_pct=risk_per_trade,
+            capital=init_cash
         )
         
-        logging.info(f"Optimization completed in {time.time() - start_time:.1f} seconds")
-        
-        # Check if we found valid parameters
-        if best_params is None:
-            logging.critical(f"No valid parameters found for split {i+1}, skipping OOS processing")
-            
-            # Try with default parameters as fallback
-            logging.info("Attempting with default parameters as fallback")
-            default_params = {
-                'rsi_lower': 30,
-                'rsi_upper': 70,
-                'bb_window': 20,
-                'bb_alpha': 2.0,
-                'volatility_lower': 0.01,
-                'volatility_upper': 0.05,
-                'stop_loss_pct': 0.05,
-                'take_profit_pct': 0.1,
-                'size_pct': 0.2,
-                'max_holdings': 1
-            }
-            
-            # Test with default parameters on out-of-sample data
-            try:
-                oos_pf = create_pf_for_params(test_data, default_params)
-                if oos_pf is not None:
-                    oos_metrics = evaluate_portfolio(oos_pf)
-                    oos_portfolios.append((oos_pf, oos_metrics, default_params, i))
-                    logging.info(f"Added OOS portfolio for split {i+1} using default parameters")
-                    
-                    # Store parameters
-                    all_params.append((default_params, i, 'default'))
-                else:
-                    logging.error(f"Default parameters failed for split {i+1}")
-            except Exception as e:
-                logging.error(f"Error creating OOS portfolio with default parameters: {e}")
-            
-            continue
-            
-        # Store the best parameters
-        all_params.append((best_params, i, 'optimized'))
-        
-        # Test optimized parameters on out-of-sample data
+        # Create portfolio object
         try:
-            oos_pf = create_pf_for_params(test_data, best_params)
-            if oos_pf is not None:
-                oos_metrics = evaluate_portfolio(oos_pf)
-                oos_portfolios.append((oos_pf, oos_metrics, best_params, i))
-                logging.info(f"Added OOS portfolio for split {i+1}")
+            # Determine whether to use CustomPortfolio
+            use_sl_tp = sl_pct is not None and sl_pct > 0 and tp_pct is not None and tp_pct > 0
+            
+            if use_sl_tp:
+                try:
+                    # Import CustomPortfolio for stop-loss and take-profit
+                    from scripts.portfolio.custom_portfolio import CustomPortfolio
+                    
+                    # Create portfolio with CustomPortfolio
+                    portfolio = CustomPortfolio.from_signals(
+                        close=df['close'],
+                        entries=long_entry,
+                        exits=long_exit,
+                        size=size,
+                        size_type='amount' if size is not None else 'value',
+                        init_cash=init_cash,
+                        fees=commission_pct/100,
+                        slippage=slippage_pct/100,
+                        freq=get_vbt_freq_str(GRANULARITY_STR),
+                        stop_loss=sl_pct,
+                        take_profit=tp_pct
+                    )
+                    
+                    logging.info("Created portfolio with CustomPortfolio for SL/TP")
+                except ImportError:
+                    logging.warning("Could not import CustomPortfolio, falling back to standard Portfolio")
+                    # Fall back to standard Portfolio
+                    portfolio = vbt.Portfolio.from_signals(
+                        close=df['close'],
+                        entries=long_entry,
+                        exits=long_exit,
+                        size=size,
+                        size_type='amount' if size is not None else 'value',
+                        init_cash=init_cash,
+                        fees=commission_pct/100,
+                        slippage=slippage_pct/100,
+                        freq=get_vbt_freq_str(GRANULARITY_STR)
+                    )
             else:
-                logging.error(f"Failed to create OOS portfolio for split {i+1}")
+                # Use standard Portfolio without SL/TP
+                portfolio = vbt.Portfolio.from_signals(
+                    close=df['close'],
+                    entries=long_entry,
+                    exits=long_exit,
+                    size=size,
+                    size_type='amount' if size is not None else 'value',
+                    init_cash=init_cash,
+                    fees=commission_pct/100,
+                    slippage=slippage_pct/100,
+                    freq=get_vbt_freq_str(GRANULARITY_STR)
+                )
+            
+            # Basic validity check
+            if portfolio is not None:
+                return portfolio
+            else:
+                logging.error("Portfolio creation returned None")
+                return None
+                
         except Exception as e:
-            logging.error(f"Error creating OOS portfolio: {e}")
-    
-    # Check if we have any OOS portfolios
-    if not oos_portfolios:
-        logging.critical("No OOS portfolios generated - WFO process failed")
-        return False
-    
-    # Combine OOS portfolios to evaluate overall performance
-    try:
-        # Combine performance metrics
-        combined_metrics = {
-            'total_return': np.mean([m['total_return'] for _, m, _, _ in oos_portfolios]),
-            'sharpe_ratio': np.mean([m['sharpe_ratio'] for _, m, _, _ in oos_portfolios]),
-            'sortino_ratio': np.mean([m['sortino_ratio'] for _, m, _, _ in oos_portfolios if 'sortino_ratio' in m]),
-            'max_drawdown': np.mean([m['max_drawdown'] for _, m, _, _ in oos_portfolios]),
-            'win_rate': np.mean([m['win_rate'] for _, m, _, _ in oos_portfolios]),
-            'profit_factor': np.mean([m['profit_factor'] for _, m, _, _ in oos_portfolios if 'profit_factor' in m]),
-            'num_portfolios': len(oos_portfolios)
-        }
-        
-        logging.info(f"WFO completed. Overall metrics: Sharpe: {combined_metrics['sharpe_ratio']:.2f}, "
-                    f"Return: {combined_metrics['total_return']:.2%}, "
-                    f"Win Rate: {combined_metrics['win_rate']:.2%}")
-        
-        # Save results to file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results = {
-            'timestamp': timestamp,
-            'symbol': SYMBOL,
-            'timeframe': TIMEFRAME,
-            'overall_metrics': combined_metrics,
-            'parameters': [{'params': p[0], 'window': p[1], 'type': p[2]} for p in all_params],
-            'window_metrics': [{'metrics': m, 'window': i, 'params': p} 
-                              for _, m, p, i in oos_portfolios]
-        }
-        
-        # Create results directory if it doesn't exist
-        os.makedirs('results', exist_ok=True)
-        
-        # Save to JSON file
-        with open(f'results/wfo_results_{timestamp}.json', 'w') as f:
-            json.dump(results, f, indent=2, default=str)
-        
-        logging.info(f"Results saved to results/wfo_results_{timestamp}.json")
-        return True
-        
+            logging.error(f"Error creating portfolio: {str(e)}")
+            return None
+            
     except Exception as e:
-        logging.error(f"Error in final WFO evaluation: {e}")
-        return False
+        logging.error(f"Error in create_pf_for_params: {str(e)}")
+        return None
+
+
+def calculate_position_size(signal, price, stop_loss_pct, risk_pct, capital):
+    """
+    Calculate position size based on risk per trade.
+    
+    Args:
+        signal: Boolean Series with entry signals
+        price: Series with entry prices
+        stop_loss_pct: Stop loss percentage
+        risk_pct: Risk percentage per trade
+        capital: Total capital
+        
+    Returns:
+        Series: Position sizes in currency units
+    """
+    # Initialize size Series with zeros
+    size = pd.Series(0.0, index=signal.index)
+    
+    # Only calculate sizes for entry signals
+    for i in signal[signal].index:
+        # Determine stop loss price
+        entry_price = price[i]
+        risk_amount = capital * risk_pct
+        
+        # Calculate the price distance to stop loss
+        price_distance = entry_price * stop_loss_pct
+        
+        if price_distance > 0:
+            # Calculate position size in units
+            size[i] = risk_amount / price_distance
+        else:
+            size[i] = 0.0
+            
+    return size
+
+def evaluate_parameter_set(data, params, split_id=None):
+    """
+    Evaluate a parameter set on the given data.
+    
+    Args:
+        data: DataFrame with OHLCV data
+        params: Dictionary of strategy parameters
+        split_id: Optional identifier for the data split
+        
+    Returns:
+        tuple: (portfolio, metrics, params, split_id)
+    """
+    try:
+        # Create portfolio with parameters
+        if STRATEGY_TYPE == "candlestick":
+            # Extract candlestick specific parameters
+            lookback_periods = params.get('lookback_periods', 20)
+            min_strength = params.get('min_strength', 0.01)
+            use_strength = params.get('use_strength', True)
+            use_confirmation = params.get('use_confirmation', True)
+            confirmation_window = params.get('confirmation_window', 3)
+            stop_loss_pct = params.get('stop_loss_pct', 0.03)
+            take_profit_pct = params.get('take_profit_pct', 0.06)
+            risk_per_trade = params.get('risk_per_trade', 0.02)
+            
+            # Extract candle patterns
+            df_with_patterns = extract_candle_patterns(data)
+            
+            # Calculate pattern strength if needed
+            if use_strength:
+                df_with_patterns = get_candle_pattern_strength(df_with_patterns, lookback=lookback_periods)
+            
+            # Generate signals
+            entries, exits = generate_candle_pattern_signals(
+                df_with_patterns, 
+                min_strength=min_strength,
+                use_strength=use_strength
+            )
+            
+            # Apply confirmation if needed
+            if use_confirmation:
+                # Shift entries by confirmation window days
+                confirmed_entries = entries.copy()
+                for i in range(1, confirmation_window):
+                    confirmed_entries = confirmed_entries & entries.shift(-i)
+                entries = confirmed_entries
+            
+            # Calculate position sizes based on risk per trade
+            size = calculate_position_size(
+                signal=entries,
+                price=data['close'],
+                stop_loss_pct=stop_loss_pct,
+                risk_pct=risk_per_trade,
+                capital=INITIAL_CAPITAL
+            )
+            
+            # Create portfolio
+            portfolio = create_pf_for_candlestick_strategy(
+                data=data,
+                entries=entries,
+                exits=exits,
+                init_cash=INITIAL_CAPITAL,
+                size=size,
+                sl_stop=stop_loss_pct,
+                tp_stop=take_profit_pct
+            )
+        else:
+            # Use the EdgeMultiFactorStrategy approach
+            portfolio = create_pf_for_params(data, params, init_cash=INITIAL_CAPITAL)
+        
+        # Calculate performance metrics
+        metrics = calculate_performance_metrics(portfolio)
+        
+        return portfolio, metrics, params, split_id
+    
+    except Exception as e:
+        wfo_logger.error(f"Error evaluating parameter set: {str(e)}")
+        return None, None, params, split_id
 
 def calculate_performance_metrics(portfolio):
     """Calculate key performance metrics from a portfolio object."""
@@ -1861,687 +1511,498 @@ def calculate_performance_metrics(portfolio):
     
     return metrics
 
-def analyze_parameter_stability(all_parameters):
+def evaluate_parameter_sets(data, param_grid, optimization_metric='sharpe_ratio', split_id=None, use_parallel=USE_PARALLEL, num_cores=NUM_CORES):
     """
-    Analyze the stability of parameters across WFO splits.
-    Returns a dict with stability metrics for each parameter.
+    Evaluate multiple parameter sets and return the best one based on the optimization metric.
+    
+    Args:
+        data: DataFrame with OHLCV data
+        param_grid: Dictionary with parameter names and possible values
+        optimization_metric: Metric to optimize (e.g., 'sharpe_ratio')
+        split_id: Optional identifier for the data split
+        use_parallel: Whether to use parallel processing
+        num_cores: Number of CPU cores to use for parallel processing
+        
+    Returns:
+        tuple: (best_portfolio, best_metrics, best_params, split_id)
     """
-    if not all_parameters or len(all_parameters) < 2:
+    # Generate all parameter combinations
+    param_combinations = []
+    for param_name, param_values in param_grid.items():
+        if isinstance(param_values, tuple) and len(param_values) == 3:
+            # Handle range specifications (start, stop, step)
+            start, stop, step = param_values
+            if isinstance(step, int):
+                values = list(range(start, stop + 1, step))
+            else:
+                # For float steps, use numpy arange
+                values = np.arange(start, stop + step/2, step).tolist()
+            param_grid[param_name] = values
+    
+    # Get all combinations of parameters
+    keys = list(param_grid.keys())
+    values = list(param_grid.values())
+    param_combinations = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+    
+    # Log the number of combinations
+    wfo_logger.info(f"Evaluating {len(param_combinations)} parameter combinations for split {split_id}")
+    
+    # Evaluate all parameter sets
+    results = []
+    if use_parallel and num_cores > 1:
+        with ProcessPoolExecutor(max_workers=num_cores) as executor:
+            # Prepare arguments for parallel processing
+            param_args = [(data, params, split_id) for params in param_combinations]
+            
+            # Use tqdm for progress tracking if available
+            if 'tqdm' in sys.modules:
+                results = list(tqdm(executor.map(evaluate_single_param_set_wrapper, param_args), 
+                                    total=len(param_combinations), desc=f"Split {split_id}"))
+            else:
+                results = list(executor.map(evaluate_single_param_set_wrapper, param_args))
+    else:
+        # Sequential evaluation
+        for i, params in enumerate(param_combinations):
+            if 'tqdm' in sys.modules and i % 10 == 0:
+                wfo_logger.info(f"Evaluating combination {i+1}/{len(param_combinations)} for split {split_id}")
+            result = evaluate_parameter_set(data, params, split_id)
+            results.append(result)
+    
+    # Filter out failed evaluations
+    valid_results = [res for res in results if res[0] is not None and res[1] is not None]
+    
+    if not valid_results:
+        wfo_logger.warning(f"No valid parameter sets found for split {split_id}")
+        return None, None, None, split_id
+    
+    # Find the best result based on the optimization metric
+    best_result = max(valid_results, key=lambda x: x[1].get(optimization_metric, -float('inf')))
+    
+    return best_result
+
+def analyze_parameter_stability(all_params):
+    """
+    Analyze parameter stability across different WFO splits.
+    
+    Args:
+        all_params: List of parameter dictionaries from each split
+        
+    Returns:
+        dict: Stability metrics for each parameter
+    """
+    if not all_params or len(all_params) < 2:
+        logging.warning("Not enough parameter sets to analyze stability")
         return {}
     
-    # Convert list of parameter dicts to dict of parameter lists
-    param_values = {}
-    for params in all_parameters:
-        for key, value in params.items():
-            if key not in param_values:
-                param_values[key] = []
-            param_values[key].append(value)
+    # Create a DataFrame with all parameters
+    params_df = pd.DataFrame(all_params)
     
     # Calculate stability metrics for each parameter
     stability = {}
-    for param_name, values in param_values.items():
-        # Skip if not enough values
-        if len(values) < 2:
+    
+    for param in params_df.columns:
+        if param in ['initial_capital', 'commission_pct', 'slippage_pct']:
+            # Skip fixed parameters
             continue
             
-        # Convert to numpy array for calculations
-        values_array = np.array(values)
+        # Extract parameter values
+        values = params_df[param].values
         
-        # Calculate statistics
-        mean = np.mean(values_array)
-        std = np.std(values_array)
-        cv = std / mean if mean != 0 else float('inf')  # Coefficient of variation
-        
-        stability[param_name] = {
-            'mean': mean,
-            'std': std,
-            'cv': cv,
-            'min': np.min(values_array),
-            'max': np.max(values_array),
-            'range': np.max(values_array) - np.min(values_array),
-            'values': values
-        }
+        # Convert categorical parameters to numbers if needed
+        if params_df[param].dtype == 'object':
+            # For categorical parameters, calculate mode and frequency
+            value_counts = params_df[param].value_counts()
+            mode_val = value_counts.index[0]
+            mode_freq = value_counts.iloc[0] / len(params_df)
+            
+            stability[param] = {
+                'type': 'categorical',
+                'mode': mode_val,
+                'mode_frequency': mode_freq,
+                'unique_values': len(value_counts),
+                'stability_score': mode_freq
+            }
+        else:
+            # For numerical parameters
+            mean_val = np.mean(values)
+            median_val = np.median(values)
+            std_val = np.std(values)
+            cov = std_val / mean_val if mean_val != 0 else float('inf')
+            
+            # A better stability metric for numerical parameters
+            # Lower is more stable
+            stability_score = min(1.0, cov)
+            
+            # Calculate percentages of values within ranges
+            within_5pct = np.mean(np.abs(values - median_val) <= 0.05 * abs(median_val))
+            within_10pct = np.mean(np.abs(values - median_val) <= 0.10 * abs(median_val))
+            
+            stability[param] = {
+                'type': 'numerical',
+                'mean': mean_val,
+                'median': median_val,
+                'std': std_val,
+                'cov': cov,
+                'stability_score': 1.0 - stability_score,  # Convert to 0-1 scale where 1 is most stable
+                'within_5pct': within_5pct,
+                'within_10pct': within_10pct
+            }
     
     return stability
 
-def recommend_final_parameters(all_parameters, stability):
+
+def recommend_final_parameters(all_params, stability_metrics):
     """
-    Recommend final parameters based on WFO results and stability analysis.
+    Recommend final parameters based on stability analysis.
+    
+    Args:
+        all_params: List of parameter dictionaries from each split
+        stability_metrics: Parameter stability analysis from analyze_parameter_stability
+        
+    Returns:
+        dict: Recommended final parameters
     """
-    if not all_parameters:
+    if not all_params:
+        logging.error("No parameter sets available for final recommendation")
         return {}
     
-    # Start with the most recent parameters as the base
-    final_params = all_parameters[-1].copy()
+    # Create a DataFrame with all parameters
+    params_df = pd.DataFrame(all_params)
     
-    # For each parameter, decide whether to use mean, median, or most recent value
-    for param_name, metrics in stability.items():
-        # Skip if parameter not in most recent set
-        if param_name not in final_params:
-                continue
-                
-        # If parameter is highly unstable, maybe ask chat model for help
-        if metrics['cv'] > 0.5 and chat_model_available():
-            suggestion = ask_chat_model(
-                f"Parameter '{param_name}' is unstable across WFO splits (CV={metrics['cv']:.2f}). Values: {metrics['values']}. How should I set the final value?"
-            )
-            wfo_logger.info(f"Chat model suggestion for unstable parameter '{param_name}': {suggestion}")
-        
-        # Use median for more stable values
-        if metrics['cv'] < 0.3:
-            final_params[param_name] = np.median(metrics['values'])
+    # Initialize final parameters dictionary
+    final_params = {}
+    
+    # Add fixed parameters
+    for param in ['initial_capital', 'commission_pct', 'slippage_pct']:
+        if param in params_df.columns:
+            final_params[param] = params_df[param].iloc[0]
+    
+    # Process each parameter based on stability
+    for param, metrics in stability_metrics.items():
+        if metrics['type'] == 'categorical':
+            # For categorical parameters, use the mode
+            final_params[param] = metrics['mode']
+        else:
+            # For numerical parameters, use weighted approach based on stability
+            stability_score = metrics['stability_score']
+            
+            if stability_score >= 0.8:
+                # High stability - use median
+                final_params[param] = metrics['median']
+            elif stability_score >= 0.5:
+                # Medium stability - use mean
+                final_params[param] = metrics['mean']
+            else:
+                # Low stability - use last value (recency bias) or median of last N values
+                recent_values = params_df[param].iloc[-3:].values
+                final_params[param] = np.median(recent_values)
+    
+    # Ensure all parameters are present
+    for param in PARAM_GRID.keys():
+        if param not in final_params and param in params_df.columns:
+            # Use median as fallback
+            final_params[param] = params_df[param].median()
+    
+    # Log the final parameters
+    logging.info(f"Recommended final parameters: {final_params}")
     
     return final_params
 
-def save_final_parameters(params):
-    """Save the final recommended parameters to a file."""
-    import json
-    import os
-    
-    # Create directory if it doesn't exist
-    os.makedirs('output', exist_ok=True)
-    
-    # Save parameters as JSON
-    output_file = f'output/wfo_final_params_{SYMBOL}_{GRANULARITY_STR}.json'
-    with open(output_file, 'w') as f:
-        json.dump(params, f, indent=4)
-    
-    wfo_logger.info(f"Final parameters saved to {output_file}")
 
-def generate_wfo_report(train_portfolios, oos_portfolios, all_parameters):
-    """Generate a detailed HTML report of the WFO results."""
-    wfo_logger.info("Generating detailed WFO report...")
+def save_final_parameters(params):
+    """
+    Save final parameters to a JSON file.
     
+    Args:
+        params: Dictionary of final parameters
+        
+    Returns:
+        bool: True if successful, False if error encountered
+    """
     try:
-        import os
-        from datetime import datetime
+        # Create output directory if it doesn't exist
+        os.makedirs('output', exist_ok=True)
         
-        # Create directory if it doesn't exist
-        report_dir = 'reports'
-        os.makedirs(report_dir, exist_ok=True)
-        
-        # Generate report filename
+        # Generate filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_file = f'{report_dir}/wfo_report_{SYMBOL}_{GRANULARITY_STR}_{timestamp}.html'
+        filename = f"output/wfo_params_{timestamp}.json"
         
-        # Generate HTML report content
-        # This would normally use a template engine or HTML generation library
-        # Simplified version for demonstration
-        html_content = f"""
+        # Save parameters to file
+        with open(filename, 'w') as f:
+            json.dump(params, f, indent=4)
+        
+        logging.info(f"Final parameters saved to {filename}")
+        
+        # Also save to a fixed filename for automation
+        with open("output/latest_wfo_params.json", 'w') as f:
+            json.dump(params, f, indent=4)
+        
+        return True
+    
+    except Exception as e:
+        logging.error(f"Error saving final parameters: {str(e)}")
+        return False
+
+
+def generate_wfo_report(train_portfolios, oos_portfolios, all_params):
+    """
+    Generate a comprehensive report on walk-forward optimization results.
+    
+    Args:
+        train_portfolios: List of (portfolio, metrics, params, split_id) tuples for training data
+        oos_portfolios: List of (portfolio, metrics, params, split_id) tuples for out-of-sample data
+        all_params: List of parameter dictionaries from each split
+        
+    Returns:
+        bool: True if successful, False if error encountered
+    """
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs('output', exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"output/wfo_report_{timestamp}.html"
+        
+        # Initialize report HTML
+        report_html = f"""
+        <!DOCTYPE html>
         <html>
         <head>
-            <title>WFO Report - {SYMBOL} {GRANULARITY_STR}</title>
+            <title>Walk-Forward Optimization Report - {timestamp}</title>
             <style>
                 body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                table {{ border-collapse: collapse; width: 100%; }}
+                h1, h2, h3 {{ color: #333366; }}
+                table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
                 th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                .summary {{ background-color: #e9f7ef; padding: 15px; margin-bottom: 20px; }}
             </style>
         </head>
         <body>
             <h1>Walk-Forward Optimization Report</h1>
-            <div class="summary">
-                <h2>Summary</h2>
-                <p>Symbol: {SYMBOL}</p>
-                <p>Timeframe: {GRANULARITY_STR}</p>
-                <p>Date Range: {WFO_START_DATE} to {WFO_END_DATE}</p>
-                <p>Splits Processed: {len(oos_portfolios)}/{len(train_portfolios)}</p>
-                <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            </div>
-            
-            <!-- Performance metrics would be added here -->
-            
-            <!-- Parameter stability analysis would be added here -->
-            
-            <!-- Charts would be added here -->
+            <h2>Date: {timestamp}</h2>
+            <table>
+                <tr>
+                    <th>Parameter</th>
+                    <th>Value</th>
+                </tr>
+                {''.join([f"<tr><td>{param}</td><td>{value}</td></tr>" for param, value in params.items()])}
+            </table>
+            <h2>Results</h2>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+                {''.join([f"<tr><td>{metric}</td><td>{value}</td></tr>" for metric, value in metrics.items()])}
+            </table>
         </body>
         </html>
         """
         
-        # Write report to file
-        with open(report_file, 'w') as f:
-            f.write(html_content)
+        # Save report to file
+        with open(filename, 'w') as f:
+            f.write(report_html)
         
-        wfo_logger.info(f"WFO report generated: {report_file}")
+        logging.info(f"Walk-Forward Optimization report saved to {filename}")
         
+        return True
+    
     except Exception as e:
-        wfo_logger.error(f"Error generating WFO report: {str(e)}")
+        logging.error(f"Error generating WFO report: {str(e)}")
+        return False
 
-def calculate_average_metrics(portfolios):
-    """Calculate average performance metrics across multiple portfolios."""
-    if not portfolios:
-        return {}
-        
-    # Get metrics for each portfolio
-    all_metrics = [calculate_performance_metrics(pf) for pf in portfolios]
-    
-    # Average the metrics
-    avg_metrics = {}
-    for metric in all_metrics[0].keys():
-        values = [m.get(metric, 0) for m in all_metrics]
-        avg_metrics[metric] = sum(values) / len(values)
-    
-    return avg_metrics
-
-# --- Data Loading and Preparation ---
-def load_data(symbol, timeframe='1d', lookback_days=365):
+def run_walk_forward_optimization(data, param_grid, optimization_metric='sharpe_ratio', in_sample_days=IN_SAMPLE_DAYS, out_sample_days=OUT_SAMPLE_DAYS, step_days=STEP_DAYS):
     """
-    Load market data for the specified symbol and timeframe with improved error handling.
+    Run walk-forward optimization on the given data.
     
     Args:
-        symbol (str): Trading symbol (e.g. 'BTC/USD')
-        timeframe (str): Chart timeframe (e.g. '1d', '4h', '1h')
-        lookback_days (int): Number of days of historical data to load
+        data: DataFrame with OHLCV data
+        param_grid: Dictionary with parameter names and possible values
+        optimization_metric: Metric to optimize (e.g., 'sharpe_ratio')
+        in_sample_days: Number of days for in-sample (training) period
+        out_sample_days: Number of days for out-of-sample (testing) period
+        step_days: Number of days to step forward for each split
         
     Returns:
-        dict: Dictionary with OHLCV data and derived indicators
+        tuple: (train_results, oos_results, all_params)
     """
-    try:
-        import pandas as pd
-        import numpy as np
-        from datetime import datetime, timedelta
-        import vectorbtpro as vbt
-        
-        logging.info(f"Loading data for {symbol} ({timeframe}) with {lookback_days} days lookback")
-        
-        # Set date range with a buffer to ensure sufficient data
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=int(lookback_days * 1.2))  # Add 20% buffer for data
-        
-        original_start_date = start_date
-        original_symbol = symbol
-        data = {}
-        data_loaded = False
-        
-        # Try primary data source
-        try:
-            # Try to load from vectorbtpro data module
-            logging.info(f"Attempting to load data from YFData for {symbol} from {start_date} to {end_date}")
-            symbol_formatted = symbol.replace('/', '-')
-            ohlcv = vbt.YFData.download(
-                symbol_formatted, 
-                start=start_date,
-                end=end_date,
-                timeframe=timeframe
-            ).get()
-            
-            # Validate the data
-            if ohlcv is not None and not ohlcv.empty and len(ohlcv) > 50:  # Minimum data requirement
-                # Extract OHLCV columns
-                data['open'] = ohlcv['Open']
-                data['high'] = ohlcv['High']
-                data['low'] = ohlcv['Low']
-                data['close'] = ohlcv['Close']
-                data['volume'] = ohlcv['Volume']
-                data_loaded = True
-                logging.info(f"Successfully loaded {len(ohlcv)} bars from YFData")
-            else:
-                logging.warning(f"Data from YFData was empty or insufficient: {len(ohlcv) if ohlcv is not None else 'None'} bars")
-            
-        except Exception as e:
-            logging.warning(f"Failed to load data from YFData: {e}")
-        
-        # Try alternative data sources if primary failed
-        if not data_loaded:
-            # Try alternative symbols
-            alternative_symbols = [
-                symbol.replace('/', '-'),   # Try BTC-USD format
-                symbol.replace('/', ''),    # Try BTCUSD format
-                symbol.replace('/USD', '/USDT')  # Try USDT pair instead
-            ]
-            
-            for alt_symbol in alternative_symbols:
-                if data_loaded:
-                    break
-                    
-                try:
-                    logging.info(f"Trying alternative symbol: {alt_symbol}")
-                    ohlcv = vbt.YFData.download(
-                        alt_symbol, 
-                        start=start_date,
-                        end=end_date,
-                        timeframe=timeframe
-                    ).get()
-                    
-                    if ohlcv is not None and not ohlcv.empty and len(ohlcv) > 50:
-                        data['open'] = ohlcv['Open']
-                        data['high'] = ohlcv['High']
-                        data['low'] = ohlcv['Low']
-                        data['close'] = ohlcv['Close']
-                        data['volume'] = ohlcv['Volume']
-                        data_loaded = True
-                        logging.info(f"Successfully loaded {len(ohlcv)} bars using alternative symbol {alt_symbol}")
-                except Exception as alt_err:
-                    logging.warning(f"Failed to load data for alternative symbol {alt_symbol}: {alt_err}")
-            
-            # Try to load from CSV if available
-            if not data_loaded:
-                try:
-                    csv_paths = [
-                        f"data/{symbol.replace('/', '_')}_{timeframe}.csv",
-                        f"data/{symbol.replace('/', '-')}_{timeframe}.csv",
-                        f"data/{symbol.replace('/', '')}_{timeframe}.csv"
-                    ]
-                    
-                    for csv_path in csv_paths:
-                        try:
-                            logging.info(f"Attempting to load from CSV: {csv_path}")
-                            df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-                            
-                            # Validate CSV data
-                            if df is not None and not df.empty and len(df) > 50:
-                                # Extract OHLCV columns
-                                data['open'] = df['open'] if 'open' in df.columns else df['Open']
-                                data['high'] = df['high'] if 'high' in df.columns else df['High']
-                                data['low'] = df['low'] if 'low' in df.columns else df['Low']
-                                data['close'] = df['close'] if 'close' in df.columns else df['Close']
-                                
-                                # Handle volume column which might be missing
-                                if 'volume' in df.columns:
-                                    data['volume'] = df['volume']
-                                elif 'Volume' in df.columns:
-                                    data['volume'] = df['Volume']
-                                else:
-                                    # Generate synthetic volume
-                                    data['volume'] = pd.Series(np.ones(len(df)), index=df.index)
-                                
-                                data_loaded = True
-                                logging.info(f"Successfully loaded {len(df)} bars from CSV: {csv_path}")
-                                break
-                        except Exception as csv_path_err:
-                            logging.warning(f"Failed to load from CSV path {csv_path}: {csv_path_err}")
-                    
-                except Exception as csv_err:
-                    logging.error(f"Failed to load from all CSV options: {csv_err}")
-        
-        # Generate mock data as last resort
-        if not data_loaded:
-            logging.warning("All data loading attempts failed. Generating mock data for testing.")
-            
-            # Add more realistic values for mock data to better simulate real market behavior
-            dates = pd.date_range(start=start_date, end=end_date, freq=timeframe)
-            n_bars = len(dates)
-            
-            if n_bars < 100:
-                logging.warning(f"Not enough bars ({n_bars}) in date range. Expanding range.")
-                start_date = end_date - timedelta(days=lookback_days * 2)  # Double the lookback period
-                dates = pd.date_range(start=start_date, end=end_date, freq=timeframe)
-                n_bars = len(dates)
-            
-            # Generate synthetic price data with realistic properties
-            np.random.seed(42)  # For reproducibility
-            
-            # Set base values according to the asset being simulated
-            if 'btc' in symbol.lower():
-                start_price = 50000.0
-                daily_returns = np.random.normal(0.0005, 0.03, n_bars)  
-            elif 'eth' in symbol.lower():
-                start_price = 3000.0
-                daily_returns = np.random.normal(0.0006, 0.04, n_bars)
-            else:
-                start_price = 100.0
-                daily_returns = np.random.normal(0.0003, 0.02, n_bars)
-            
-            # Generate close prices with momentum effect
-            momentum = np.cumsum(np.random.normal(0, 0.005, n_bars))  # Add gradual trends
-            close_prices = start_price * (1 + daily_returns + momentum * 0.01).cumprod()
-            
-            # Generate other OHLCV data with realistic relationships
-            high_ratio = 1 + np.abs(np.random.normal(0, 0.015, n_bars))  # High is 0-3% above close
-            low_ratio = 1 - np.abs(np.random.normal(0, 0.015, n_bars))   # Low is 0-3% below close
-            
-            # Add volatility clustering to make price movements more realistic
-            volatility = np.abs(np.random.normal(0, 0.01, n_bars))
-            for i in range(1, len(volatility)):
-                volatility[i] = 0.9 * volatility[i-1] + 0.1 * volatility[i]
-            
-            # Create OHLCV data
-            data['close'] = pd.Series(close_prices, index=dates)
-            data['high'] = pd.Series(close_prices * (1 + volatility * high_ratio), index=dates)
-            data['low'] = pd.Series(close_prices * (1 - volatility * low_ratio), index=dates)
-            data['open'] = pd.Series((data['high'] + data['low']) / 2, index=dates)
-            
-            # Generate volume with higher volume on larger price movements
-            normalized_returns = np.abs(daily_returns) / np.std(daily_returns)
-            volume_base = np.random.lognormal(15, 1, n_bars)
-            volume_adjusted = volume_base * (1 + normalized_returns)
-            data['volume'] = pd.Series(volume_adjusted, index=dates)
-            
-            logging.info(f"Generated {n_bars} bars of mock data from {dates[0]} to {dates[-1]}")
-            data_loaded = True
-        
-        # Calculate basic indicators
-        logging.info("Calculating indicators")
-        
-        # Ensure no NaN values in price data
-        for key in ['open', 'high', 'low', 'close']:
-            if key in data:
-                # Forward fill, then backward fill to handle any NaNs
-                data[key] = data[key].fillna(method='ffill').fillna(method='bfill')
-        
-        # RSI
-        data['rsi'] = vbt.RSI.run(data['close']).rsi
-        
-        # Bollinger Bands - check for different class names based on vectorbtpro version
-        try:
-            # Try BBands (newer versions)
-            bb = vbt.BBands.run(data['close'])
-            data['bb_middle'] = bb.middle
-            data['bb_upper'] = bb.upper
-            data['bb_lower'] = bb.lower
-        except AttributeError:
-            try:
-                # Try BBANDS (older versions)
-                bb = vbt.BBANDS.run(data['close'])
-                data['bb_middle'] = bb.middle
-                data['bb_upper'] = bb.upper
-                data['bb_lower'] = bb.lower
-            except AttributeError:
-                # Last resort, calculate manually
-                logging.warning("Bollinger Bands indicators not found, calculating manually")
-                window = 20
-                rolling_mean = data['close'].rolling(window=window).mean()
-                rolling_std = data['close'].rolling(window=window).std()
-                data['bb_middle'] = rolling_mean
-                data['bb_upper'] = rolling_mean + (rolling_std * 2)
-                data['bb_lower'] = rolling_mean - (rolling_std * 2)
-        
-        # Volatility (ATR)
-        try:
-            data['atr'] = vbt.ATR.run(data['high'], data['low'], data['close']).atr
-            data['atr_pct'] = data['atr'] / data['close'] * 100  # ATR as percentage of price
-        except AttributeError:
-            # Calculate manually if not available
-            logging.warning("ATR indicator not found, calculating manually")
-            window = 14
-            tr1 = abs(data['high'] - data['low'])
-            tr2 = abs(data['high'] - data['close'].shift())
-            tr3 = abs(data['low'] - data['close'].shift())
-            tr = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3}).max(axis=1)
-            data['atr'] = tr.rolling(window=window).mean()
-            data['atr_pct'] = data['atr'] / data['close'] * 100
-        
-        # Price momentum
-        data['returns'] = data['close'].pct_change()
-        data['rolling_vol'] = data['returns'].rolling(window=20).std() * np.sqrt(252)  # Annualized vol
-        
-        # Log data summary
-        start_date_str = data['close'].index[0].strftime('%Y-%m-%d')
-        end_date_str = data['close'].index[-1].strftime('%Y-%m-%d')
-        logging.info(f"Loaded {len(data['close'])} bars from {start_date_str} to {end_date_str}")
-        logging.info(f"Price range: {data['close'].min():.2f} to {data['close'].max():.2f}")
-        
-        return data
-
-    except Exception as e:
-        logging.error(f"Error loading market data: {e}")
-        if chat_model_available():
-            context = {"error_location": "load_market_data"}
-            debug_with_chat(e, "Error when loading market data", context)
-        return None
-
-
-def create_wfo_splits(data, num_splits, train_size):
-    """
-    Create walk-forward optimization splits with improved handling to prevent overlaps.
+    wfo_logger.info("Starting walk-forward optimization")
     
-    Args:
-        data: DataFrame or dict with OHLCV data
-        num_splits: Number of splits to create
-        train_size: Size of training set as fraction of split
-        
-    Returns:
-        List of tuples (train_data, test_data)
-    """
-    import numpy as np
-    import pandas as pd
+    # Create necessary splits
+    total_days = len(data)
+    min_days_needed = in_sample_days + out_sample_days
     
-    # Get reference series for splitting (using close price)
-    if isinstance(data, pd.DataFrame):
-        series = data['close'] if 'close' in data.columns else data.iloc[:, 0]
-    else:
-        series = data['close']
-        
-    total_rows = len(series)
-    logging.info(f"Creating {num_splits} WFO splits with training size of {train_size*100:.0f}%")
+    if total_days < min_days_needed:
+        wfo_logger.error(f"Not enough data for walk-forward optimization. Need at least {min_days_needed} days, but only have {total_days} days.")
+        return [], [], []
     
-    # Calculate rows per split to ensure no overlap
-    split_size = total_rows // num_splits
+    # Calculate number of splits
+    max_start_idx = total_days - min_days_needed
+    num_splits = max(1, max_start_idx // step_days + 1)
     
-    # Ensure minimum data size requirements are met
-    if split_size < 90:  # Minimum 90 days per split as a rule of thumb
-        logging.warning(f"Split size too small: {split_size} days. Consider reducing num_splits or using more data.")
-        # Adjust to fewer splits if needed
-        original_splits = num_splits
-        num_splits = max(2, total_rows // 90)
-        split_size = total_rows // num_splits
-        logging.warning(f"Adjusted splits from {original_splits} to {num_splits} to ensure at least 90 days per split")
+    wfo_logger.info(f"Creating {num_splits} splits for walk-forward optimization")
     
-    # Calculate train and test sizes
-    train_days = int(split_size * train_size)
-    test_days = split_size - train_days
+    # Initialize results lists
+    train_results = []
+    oos_results = []
+    all_params = []
     
-    logging.info(f"Each split: {split_size} days (Train: {train_days}, Test: {test_days})")
-    
-    splits = []
-    for i in range(num_splits):
-        # Calculate split boundaries
-        start_idx = i * split_size
-        train_end_idx = start_idx + train_days
-        test_end_idx = min(train_end_idx + test_days, total_rows)
+    # Run optimization for each split
+    for split_id in range(num_splits):
+        # Calculate indices for this split
+        start_idx = split_id * step_days
+        train_end_idx = start_idx + in_sample_days
+        oos_end_idx = min(train_end_idx + out_sample_days, total_days)
         
-        # Handle last split potentially being smaller
-        if i == num_splits - 1:
-            test_end_idx = total_rows
-            
-        # Log split details
-        logging.info(f"Split {i+1}: Train [{start_idx}:{train_end_idx}], Test [{train_end_idx}:{test_end_idx}]")
-            
-        # Extract train and test data
-        if isinstance(data, pd.DataFrame):
-            train_data = data.iloc[start_idx:train_end_idx].copy()
-            test_data = data.iloc[train_end_idx:test_end_idx].copy()
-        else:
-            # For dict of Series
-            train_data = {}
-            test_data = {}
-            for key, series in data.items():
-                train_data[key] = series.iloc[start_idx:train_end_idx].copy()
-                test_data[key] = series.iloc[train_end_idx:test_end_idx].copy()
+        # Skip if we don't have enough data for out-of-sample
+        if train_end_idx >= total_days:
+            wfo_logger.warning(f"Split {split_id}: Not enough data for training. Skipping.")
+            continue
         
-        splits.append((train_data, test_data))
+        # Extract data for this split
+        train_data = data.iloc[start_idx:train_end_idx].copy()
+        oos_data = data.iloc[train_end_idx:oos_end_idx].copy()
         
-    # Verify splits
-    for i, (train, test) in enumerate(splits):
-        if isinstance(train, pd.DataFrame):
-            train_size = len(train)
-            test_size = len(test)
-        else:
-            train_size = len(list(train.values())[0])
-            test_size = len(list(test.values())[0])
-            
-        logging.info(f"Split {i+1} sizes - Training: {train_size}, Testing: {test_size}")
-    
-    return splits
-
-def calculate_target_amount(close, entries, sl_pct, risk_per_trade, init_cash):
-    """
-    Calculate position size based on risk parameters.
-    
-    Args:
-        close (pd.Series): Close price series
-        entries (pd.Series): Boolean series indicating entry points
-        sl_pct (float): Stop loss percentage as a decimal (e.g., 0.02 for 2%)
-        risk_per_trade (float): Fraction of capital to risk per trade (e.g., 0.01 for 1%)
-        init_cash (float): Initial capital
+        # Log split information
+        wfo_logger.info(f"Split {split_id}: Training {train_data.index[0]} to {train_data.index[-1]} ({len(train_data)} days)")
+        wfo_logger.info(f"Split {split_id}: Testing {oos_data.index[0]} to {oos_data.index[-1]} ({len(oos_data)} days)")
         
-    Returns:
-        pd.Series: Position sizes at each entry point
-    """
-    # Create a Series of zeros with the same index as close
-    amount = pd.Series(0.0, index=close.index)
-    
-    # For each entry point, calculate the position size
-    entry_indices = entries[entries].index
-    
-    for idx in entry_indices:
-        # Get entry price
-        entry_price = close[idx]
-        
-        # Calculate risk amount in dollars
-        risk_amount = init_cash * risk_per_trade
-        
-        # Calculate max loss per unit
-        max_loss_per_unit = entry_price * sl_pct
-        
-        # Calculate units to trade
-        if max_loss_per_unit > 0:
-            units = risk_amount / max_loss_per_unit
-        else:
-            units = 0
-            
-        # Set the amount at this entry point
-        amount[idx] = units
-    
-    return amount
-
-# =============================================================================
-# Main Execution Block
-# =============================================================================
-if __name__ == "__main__":
-    wfo_logger.info("Executing WFO script...")
-    try:
-        # Enable vectorbtpro caching if configured
-        if ENABLE_CACHING:
-            wfo_logger.info("Enabling VectorBT Pro caching for faster calculations")
-            try:
-                # Use the simplest caching option
-                if hasattr(vbt, 'settings'):
-                    if hasattr(vbt.settings, 'set_option'):
-                        vbt.settings.set_option('caching', True)
-                    elif hasattr(vbt.settings, 'caching'):
-                        if not isinstance(vbt.settings.caching, dict):
-                            vbt.settings.caching = True
-            except Exception as cache_err:
-                wfo_logger.warning(f"Could not enable VectorBT Pro caching: {cache_err}")
-        
-        # Set debug verbosity
-        if not VERBOSE_DEBUG:
-            wfo_logger.info("Setting lower verbosity for production run")
-            wfo_logger.setLevel(logging.INFO)
-        
-        run_walk_forward_optimization()
-        wfo_logger.info("Script execution completed successfully.")
-    except Exception as main_err:
-        wfo_logger.critical(f"Script failed with error: {main_err}")
-        # Optionally exit with error code
-        sys.exit(1) 
-
-def initialize_chat_model():
-    """Initialize the chat model for the strategy.
-    
-    This function attempts to initialize the chat model using vectorbtpro.
-    If successful, it will return the chat model instance.
-    If unsuccessful, it will return None.
-    
-    Returns:
-        object: The chat model instance if successful, None otherwise.
-    """
-    try:
-        # Just use the get_chat_model function
-        chat_model = get_chat_model()
-        if chat_model:
-            wfo_logger.info("Successfully initialized chat model.")
-            return chat_model
-        else:
-            wfo_logger.warning("Failed to initialize chat model.")
-            return None
-    except Exception as e:
-        wfo_logger.error(f"Failed to initialize chat model: {e}", exc_info=True)
-        return None
-
-def debug_with_chat(error_message, context_data=None):
-    """Use the chat provider to debug an error with additional context"""
-    try:
-        # Only use if we have a chat provider configured
-        if not hasattr(debug_with_chat, "chat_fn"):
-            # Try to create a chat function if we haven't already
-            chat_fn = setup_chat_provider()
-            if chat_fn:
-                debug_with_chat.chat_fn = chat_fn
-            else:
-                logging.warning("No chat provider available for debugging")
-                return f"Debugging failed: {error_message}"
-        
-        # Create a debugging prompt with error context
-        prompt = f"""
-        I'm encountering an error in my cryptocurrency trading strategy optimization:
-        
-        ERROR: {error_message}
-        
-        Additional context:
-        {json.dumps(context_data, indent=2) if context_data else 'No additional context provided'}
-        
-        Please help me understand what might be causing this issue and suggest potential solutions.
-        """
-        
-        # Send to chat provider and get response
-        response = debug_with_chat.chat_fn(prompt)
-        logging.info(f"AI debugging suggestion: {response.strip()}")
-        return response
-    except Exception as e:
-        logging.error(f"Error in debug_with_chat: {str(e)}")
-        return f"Debugging failed: {error_message}"
-
-def handle_portfolio_error(error, params):
-    """Handle errors that occur during portfolio creation.
-    
-    Args:
-        error (Exception): The error that occurred.
-        params (dict): The parameters that were used for portfolio creation.
-    
-    Returns:
-        str: Debugging advice for the portfolio error.
-    """
-    # Get specific context for portfolio creation errors
-    context = "Error occurred during portfolio creation. "
-    
-    # Add more context based on common portfolio errors
-    if "truth value of a Series is ambiguous" in str(error):
-        context += (
-            "This is likely due to a boolean operation on a pandas Series. "
-            "Check entry/exit condition calculations and ensure proper boolean operations."
+        # Find optimal parameters on training data
+        best_train_portfolio, best_train_metrics, best_params, _ = evaluate_parameter_sets(
+            train_data, param_grid, optimization_metric, split_id
         )
-    elif "cannot reindex from a duplicate axis" in str(error):
-        context += "This may be due to duplicate index values in the data."
-    elif "Input contains NaN" in str(error):
-        context += "Check for NaN values in price data or signal generation."
+        
+        # Skip if no valid parameters found
+        if best_params is None:
+            wfo_logger.warning(f"Split {split_id}: No valid parameters found. Skipping.")
+            continue
+        
+        # Store the best parameters
+        all_params.append(best_params)
+        
+        # Apply best parameters to out-of-sample data
+        oos_portfolio, oos_metrics, _, _ = evaluate_parameter_set(oos_data, best_params, split_id)
+        
+        # Store results
+        train_results.append((best_train_portfolio, best_train_metrics, best_params, split_id))
+        if oos_portfolio is not None:
+            oos_results.append((oos_portfolio, oos_metrics, best_params, split_id))
+        
+        # Log results
+        wfo_logger.info(f"Split {split_id}: Best parameters: {best_params}")
+        if best_train_metrics:
+            wfo_logger.info(f"Split {split_id}: Training metrics: {best_train_metrics}")
+        if oos_metrics:
+            wfo_logger.info(f"Split {split_id}: Out-of-sample metrics: {oos_metrics}")
     
-    # Get debugging advice using the chat model
-    return debug_with_chat(error, context=context, params=params) 
+    # Analyze parameter stability
+    if all_params:
+        stability_metrics = analyze_parameter_stability(all_params)
+        wfo_logger.info(f"Parameter stability metrics: {stability_metrics}")
+        
+        # Recommend final parameters
+        final_params = recommend_final_parameters(all_params, stability_metrics)
+        wfo_logger.info(f"Recommended final parameters: {final_params}")
+        
+        # Save final parameters
+        save_final_parameters(final_params)
+        
+        # Generate report
+        generate_wfo_report(train_results, oos_results, all_params)
+    
+    return train_results, oos_results, all_params
 
-# --- Create portfolios with modified signal generation ---
-    logging.info(f"Completed {len(study.trials)} trials so far")
-    if len(study.trials) % 10 == 0:
-        best_trial = study.best_trial
-        if best_trial.value != float('-inf'):
-            logging.info(f"Best value so far: {best_trial.value} with params: {best_trial.params}")
-        else:
-            logging.warning("No valid portfolio found yet")
-            
-    # Return true to continue optimization
-    return True
+def create_pf_for_candlestick_strategy(data, entries, exits, init_cash=INITIAL_CAPITAL, size=None, sl_stop=None, tp_stop=None):
+    """
+    Wrapper function for create_portfolio_for_strategy for the candlestick strategy.
+    
+    Args:
+        data: DataFrame with OHLCV data
+        entries: Series of entry signals
+        exits: Series of exit signals
+        init_cash: Initial capital
+        size: Optional size series
+        sl_stop: Stop loss percentage (as decimal)
+        tp_stop: Take profit percentage (as decimal)
+        
+    Returns:
+        Portfolio object or CustomPortfolio object
+    """
+    # Ensure data types are correct
+    if not isinstance(entries, pd.Series):
+        entries = pd.Series(entries, index=data.index)
+    if not isinstance(exits, pd.Series):
+        exits = pd.Series(exits, index=data.index)
+    
+    # Convert stop_loss_pct and take_profit_pct to their decimal forms if they're passed as string-formatted percentages
+    if isinstance(sl_stop, str) and sl_stop.endswith('%'):
+        sl_stop = float(sl_stop.rstrip('%')) / 100
+    elif isinstance(sl_stop, (int, float)):
+        sl_stop = float(sl_stop)
+        
+    if isinstance(tp_stop, str) and tp_stop.endswith('%'):
+        tp_stop = float(tp_stop.rstrip('%')) / 100
+    elif isinstance(tp_stop, (int, float)):
+        tp_stop = float(tp_stop)
+    
+    return create_portfolio_for_strategy(data, entries, exits, init_cash, size, sl_stop, tp_stop)
 
-def progress_callback(study, trial=None):
-    """Callback function for Optuna to track optimization progress"""
-    logging.info(f"Completed {len(study.trials)} trials so far")
-    if len(study.trials) % 10 == 0:
-        best_trial = study.best_trial
-        if best_trial.value != float('-inf'):
-            logging.info(f"Best value so far: {best_trial.value} with params: {best_trial.params}")
-        else:
-            logging.warning("No valid portfolio found yet")
+# This function needs to be outside of evaluate_parameter_sets for parallel processing
+def evaluate_single_param_set_wrapper(args):
+    """Wrapper for evaluate_parameter_set to use in parallel processing."""
+    data, params, split_id = args
+    return evaluate_parameter_set(data, params, split_id)
+
+# Main execution
+if __name__ == "__main__":
+    # Configure chat provider if available
+    if chat_model_available():
+        wfo_logger.info("Chat model is available and will be used for analysis")
+    else:
+        wfo_logger.warning("Chat model is not available. Some features will be limited.")
+    
+    # Fetch historical data
+    wfo_logger.info(f"Fetching historical data for {SYMBOL} from {WFO_START_DATE} to {WFO_END_DATE}")
+    try:
+        data = fetch_historical_data(SYMBOL, WFO_START_DATE, WFO_END_DATE, GRANULARITY_SECONDS)
+        
+        if data is None or len(data) == 0:
+            wfo_logger.error("Failed to fetch historical data. Exiting.")
+            sys.exit(1)
+        
+        wfo_logger.info(f"Fetched {len(data)} periods of historical data")
+        
+        # Run walk-forward optimization
+        train_results, oos_results, all_params = run_walk_forward_optimization(
+            data, PARAM_GRID, OPTIMIZATION_METRIC, IN_SAMPLE_DAYS, OUT_SAMPLE_DAYS, STEP_DAYS
+        )
+        
+        # Summarize results
+        if all_params:
+            wfo_logger.info(f"Walk-forward optimization completed with {len(all_params)} valid splits")
             
-    # Return true to continue optimization
-    return True
+            # Calculate overall out-of-sample performance
+            if oos_results:
+                total_oos_return = sum([m[1].get('total_return', 0) for m in oos_results if m[1] is not None])
+                avg_oos_sharpe = np.mean([m[1].get('sharpe', 0) for m in oos_results if m[1] is not None])
+                wfo_logger.info(f"Overall out-of-sample performance: Return = {total_oos_return:.2f}%, Sharpe = {avg_oos_sharpe:.2f}")
+            
+            # Final recommended parameters from stability analysis
+            stability_metrics = analyze_parameter_stability(all_params)
+            final_params = recommend_final_parameters(all_params, stability_metrics)
+            wfo_logger.info(f"Final recommended parameters: {final_params}")
+            
+            # Save to file
+            save_final_parameters(final_params)
+        else:
+            wfo_logger.warning("Walk-forward optimization failed to produce valid results")
+    
+    except Exception as e:
+        wfo_logger.error(f"Error in walk-forward optimization: {str(e)}")
+        if chat_model_available():
+            explanation = ask_chat_model(
+                f"Error in walk-forward optimization: {str(e)}. What might be causing this error?")
+            wfo_logger.info(f"Error explanation: {explanation}")
+    
+    # Exit successfully
+    sys.exit(0)

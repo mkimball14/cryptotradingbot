@@ -1,3 +1,0 @@
-strategy,metric,best_score,total_return_pct,max_drawdown_pct,win_rate_pct,num_trades,best_params,error
-StochSMA,,,,,,,,Invalid/missing result object
-RSIMomentum,,,,,,,,Invalid/missing result object

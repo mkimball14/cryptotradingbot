@@ -1,1 +1,119 @@
- 
+# Brave Search MCP Usage Guidelines
+
+- **Market Research Strategy**
+  - **DO** use structured queries to get precise crypto market information
+    ```typescript
+    // For market trends research
+    const results = await mcp_brave_search_brave_web_search({
+      query: "bitcoin price analysis last 30 days moving average",
+      count: 5
+    });
+    ```
+  - **DON'T** use overly general queries that may return irrelevant results
+    ```typescript
+    // ❌ DON'T: Use vague queries
+    const results = await mcp_brave_search_brave_web_search({
+      query: "crypto prices",
+      count: 10
+    });
+    ```
+
+- **API Documentation Research**
+  - **DO** include specific API names and parameters in queries
+    ```typescript
+    // When looking for API documentation
+    const results = await mcp_brave_search_brave_web_search({
+      query: "Coinbase Advanced Trade API JWT authentication ES256",
+      count: 5
+    });
+    ```
+  - **DO** use vendor-specific terminology in searches
+    ```typescript
+    // For exchange-specific features
+    const results = await mcp_brave_search_brave_web_search({
+      query: "Coinbase websocket feed private channels signature generation",
+      count: 3
+    });
+    ```
+
+- **Trading Algorithm Research**
+  - **DO** search for specific indicators and strategies
+    ```typescript
+    // When researching trading algorithms
+    const results = await mcp_brave_search_brave_web_search({
+      query: "exponential moving average crossover strategy backtest cryptocurrency",
+      count: 7
+    });
+    ```
+  - **DO** include programming language in implementation searches
+    ```typescript
+    // For implementation details
+    const results = await mcp_brave_search_brave_web_search({
+      query: "typescript implementing MACD indicator trading bot",
+      count: 5
+    });
+    ```
+
+- **Regulatory Compliance Research**
+  - **DO** include relevant jurisdictions in compliance searches
+    ```typescript
+    // For compliance information
+    const results = await mcp_brave_search_brave_web_search({
+      query: "cryptocurrency trading bot regulatory requirements US SEC",
+      count: 5
+    });
+    ```
+  - **DO** search for recent regulatory developments
+    ```typescript
+    // For updated regulations
+    const results = await mcp_brave_search_brave_web_search({
+      query: "2025 cryptocurrency trading regulations new requirements",
+      count: 3
+    });
+    ```
+
+- **Local Exchange Research**
+  - **DO** use local search for regional exchange information
+    ```typescript
+    // For regional exchange information
+    const results = await mcp_brave_search_brave_local_search({
+      query: "cryptocurrency exchange services near New York",
+      count: 3
+    });
+    ```
+  - **DO** include specific services in local searches
+    ```typescript
+    // For specific services
+    const results = await mcp_brave_search_brave_local_search({
+      query: "OTC cryptocurrency trading desk services near San Francisco",
+      count: 3
+    });
+    ```
+
+- **Research Documentation**
+  - **DO** save valuable search results in the project's research directory
+    ```typescript
+    // Example documentation code
+    const saveResearchResults = (query, results) => {
+      const filename = `research/${query.replace(/\s+/g, '_').toLowerCase()}.md`;
+      const content = formatResultsAsMarkdown(results);
+      fs.writeFileSync(filename, content);
+    };
+    ```
+  - **DO** tag and categorize research findings
+    ```typescript
+    // Research categorization
+    const categories = {
+      'API': ['authentication', 'endpoints', 'rate-limits'],
+      'MARKET': ['trends', 'analysis', 'forecasts'],
+      'REGULATORY': ['compliance', 'licensing', 'reporting'],
+      'STRATEGIES': ['algorithms', 'indicators', 'backtesting']
+    };
+    ```
+
+- **Best Practices**
+  - Limit searches to 5-7 results for focused information
+  - Use quotes for exact phrase matching in complex queries
+  - Include time-based keywords for recent information
+  - Combine web and local search for comprehensive research
+  - Document search queries that yielded valuable results 

@@ -221,4 +221,74 @@ def calculate_bbands(data: pd.DataFrame, period: int = 20, std_dev: float = 2.0,
         print(f"[DEBUG] Traceback:\n{traceback.format_exc()}")
         cols = [f'BBL_{period}_{std_dev}', f'BBM_{period}_{std_dev}', f'BBU_{period}_{std_dev}', 
                 f'BBB_{period}_{std_dev}', f'BBP_{period}_{std_dev}']
-        return pd.DataFrame(index=data.index, columns=cols) 
+        return pd.DataFrame(index=data.index, columns=cols)
+
+def calculate_bb_squeeze(data: pd.DataFrame,
+                         bb_period: int = 20,
+                         bb_std_dev: float = 2.0,
+                         kc_period: int = 20,
+                         kc_factor: float = 1.5,
+                         use_ema: bool = True) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calculate Bollinger Bands Squeeze indicator to identify low volatility periods.
+    This indicator combines Bollinger Bands and Keltner Channels to identify when
+    price volatility is low (the bands "squeeze") and potential breakout opportunities.
+    
+    Args:
+        data: DataFrame with OHLC data
+        bb_period: Period for Bollinger Bands moving average
+        bb_std_dev: Standard deviation multiplier for Bollinger Bands
+        kc_period: Period for Keltner Channels moving average
+        kc_factor: ATR multiplier for Keltner Channels
+        use_ema: Whether to use EMA (True) or SMA (False) for moving averages
+        
+    Returns:
+        Tuple containing:
+        - is_squeeze: Boolean Series indicating when Bollinger Bands are inside Keltner Channels
+        - squeeze_intensity: Numeric Series showing how strong the squeeze is (negative = stronger squeeze)
+        - momentum: Momentum signal derived from the differential of BB width and KC width
+    """
+    try:
+        # Calculate Bollinger Bands
+        if use_ema:
+            middle_band = data['close'].ewm(span=bb_period, adjust=False).mean()
+        else:
+            middle_band = data['close'].rolling(window=bb_period).mean()
+            
+        std_dev = data['close'].rolling(window=bb_period).std()
+        bb_upper = middle_band + (std_dev * bb_std_dev)
+        bb_lower = middle_band - (std_dev * bb_std_dev)
+        bb_width = bb_upper - bb_lower
+        
+        # Calculate Keltner Channels
+        if use_ema:
+            kc_middle = data['close'].ewm(span=kc_period, adjust=False).mean()
+        else:
+            kc_middle = data['close'].rolling(window=kc_period).mean()
+            
+        # Calculate ATR for Keltner Channels
+        atr = calculate_atr(data, period=kc_period)
+        kc_upper = kc_middle + (atr * kc_factor)
+        kc_lower = kc_middle - (atr * kc_factor)
+        kc_width = kc_upper - kc_lower
+        
+        # Calculate Squeeze Conditions
+        # Squeeze happens when Bollinger Bands are inside Keltner Channels
+        is_squeeze = (bb_lower > kc_lower) & (bb_upper < kc_upper)
+        
+        # Calculate squeeze intensity: negative value when in squeeze, larger negative = stronger squeeze
+        # Normalized by the Keltner Channel width to make it comparable across different instruments
+        squeeze_intensity = (bb_width / kc_width) - 1.0
+        
+        # Calculate momentum: rate of change in the relationship between BB and KC widths
+        # This helps identify potential breakout direction
+        # Momentum is positive when BB expanding faster than KC, negative when BB contracting faster
+        momentum = squeeze_intensity.diff(2) * 100
+        
+        return is_squeeze, squeeze_intensity, momentum
+        
+    except Exception as e:
+        print(f"Error calculating BB Squeeze: {str(e)}")
+        # Return empty series with the same index as the input data
+        empty_series = pd.Series(np.nan, index=data.index)
+        return empty_series, empty_series, empty_series 

@@ -5,8 +5,8 @@
 
 import numpy as np
 import pandas as pd
-import vectorbt as vbt
-from vectorbtpro.portfolio.enums import StopType
+import vectorbtpro as vbt
+from vectorbtpro.portfolio.enums import StopExitType
 
 class EdgeMultiFactorStrategy:
     # Simulating a base class for trading strategies
@@ -29,7 +29,7 @@ class AdaptiveTradingStrategy(EdgeMultiFactorStrategy):
         # Calculate RSI
         self.data['RSI'] = vbt.RSI.run(self.data['Close'], window=self.rsi_periods).rsi
         # Calculate Bollinger Bands
-        bollinger = vbt.BBANDS.run(self.data['Close'], window=self.bollinger_window, std_dev=self.bollinger_dev)
+        bollinger = vbt.BBANDS.run(self.data['Close'], window=self.bollinger_window, alpha=self.bollinger_dev)
         self.data['BB_Upper'] = bollinger.upper
         self.data['BB_Lower'] = bollinger.lower
         self.data['BB_Middle'] = bollinger.middle
@@ -70,15 +70,35 @@ class AdaptiveTradingStrategy(EdgeMultiFactorStrategy):
         self.set_position_size()
         self.calculate_stop_loss_take_profit()
         
-        pf = vbt.Portfolio.from_signals(self.data['Close'],
-                                        entries=self.data['Market_Regime'] == 'Trending',
-                                        exits=self.data['Market_Regime'] == 'Ranging',
-                                        size=self.position_size,
-                                        stop_loss=self.data['stop_loss'],
-                                        take_profit=self.data['take_profit'],
-                                        init_cash=self.initial_capital,
-                                        fees=0.001,  # Assuming 0.1% trading fee
-                                        sl_stop=StopType.ATR,  # Using ATR for stop loss
-                                        tp_stop=StopType.ATR)  # Using ATR for take profit
+        # Simplified version without stop loss and take profit
+        pf = vbt.Portfolio.from_signals(
+            self.data['Close'],
+            entries=self.data['Market_Regime'] == 'Trending',
+            exits=self.data['Market_Regime'] == 'Ranging',
+            size=self.position_size,
+            init_cash=self.initial_capital,
+            fees=0.001  # Assuming 0.1% trading fee
+        )
         
         return pf.stats()
+
+    # Add a method to plot the equity curve
+    def plot_equity_curve(self):
+        self.calculate_indicators()
+        self.detect_market_regime()
+        self.adjust_parameters_based_on_volatility()
+        self.set_position_size()
+        self.calculate_stop_loss_take_profit()
+        
+        # Simplified version without stop loss and take profit
+        pf = vbt.Portfolio.from_signals(
+            self.data['Close'],
+            entries=self.data['Market_Regime'] == 'Trending',
+            exits=self.data['Market_Regime'] == 'Ranging',
+            size=self.position_size,
+            init_cash=self.initial_capital,
+            fees=0.001
+        )
+        
+        fig = pf.plot()
+        return fig

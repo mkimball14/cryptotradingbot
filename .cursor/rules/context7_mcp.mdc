@@ -1,1 +1,115 @@
- 
+# Context7 MCP Usage Guidelines
+
+- **Library Documentation Research**
+  - **DO** verify library information before implementation
+    ```typescript
+    // Before implementing new library code
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: "websocket-library-id",
+      tokens: 3000
+    });
+    ```
+  - **DON'T** rely on potentially outdated internal knowledge
+    ```typescript
+    // ❌ DON'T: Skip library verification
+    // Implementing directly without checking latest docs
+    const ws = new WebSocket(url);
+    ```
+
+- **API Client Implementation**
+  - **DO** check for breaking changes in crypto exchange API libraries
+    ```typescript
+    // Before implementing exchange API client
+    const libraryID = await mcp_context7_resolve_library_id({
+      libraryName: "coinbase-advanced-trade"
+    });
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: libraryID,
+      topic: "authentication"
+    });
+    ```
+  - **DO** focus documentation queries on specific topics
+    ```typescript
+    // For targeted information
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: libraryID,
+      topic: "websocket",
+      tokens: 2000
+    });
+    ```
+
+- **WebSocket Implementation**
+  - **DO** verify WebSocket library best practices
+    ```typescript
+    // Before implementing WebSocket connection
+    const libraryID = await mcp_context7_resolve_library_id({
+      libraryName: "ws"
+    });
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: libraryID,
+      topic: "connection management"
+    });
+    ```
+  - **DO** research reconnection strategies
+    ```typescript
+    // For reconnection strategy implementation
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: websocketLibraryID,
+      topic: "reconnection strategies"
+    });
+    ```
+
+- **Trading Algorithm Libraries**
+  - **DO** verify technical indicator implementations
+    ```typescript
+    // Before implementing technical indicators
+    const libraryID = await mcp_context7_resolve_library_id({
+      libraryName: "technicalindicators"
+    });
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: libraryID,
+      topic: "moving averages"
+    });
+    ```
+  - **DO** check for optimized implementations
+    ```typescript
+    // For performance-critical code
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: indicatorLibraryID,
+      topic: "performance optimization"
+    });
+    ```
+
+- **Authentication Libraries**
+  - **DO** verify JWT implementation details
+    ```typescript
+    // Before implementing JWT authentication
+    const libraryID = await mcp_context7_resolve_library_id({
+      libraryName: "jsonwebtoken"
+    });
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: libraryID,
+      topic: "ES256 signing"
+    });
+    ```
+  - **DO** check for security best practices
+    ```typescript
+    // For secure implementation
+    const docsResult = await mcp_context7_get_library_docs({
+      context7CompatibleLibraryID: jwtLibraryID,
+      topic: "security best practices"
+    });
+    ```
+
+- **Documentation Workflow**
+  - Start with `mcp_context7_resolve_library_id` to get the correct library ID
+  - Use specific topics to narrow down documentation requests
+  - Adjust token count based on documentation complexity
+  - Store important documentation snippets in project docs
+  
+- **Best Practices**
+  - Always resolve library ID before requesting documentation
+  - Use specific topic queries for targeted information
+  - Request only the necessary number of tokens
+  - Check documentation before major version updates
+  - Use context7 to verify implementation details from other sources 

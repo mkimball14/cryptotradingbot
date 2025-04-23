@@ -1,1 +1,187 @@
- 
+# Cursor AI Workflow Optimization
+
+## Session Initialization
+
+- **Start Every Session With:**
+  ```python
+  """
+  Project: Crypto Trading Bot
+  Current Component: [component_name]
+  Key Files: 
+  - scripts/strategies/[current_file].py
+  - [other_relevant_files]
+  
+  Following documentation in:
+  - docs/strategy_architecture.md
+  - scripts/strategies/README.md
+  """
+  ```
+
+## Model-Specific Guidelines
+
+- **For Gemini 2.5 Pro (Large Context)**
+  - Load multiple related files at once
+  - Use for large codebase reviews
+  - Prefix commands with `@gemini:`
+  ```python
+  """
+  @gemini: Reviewing multiple files:
+  @file1
+  @file2
+  @file3
+  """
+  ```
+
+- **For Claude 3.7 Sonnet (Precise)**
+  - Focus on specific components
+  - Use for critical algorithm work
+  - Prefix commands with `@claude:`
+  ```python
+  """
+  @claude: Working on specific component:
+  @current_file
+  Task: [specific_task]
+  """
+  ```
+
+## File Reference Patterns
+
+- **Direct File References:**
+  ```python
+  @wfo_edge_strategy.py  # Reference specific file
+  @strategies/           # Reference directory
+  ```
+
+- **Component Groups:**
+  ```python
+  @core:    # Core strategy files
+  @opt:     # Optimization files
+  @test:    # Test files
+  @docs:    # Documentation
+  ```
+
+## Context Management
+
+- **Strategy Context:**
+  ```python
+  # At start of strategy work
+  """
+  Strategy Context:
+  - Base: edge_multi_factor_fixed.py
+  - Optimization: wfo_edge_strategy.py
+  - Assistant: edge_strategy_assistant.py
+  """
+  ```
+
+- **Optimization Context:**
+  ```python
+  # At start of optimization work
+  """
+  Optimization Context:
+  - Parameters: enhanced_parameter_suggestions.py
+  - Validation: wfo_edge_strategy.py
+  - Schedule: scheduled_optimization.py
+  """
+  ```
+
+## Directory Shortcuts
+
+- **Quick Navigation:**
+  ```python
+  @strategies  # scripts/strategies/
+  @live        # scripts/live_trading/
+  @tests       # tests/
+  @config      # config/
+  ```
+
+## Task Context
+
+- **Task Reference:**
+  ```python
+  """
+  Current Task: [task_id]
+  Status: [status]
+  Dependencies: [task_dependencies]
+  """
+  ```
+
+## Memory Management
+
+- **Context Refreshing:**
+  ```python
+  # Refresh project context every new chat
+  """
+  Refresh Context:
+  1. Project: Crypto Trading Bot
+  2. Component: [current_component]
+  3. Task: [current_task]
+  4. Dependencies: [key_dependencies]
+  """
+  ```
+
+- **File Groups:**
+  ```python
+  # Define related file groups
+  """
+  Working Group:
+  @core: [core_files]
+  @related: [related_files]
+  @config: [config_files]
+  """
+  ```
+
+## Error Prevention
+
+- **File Location Verification:**
+  ```python
+  # Before file operations
+  """
+  Target Directory: scripts/strategies/
+  Operation: [create/modify/delete]
+  Files: [file_list]
+  """
+  ```
+
+- **Dependency Checking:**
+  ```python
+  # Before modifications
+  """
+  Dependencies:
+  - Required: [required_files]
+  - Affected: [affected_files]
+  - Config: [config_files]
+  """
+  ```
+
+## Documentation Integration
+
+- **Always Reference:**
+  - `docs/strategy_architecture.md`
+  - `scripts/strategies/README.md`
+  - Relevant task files
+
+## Best Practices
+
+1. **Start Each Session With:**
+   - Project context
+   - Current component
+   - Related files
+   - Task information
+
+2. **During Development:**
+   - Use appropriate model prefix
+   - Reference files with @ notation
+   - Include relevant documentation
+   - Specify target directories
+
+3. **For File Operations:**
+   - Verify target directory
+   - Check dependencies
+   - Reference documentation
+   - Follow naming conventions
+
+4. **When Switching Context:**
+   - Refresh project context
+   - Update file groups
+   - Specify new component
+   - Reference related tasks 
