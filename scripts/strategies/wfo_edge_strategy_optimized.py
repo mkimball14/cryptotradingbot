@@ -17,6 +17,7 @@ import inspect
 from dotenv import load_dotenv
 import time
 import pandas_ta as ta
+import traceback
 
 # Note: This is a partial file containing the optimized configuration. 
 # The rest of the original script's functions need to be added.
@@ -80,35 +81,47 @@ ATR_WINDOW_SIZING = 14
 STRATEGY_TYPE = "candlestick"  # Options: "edge_multi_factor", "candlestick"
 
 # --- Optimization Parameters (Optimized for Speed) ---
-OPTIMIZATION_METRIC = 'sharpe_ratio' 
+OPTIMIZATION_METRIC = 'sharpe_ratio'
 
-# Define parameter grids (Simplified for speed)
-EDGE_MULTI_FACTOR_PARAM_GRID_FAST = {
-    'rsi_window': [10, 20],      
-    'rsi_entry': [25, 35],      
-    'rsi_exit': [60, 70],       
-    'bb_window': [15, 25],      
-    'bb_dev': [2.0, 2.5],     
-    'vol_window': [10, 20],      
-    'vol_threshold': [0.5, 1.0], 
-    'sl_pct': [1.0, 2.0],     
-    'tp_pct': [2.0, 4.0],     
-    'risk_per_trade': [0.01, 0.02]  
+# Define parameter grids (Full versions from original script)
+EDGE_MULTI_FACTOR_PARAM_GRID = {
+    # RSI parameters
+    'rsi_window': (5, 25, 1),      # Wider range with smaller values included
+    'rsi_entry': (20, 40, 2),      # Go lower on entry threshold to catch more oversold conditions
+    'rsi_exit': (50, 75, 5),       # More granular exit thresholds
+    
+    # Bollinger Band parameters
+    'bb_window': (10, 30, 2),      # More flexible window size
+    'bb_dev': (1.5, 3.0, 0.1),     # Wider range of deviations
+    
+    # Volatility parameters
+    'vol_window': (5, 30, 5),      # Wider range of volatility windows
+    'vol_threshold': (0.5, 2.0, 0.2), # Include more permissive volume thresholds
+    
+    # Stop loss and take profit
+    'sl_pct': (0.5, 4.0, 0.5),     # More granular stop loss range
+    'tp_pct': (1.0, 8.0, 1.0),     # More granular take profit range
+    
+    # Position sizing
+    'risk_per_trade': [0.005, 0.01, 0.015, 0.02, 0.03]  # More sizing options
 }
 
-CANDLESTICK_PARAM_GRID_FAST = {
-    'lookback_periods': [20, 40],
-    'min_strength': [0.01, 0.03],
+CANDLESTICK_PARAM_GRID = {
+    # Candlestick pattern parameters
+    'lookback_periods': [20, 30, 50],
+    'min_strength': [0.005, 0.01, 0.02, 0.05],
     'use_strength': [True, False],
-    'use_confirmation': [True, False], 
-    'confirmation_window': [2, 3], 
-    'stop_loss_pct': [0.02, 0.04],
-    'take_profit_pct': [0.05, 0.08],
-    'risk_per_trade': [0.01, 0.02]
+    'use_confirmation': [True, False],
+    'confirmation_window': [2, 3, 5],
+    
+    # Risk management parameters
+    'stop_loss_pct': [0.02, 0.03, 0.05],
+    'take_profit_pct': [0.04, 0.06, 0.1],
+    'risk_per_trade': [0.01, 0.02, 0.03]
 }
 
 # Use the appropriate parameter grid based on strategy type
-PARAM_GRID = CANDLESTICK_PARAM_GRID_FAST if STRATEGY_TYPE == "candlestick" else EDGE_MULTI_FACTOR_PARAM_GRID_FAST
+PARAM_GRID = CANDLESTICK_PARAM_GRID if STRATEGY_TYPE == "candlestick" else EDGE_MULTI_FACTOR_PARAM_GRID
 
 # --- Performance Optimization Settings ---
 USE_PARALLEL = True
@@ -120,7 +133,7 @@ VERBOSE_DEBUG = False
 QUICK_TEST = True # Set to True to force fast settings
 if QUICK_TEST:
     # Override PARAM_GRID with the fast version 
-    PARAM_GRID = CANDLESTICK_PARAM_GRID_FAST if STRATEGY_TYPE == "candlestick" else EDGE_MULTI_FACTOR_PARAM_GRID_FAST
+    PARAM_GRID = CANDLESTICK_PARAM_GRID if STRATEGY_TYPE == "candlestick" else EDGE_MULTI_FACTOR_PARAM_GRID
     
     # Override WFO and Data parameters specifically for QUICK_TEST
     IN_SAMPLE_DAYS = 50
@@ -1142,40 +1155,50 @@ def generate_wfo_report(train_portfolios, oos_portfolios, all_params):
         output_path = OUTPUT_DIR # Use the defined OUTPUT_DIR
         output_path.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = output_path / f"wfo_report_{STRATEGY_TYPE}_optimized_{timestamp}.txt"
+        # Corrected: Add strategy type and 'optimized' suffix
+        filename = output_path / f"wfo_report_{STRATEGY_TYPE}_optimized_{timestamp}.txt" 
         
         with open(filename, 'w') as f:
             f.write(f"Walk-Forward Optimization Report (Optimized {STRATEGY_TYPE}) - {timestamp}\n")
             f.write("====================================================================\n")
+            # Use globally defined constants for the header
             f.write(f"Symbol: {SYMBOL}, Granularity: {GRANULARITY_STR}\n")
-            f.write(f"Period: {WFO_START_DATE} to {WFO_END_DATE}\n")
+            f.write(f"Period: {WFO_START_DATE} to {WFO_END_DATE}\n") 
             f.write(f"WFO Settings: In-Sample={IN_SAMPLE_DAYS}d, Out-Sample={OUT_SAMPLE_DAYS}d, Step={STEP_DAYS}d\n")
             f.write(f"Optimization Metric: {OPTIMIZATION_METRIC}\n")
             f.write("--------------------------------------------------------------------\n")
             
             if not all_params:
                 f.write("No valid splits completed.\n")
-                return True
+                # Corrected: Close file before returning
+                return True 
 
             f.write(f"Number of Splits Completed: {len(all_params)}\n")
             
             # OOS Performance Summary
-            oos_metrics_list = [m[1] for m in oos_portfolios if m[1] is not None]
+            # Corrected: Ensure m[1] exists before accessing it
+            oos_metrics_list = [m[1] for m in oos_portfolios if m and m[1] is not None] 
             if oos_metrics_list:
-                avg_oos_metrics = pd.DataFrame(oos_metrics_list).mean().to_dict()
-                f.write("\n--- Average Out-of-Sample Performance ---\n")
-                for k, v in avg_oos_metrics.items():
-                    f.write(f"  {k}: {v:.4f}\n")
+                # Filter for only dictionaries before creating DataFrame
+                valid_oos_metrics = [m for m in oos_metrics_list if isinstance(m, dict)]
+                if valid_oos_metrics:
+                    avg_oos_metrics = pd.DataFrame(valid_oos_metrics).mean().to_dict()
+                    f.write("\n--- Average Out-of-Sample Performance ---\n")
+                    for k, v in avg_oos_metrics.items():
+                        f.write(f"  {k}: {v:.4f}\n")
+                else:
+                    f.write("\n--- No valid OOS metrics dictionaries found ---\n") # Added message
             else:
                 f.write("\n--- No valid Out-of-Sample results found ---\n")
                 
             f.write("\n--- Split Details ---\n")
-            for i, params in enumerate(all_params):
+            for i, params_in_split in enumerate(all_params): # Renamed 'params' loop variable
                 f.write(f"\nSplit {i}:\n")
-                f.write(f"  Best Params: {json.dumps(params, default=json_encoder_default)}\n")
-                if i < len(train_portfolios) and train_portfolios[i][1]: 
+                # Use the loop variable 'params_in_split'
+                f.write(f"  Best Params: {json.dumps(params_in_split, default=json_encoder_default)}\n") 
+                if i < len(train_portfolios) and train_portfolios[i] and train_portfolios[i][1]: # Check train_portfolios[i] exists
                     f.write(f"  Train Metrics: {json.dumps(train_portfolios[i][1], default=json_encoder_default)}\n")
-                if i < len(oos_portfolios) and oos_portfolios[i][1]: 
+                if i < len(oos_portfolios) and oos_portfolios[i] and oos_portfolios[i][1]: # Check oos_portfolios[i] exists
                     f.write(f"  OOS Metrics: {json.dumps(oos_portfolios[i][1], default=json_encoder_default)}\n")
             
             # Parameter Stability and Final Recommendation
@@ -1191,7 +1214,8 @@ def generate_wfo_report(train_portfolios, oos_portfolios, all_params):
         return True
         
     except Exception as e:
-        wfo_logger.error(f"Error generating WFO report: {str(e)}")
+        # Use traceback for more detailed error info
+        wfo_logger.error(f"Error generating WFO report: {str(e)}\n{traceback.format_exc()}") 
         return False
 
 # --- Remaining functions placeholder ---

@@ -1,0 +1,10 @@
+{
+    "lookback_periods": 20.0,
+    "min_strength": 0.01,
+    "use_strength": 1.0,
+    "use_confirmation": 1.0,
+    "confirmation_window": 2.0,
+    "stop_loss_pct": 0.02,
+    "take_profit_pct": 0.05,
+    "risk_per_trade": 0.01
+}
