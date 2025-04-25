@@ -9,6 +9,7 @@ requests>=2.31.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 requests>=2.31.0
+h11>=0.16.0 # Added to fix CVE-2024-33644
 
 # Financial and trading libraries
 vectorbt>=0.24.0  # Basic version, Pro version requires license
@@ -63,7 +64,7 @@ vectorbtpro>=0.25.0  # For backtesting
 
 # Data sources
 yfinance>=0.2.31     # Yahoo Finance data
-python-coinbase-advanced>=0.1.2  # Coinbase Advanced Trading API
+coinbase-advanced-py>=0.1.2  # Coinbase Advanced Trading API
 
 # Authentication and security
 cryptography>=41.0.0
