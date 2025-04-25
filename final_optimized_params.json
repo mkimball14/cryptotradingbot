@@ -1,0 +1,12 @@
+{
+    "rsi_window": 18,
+    "rsi_entry": 33,
+    "rsi_exit": 68,
+    "bb_window": 20,
+    "bb_dev": 2.16,
+    "vol_window": 20,
+    "vol_threshold": 1.0,
+    "sl_pct": 2.0,
+    "tp_pct": 4.0,
+    "risk_per_trade": 0.01
+}

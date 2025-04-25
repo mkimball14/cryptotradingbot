@@ -1,0 +1,74 @@
+# Task ID: 14
+# Title: Refactor Edge Multi-Factor Strategy and WFO Logic
+# Status: in_progress
+# Dependencies: 3, 5
+# Priority: high
+# Description: Refactor the wfo_edge_strategy_optimized.py and related scripts into a modular structure within scripts/strategies/refactored_edge/ for improved performance, maintainability, and structure, following the plan in docs/strategy_refactoring_plan.md.
+# Details:
+1. Create new directory structure: scripts/strategies/refactored_edge/ with submodules (config, indicators, signals, utils).
+2. Migrate configuration parameters to config.py.
+3. Migrate indicator calculation logic to indicators.py, leveraging vectorbtpro's IndicatorFactory.
+4. Migrate signal generation logic to signals.py.
+5. Move utility functions to utils.py.
+6. Update wfo_runner.py to use the new modular structure.
+7. Update backtest_runner.py (or create a new one) for the refactored strategy.
+8. Ensure consistent naming and docstrings.
+
+# Test Strategy:
+Create unit tests for individual modules (indicators, signals, utils). Run existing backtest_runner.py and wfo_runner.py against the refactored code, comparing results (performance metrics, trades) against the original strategy's baseline to ensure functional equivalence. Test WFO with different parameter sets.
+
+# Subtasks:
+## 1. Create Refactored Directory Structure [done]
+### Dependencies: None
+### Description: Create the new directory structure: scripts/strategies/refactored_edge/ and subdirectories/files: config.py, indicators.py, signals.py, utils.py.
+### Details:
+
+
+## 2. Migrate Configuration Parameters [in_progress]
+### Dependencies: 14.1
+### Description: Move all configuration settings (parameters, thresholds, file paths) from wfo_edge_strategy_optimized.py to scripts/strategies/refactored_edge/config.py.
+### Details:
+
+
+## 3. Migrate Indicator Logic [pending]
+### Dependencies: 14.1
+### Description: Move indicator calculation logic (RSI, BBands, S/D Zones, Trend, Volatility) to scripts/strategies/refactored_edge/indicators.py. Utilize vectorbtpro's IndicatorFactory where possible for efficiency.
+### Details:
+
+
+## 4. Migrate Signal Generation Logic [pending]
+### Dependencies: 14.1, 14.3
+### Description: Move the logic for combining indicators into entry and exit signals to scripts/strategies/refactored_edge/signals.py.
+### Details:
+
+
+## 5. Migrate Utility Functions [pending]
+### Dependencies: 14.1
+### Description: Move any helper or utility functions (e.g., data loading, plotting helpers) to scripts/strategies/refactored_edge/utils.py.
+### Details:
+
+
+## 6. Update WFO Runner Script [pending]
+### Dependencies: 14.2, 14.3, 14.4, 14.5
+### Description: Refactor scripts/strategies/refactored_edge/wfo_runner.py to import and use the new modular components (config, indicators, signals, utils).
+### Details:
+
+
+## 7. Update/Create Backtest Runner [pending]
+### Dependencies: 14.2, 14.3, 14.4, 14.5
+### Description: Update the existing backtest_runner.py or create a new one specifically for the refactored strategy, ensuring it uses the new modules.
+### Details:
+
+
+## 8. Create Unit Tests for Modules [pending]
+### Dependencies: 14.3, 14.4, 14.5
+### Description: Implement Pytest unit tests for the new modules (indicators.py, signals.py, utils.py) covering expected use, edge cases, and failure cases.
+### Details:
+
+
+## 9. Verify Refactored Strategy Equivalence [pending]
+### Dependencies: 14.6, 14.7, 14.8
+### Description: Run the updated backtest_runner.py and wfo_runner.py. Compare performance metrics and trade outputs against the original strategy baseline to ensure functional equivalence after refactoring.
+### Details:
+
+

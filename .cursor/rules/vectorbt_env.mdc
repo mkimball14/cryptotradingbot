@@ -3,40 +3,15 @@
 - **AI Chat Environment Requirements**
   - Every new Cursor AI chat session must:
     1. Use the vectorbtpro virtual environment
-    2. Have access to all project dependencies
-    3. Maintain consistent environment settings
-  
-  - **Required Environment Check**:
-    ```python
-    # Verify at start of each chat session:
-    import sys
-    import os
-    
-    def verify_venv():
-        """Verify virtual environment is active and properly configured"""
-        venv_path = os.environ.get('VIRTUAL_ENV')
-        if not venv_path or 'venv' not in venv_path:
-            print("WARNING: Virtual environment not activated!")
-            return False
-        return True
-    
-    if not verify_venv():
-        # Activate virtual environment
-        activate_script = "./venv/bin/activate"  # Unix/macOS
-        if os.name == 'nt':  # Windows
-            activate_script = ".\\venv\\Scripts\\activate"
-        print(f"Please activate the virtual environment: source {activate_script}")
-    ```
+# VectorBT Pro Environment Setup
 
-- **Required Environment Setup**
-  - Activate the vectorbtpro virtual environment before running any scripts
+- **Required Environment Activation**
+  - **DO** activate the conda vectorbtpro environment before running any scripts
   ```bash
-  # On Unix/macOS
-  source venv/bin/activate
-  
-  # On Windows
-  .\venv\Scripts\activate
+  # Activate the vectorbtpro conda environment
+  conda activate vectorbtpro
   ```
+  - **DON'T** use any other environments for testing or development
 
 - **Environment Verification**
   - Verify vectorbtpro is properly installed and activated:
@@ -48,7 +23,8 @@
 - **Common Issues and Solutions**
   - If vectorbtpro import fails:
     ```bash
-    # Reinstall vectorbtpro in the virtual environment
+    # Reinstall vectorbtpro in the conda environment
+    conda activate vectorbtpro
     pip install --upgrade vectorbtpro
     
     # Verify installation
@@ -62,7 +38,7 @@
     ```
 
 - **Development Workflow**
-  - Always ensure virtual environment is activated before:
+  - Always ensure vectorbtpro conda environment is activated before:
     - Starting a new Cursor AI chat session
     - Running any Python scripts
     - Installing new dependencies
@@ -70,25 +46,27 @@
     - Starting Jupyter notebooks
 
 - **IDE Integration**
-  - Configure IDE to use the virtual environment:
-    - Set Python interpreter path to `venv/bin/python`
+  - Configure IDE to use the vectorbtpro conda environment:
+    - Set Python interpreter path to the conda vectorbtpro environment
     - Update environment variables from .env file
     - Restart IDE after environment changes
 
 - **Dependency Management**
-  - Install dependencies within the virtual environment:
+  - Install dependencies within the vectorbtpro conda environment:
   ```bash
+  conda activate vectorbtpro
   pip install -r requirements.txt
   ```
   
   - Update requirements.txt when adding new dependencies:
   ```bash
+  conda activate vectorbtpro
   pip freeze > requirements.txt
   ```
 
 - **AI Chat Session Management**
   - Before starting any code-related discussion:
-    1. Verify environment is activated
+    1. Verify vectorbtpro conda environment is activated
     2. Check vectorbtpro import works
     3. Confirm all required dependencies are available
   

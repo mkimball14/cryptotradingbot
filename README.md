@@ -1,976 +1,608 @@
-# Crypto Trading Bot with AI-Powered Optimization and Live Trading
+# Crypto Trading Bot with WFO and Task-Driven Development
 
-A comprehensive cryptocurrency trading bot with walk-forward optimization, AI-assisted strategy development, and live trading via Coinbase Advanced API. Built with VectorBT Pro and OpenAI/OpenRouter APIs for backtesting and optimization, and Coinbase Advanced API for market data and order execution.
-
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Code Style](https://img.shields.io/badge/code_style-black-black)](https://black.readthedocs.io/en/stable/)
+A comprehensive cryptocurrency trading bot featuring advanced Walk-Forward Optimization (WFO) and Edge Multi-Factor strategies, designed with Coinbase Advanced API integration for paper trading and live execution. This project utilizes a task-driven development workflow managed by the Task-Master CLI.
 
 ## Features
 
-- **Edge Multi-Factor Strategy**: Combines RSI, Bollinger Bands, and volatility indicators for robust trading signals
-- **Walk-Forward Optimization**: Dynamic parameter optimization across multiple market regimes
-- **AI Strategy Assistant**: Uses LLMs to help optimize strategies and analyze market conditions
-- **Enhanced Parameter Suggestions**: Market-aware parameter recommendations with validation and performance verification
-- **Backtest Analysis**: Comprehensive performance metrics and visualization
-- **Parameter Research**: AI-assisted research for optimal indicator settings
-- **Adaptive Strategies**: Generation of strategies that adapt to changing market conditions
-- **Direct Chat API Integration**: Flexible communication with LLMs via OpenRouter/OpenAI APIs
-- **Robust Performance Metrics**: Handles vectorbt API inconsistencies for reliable trade analysis
-- **Live Trading Integration**: Real-time trading through Coinbase Advanced API
-- **WebSocket Market Data**: Real-time data streaming for responsive strategy execution
-- **Task-Driven Development**: Structured development workflow using task-master for efficient implementation
+- **Walk-Forward Optimization Engine**: Systematic approach to strategy validation with time-series partitioning, parameter stability analysis, and robustness testing.
+- **Edge Multi-Factor Strategy**: Combines RSI, Bollinger Bands, Supply/Demand Zones, Trend Analysis, and Volatility Adjustment with dynamic parameter optimization.
+- **Coinbase Advanced API Integration**: Robust WebSocket and REST API connectivity with secure JWT authentication (ES256), rate limiting, and reconnection logic.
+- **Supply/Demand Zone Detection**: Algorithmic identification of high-probability support/resistance zones with quality scoring and multi-timeframe confluence.
+- **Risk Management Framework**: Dynamic position sizing based on account risk and volatility, multi-layered stop-loss implementation, and configurable circuit breakers.
+- **Backtesting System**: Historical performance simulation with realistic fee/slippage modeling, Monte Carlo analysis, and detailed performance metrics.
+- **Task-Master CLI**: AI-powered task-driven development workflow for planning, tracking, complexity analysis, and dependency management.
+- **AWS Lambda Integration**: Framework for potential serverless deployment of trading strategies or components.
+- **AI Strategy Assistant**: Provides guidance for parameter selection, strategy modification, and performance analysis insights.
+- **Exploratory Strategy Framework**: Enables systematic testing and validation of new trading concepts before integration.
+- **Session Persistence**: Mechanisms for saving and restoring system state to handle restarts and crashes.
+- **Web UI Dashboard (Planned)**: Future interface for monitoring system status, visualizing trades, and controlling operations.
 
 ## Version History
 
-### v1.4.0 (Current)
-- Added Coinbase Advanced API integration for live trading
-- Implemented WebSocket API for real-time market data
-- Added order management system with risk controls
-- Integrated user configuration options for trading preferences
-- Added position and portfolio monitoring
-- Implemented task-master for structured development workflow
+### v0.5.0 (Current Development)
+- Enhanced Walk-Forward Optimization with parameter stability analysis and robustness checks.
+- Implemented advanced risk management protocols including dynamic position sizing and circuit breakers.
+- Integrated Trading Journal functionality for better performance tracking.
+- Developed AI assistance features for enhanced parameter suggestions.
 
-### v1.3.0
-- Added Enhanced Parameter Suggestion system with market context awareness
-- Implemented parameter validation against predefined constraints
-- Added performance validation to verify AI suggestions actually improve results
-- Created comparison framework to evaluate different optimization approaches
-- Added detailed market regime analysis for more targeted parameter suggestions
+### v0.4.0
+- Enabled live trading capabilities via Coinbase Advanced API.
+- Integrated WebSocket for real-time market data streams.
+- Enhanced backtesting engine with Monte Carlo simulation features.
+- Added multi-timeframe analysis capabilities for signal confirmation.
 
-### v1.2.1
-- Added parameter type validation to ensure window parameters are integers
-- Implemented robust parameter conversion in test workflows 
-- Fixed NumbaTypeError in rolling_std calculation during optimization
-- Enhanced end-to-end test for better verification of AI suggestions
-- Improved parameter mapping from AI suggestions to strategy implementation
+### v0.3.0
+- Implemented the core Edge Multi-Factor Strategy.
+- Developed the initial Supply/Demand zone detection algorithm.
+- Set up SQLite database for persistent market data storage.
+- Created the initial framework for AWS Lambda deployment.
 
-### v1.2.0
-- Fixed vectorbt PnL column name inconsistency ('PnL' vs 'pnl')
-- Enhanced performance metrics calculation with robust fallbacks
-- Added comprehensive system flow documentation
-- Improved error handling in portfolio creation
-- Added test scripts for performance metrics validation
+### v0.2.0
+- Built the backtesting system for historical performance analysis.
+- Implemented the foundational risk management framework with position sizing.
+- Developed algorithms for basic candlestick pattern detection.
+- Integrated initial Coinbase API connectivity.
 
-### v1.1.0
-- Added direct Chat API integration as fallback for ChatVBT
-- Implemented AI-assisted strategy enhancement
-- Added parameter stability analysis in walk-forward optimization
-- Enhanced market regime detection
-
-### v1.0.0
-- Initial release with Edge Multi-Factor Strategy
-- Basic walk-forward optimization implementation
-- VectorBT Pro integration for backtesting
-- Basic AI assistance features
+### v0.1.0
+- Initialized project structure and base architecture using FastAPI.
+- Implemented basic data fetching and normalization processes.
+- Created the configuration management system using environment variables.
+- Set up foundational logging and monitoring components.
 
 ## System Requirements
 
-- Python 3.8+
-- VectorBT Pro license (or use the limited features with vectorbt open source)
-- OpenAI API key or OpenRouter API key for AI features
-- Coinbase Advanced API key and secret for live trading
-- Pandas, NumPy, and other data science libraries
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/crypto-trading-bot.git
-cd crypto-trading-bot
-```
-
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables (create a `.env` file):
-```
-# AI API Keys
-OPENAI_API_KEY=your_openai_api_key_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Coinbase API Keys 
-COINBASE_API_KEY="organizations/{org_id}/apiKeys/{key_id}"
-COINBASE_API_SECRET="-----BEGIN EC PRIVATE KEY-----\nYOUR PRIVATE KEY\n-----END EC PRIVATE KEY-----\n"
-```
-
-## Architecture
-
-The system consists of several key components:
-
-1. **Edge Strategy Assistant**: AI-powered strategy development and optimization
-   - ChatVBT integration for parameter suggestions
-   - SearchVBT for researching optimal indicator settings
-   - Direct Chat API for flexible LLM interactions
-   - Strategy enhancement and adaptation
-
-2. **Walk-Forward Optimization**: Robust parameter optimization
-   - Multiple in-sample/out-of-sample splits
-   - Comprehensive performance metrics
-   - Parameter stability analysis
-   - Enhanced portfolio validity checks
-
-3. **Multi-Factor Strategy**: Combines multiple trading signals
-   - RSI (Relative Strength Index)
-   - Bollinger Bands
-   - Volatility (ATR)
-   - Risk management with stop-loss and take-profit
-
-4. **Live Trading System**: Real-time execution through Coinbase
-   - REST API client for order management
-   - WebSocket API for real-time market data
-   - Account management and position tracking
-   - Risk control and trade execution
-
-## Getting Started
-
-### Backtesting and Optimization
-
-To run a walk-forward optimization:
-
-```bash
-python scripts/strategies/wfo_edge_strategy.py
-```
-
-To optimize strategy with AI assistance:
-
-```bash
-python scripts/strategies/chat_optimize_edge_strategy.py
-```
-
-To test the AI strategy assistant:
-
-```bash
-python scripts/strategies/test_edge_assistant.py
-```
-
-To test direct chat functionality:
-
-```bash
-python scripts/strategies/test_direct_chat.py
-```
-
-### Live Trading
-
-To run the live trading system with the optimized strategy:
-
-```bash
-python scripts/live_trading/run_trading_system.py
-```
-
-To monitor active positions and account status:
-
-```bash
-python scripts/live_trading/monitor_positions.py
-```
-
-To test the Coinbase API connection:
-
-```bash
-python scripts/live_trading/test_api_connection.py
-```
-
-### Understanding the Results
-
-Analysis results are saved in the `analysis_results` directory:
-- Complete strategy analysis in JSON format
-- Backtesting results with performance metrics
-- Market analysis and recommendations
-- Adaptive strategy implementations
-
-Trading results are saved in the `trading_logs` directory:
-- Order history and execution details
-- Position performance metrics
-- Account balance history
-- WebSocket data logs
-
-## Task-Master Development Workflow
-
-This project uses Task-Master for structured, task-driven development. This system helps manage complex implementation tasks, track dependencies, and ensure systematic progress.
-
-### Task Management Overview
-
-Task-Master provides a comprehensive CLI for managing development tasks:
-
-```bash
-# List all tasks with status
-task-master list
-
-# Show the next task to work on
-task-master next
-
-# View details of a specific task
-task-master show <task_id>
-
-# Mark a task as completed
-task-master set-status --id=<task_id> --status=done
-```
-
-### Development Process
-
-The recommended workflow for contributing to this project:
-
-1. **Start Session**: Begin by reviewing current tasks and their dependencies
-   ```bash
-   task-master list
-   ```
-
-2. **Select Next Task**: Choose the highest priority task with all dependencies satisfied
-   ```bash
-   task-master next
-   ```
-
-3. **Understand Requirements**: Review the task's details and test strategy
-   ```bash
-   task-master show <task_id>
-   ```
-
-4. **Analyze Complexity**: For complex tasks, perform complexity analysis
-   ```bash
-   task-master analyze-complexity --id=<task_id> --research
-   ```
-
-5. **Break Down Complex Tasks**: Divide large tasks into manageable subtasks
-   ```bash
-   task-master expand --id=<task_id> --num=5 --research
-   ```
-
-6. **Implementation**: Develop the required code following the task specifications
-   - Follow the implementation details in the task description
-   - Use the recommended approach from subtask breakdown
-   - Adhere to project coding standards and patterns
-
-7. **Testing**: Verify implementation against the test strategy
-   - Implement unit tests as required
-   - Ensure all existing tests pass
-   - Verify any performance metrics or requirements
-
-8. **Mark Progress**: Update task status when completed
-   ```bash
-   task-master set-status --id=<task_id> --status=done
-   ```
-
-9. **Handle Implementation Changes**: If your implementation differs from the plan
-   ```bash
-   task-master update --from=<task_id> --prompt="Changed implementation approach to use WebSockets instead of polling"
-   ```
-
-### Determining the Next Task
-
-The `task-master next` command identifies the most appropriate task to work on using a sophisticated prioritization algorithm:
-
-```bash
-task-master next
-```
-
-This command:
-- Identifies tasks with all dependencies satisfied
-- Prioritizes tasks by priority level (high, medium, low)
-- Considers dependency chains to optimize development flow
-- Shows comprehensive task information for immediate implementation
-
-The output includes:
-- Task details and description
-- Implementation guidance
-- Subtasks (if they exist)
-- Suggested next actions
-
-This is the recommended way to start each development session, as it ensures you're always working on the most important task that can be implemented right now.
-
-### Common Workflow Patterns
-
-Depending on the development phase, use these established workflow patterns:
-
-#### For New Features:
-
-```bash
-# Begin by checking what to work on
-task-master next
-
-# Understand the task details
-task-master show <task_id>
-
-# For complex tasks, analyze and break down
-task-master analyze-complexity --id=<task_id> --research
-task-master expand --id=<task_id> --research
-
-# As you complete subtasks, mark them done
-task-master set-status --id=<task_id>.<subtask_num> --status=done
-
-# When the entire feature is complete
-task-master set-status --id=<task_id> --status=done
-```
-
-#### For Bug Fixes:
-
-```bash
-# Add a new bug fix task
-task-master add-task --prompt="Fix WebSocket reconnection issue after network interruption" --priority=high
-
-# Or link to an existing task
-task-master show <related_task_id>
-
-# When fixed, mark as complete
-task-master set-status --id=<task_id> --status=done
-```
-
-#### For Refactoring:
-
-```bash
-# Create refactoring tasks
-task-master add-task --prompt="Refactor the position management system for improved reliability" --dependencies=<dependent_task_ids>
-
-# Check for related tasks that might be affected
-task-master list --status=pending
-
-# After refactoring, update dependent tasks if implementation changed
-task-master update --from=<first_affected_task> --prompt="Position management now uses event-driven architecture"
-```
-
-### Task Structure
-
-Each task in this project contains the following components:
-
-- **ID**: Unique identifier for the task
-- **Title**: Brief description of the task
-- **Status**: Current state (pending, in_progress, done, or deferred)
-- **Dependencies**: List of tasks that must be completed first
-- **Priority**: Importance level (high, medium, low)
-- **Description**: Brief summary of what the task involves
-- **Details**: In-depth implementation instructions
-- **Test Strategy**: Approach for verifying correct implementation
-
-### Task File Format
-
-Task files are generated in the `tasks/` directory and follow this standardized format:
-
-```
-# Task ID: 5
-# Title: Implement WebSocket Connection Handler
-# Status: pending
-# Dependencies: 3, 4
-# Priority: high
-# Description: Create a robust WebSocket connection handler for real-time market data.
-
-# Details:
-Implement a WebSocket connection handler class that will:
-1. Establish secure connections to Coinbase Advanced API
-2. Handle authentication using JWT tokens
-3. Implement automatic reconnection with exponential backoff
-4. Process incoming messages and route to appropriate handlers
-5. Provide clean error handling and logging
-
-The implementation should follow the WebSocket client pattern described in the Coinbase API documentation.
-Use the abstract factory pattern to allow for future exchange integrations.
-
-# Test Strategy:
-1. Create unit tests verifying connection establishment
-2. Test authentication flow with mock credentials
-3. Verify reconnection logic works with simulated disconnects
-4. Ensure message routing correctly delivers to registered handlers
-5. Test error conditions and verify appropriate logging/handling
-```
-
-Task files can be viewed directly or through the task-master CLI:
-
-```bash
-# View task file directly
-cat tasks/task_5.md
-
-# Or use the task-master CLI
-task-master show 5
-```
-
-All tasks are also centrally defined in `tasks/tasks.json`, which serves as the source of truth for the project's task structure.
-
-### Managing Task Dependencies
-
-The project maintains a clear dependency structure:
-
-```bash
-# Add a dependency relationship
-task-master add-dependency --id=<task_id> --depends-on=<dependency_id>
-
-# Remove a dependency relationship
-task-master remove-dependency --id=<task_id> --depends-on=<dependency_id>
-
-# Validate the dependency structure
-task-master validate-dependencies
-
-# Fix any invalid dependencies
-task-master fix-dependencies
-```
-
-### Adding New Tasks
-
-To add new functionality to the project:
-
-```bash
-# Add a new task with AI assistance
-task-master add-task --prompt="Implement real-time position dashboard with React" --dependencies=12,15 --priority=high
-```
-
-### Integration with Cursor AI
-
-When using Cursor AI to assist with development:
-
-1. **Provide Task Context**: Share the task file with Cursor AI to provide implementation context
-   ```bash
-   # First, view the task
-   task-master show <task_id> > task_details.md
-   
-   # Then share this with Cursor AI
-   ```
-
-2. **Include Dependencies**: Mention dependency relationships to ensure proper integration
-   ```bash
-   task-master show <dependency_id> > dependency_details.md
-   ```
-
-3. **Verify Implementation**: Use Cursor AI to review implementation against task requirements
-   ```python
-   # Example prompt to Cursor AI
-   """
-   I've implemented the feature according to task #5. Here's my implementation:
-   
-   [paste code]
-   
-   The task requirements are:
-   [paste from task_details.md]
-   
-   Does my implementation meet all the requirements? Are there any improvements needed?
-   """
-   ```
-
-### Task-Master Environment Configuration
-
-Task-Master requires certain environment variables for optimal functioning. Add these to your `.env` file alongside the other configuration variables:
-
-```
-# Task-Master Configuration
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
-MODEL=claude-3-7-sonnet-20250219
-MAX_TOKENS=4000
-TEMPERATURE=0.7
-DEBUG=false
-LOG_LEVEL=info
-DEFAULT_SUBTASKS=3
-DEFAULT_PRIORITY=medium
-PROJECT_NAME=Crypto Trading Bot
-PROJECT_VERSION=1.4.0
-PERPLEXITY_API_KEY=your_perplexity_api_key_here  # Optional, for research features
-```
-
-These variables control:
-
-- **API Access**: Anthropic API key for Claude model access
-- **Model Settings**: Which Claude model to use and its parameters
-- **Development Settings**: Logging levels and debugging options
-- **Default Values**: Standard configurations for new tasks
-- **Project Metadata**: Information used in generated documentation
-- **Research Capabilities**: Optional Perplexity API integration for enhanced research
-
-You can modify these settings to suit your specific development requirements. For example:
-- Use `MODEL=claude-3-opus-20240229` for more complex task expansion
-- Set `MAX_TOKENS=8000` for more detailed responses
-- Use `DEBUG=true` and `LOG_LEVEL=debug` for troubleshooting
-- Adjust `DEFAULT_SUBTASKS` based on your typical task complexity
-
-## AI-Assisted Strategy Development with VectorBT
-
-This section provides a comprehensive explanation of how the AI assistance system works with VectorBT and how you can leverage it using Cursor for strategy enhancement, debugging, and development.
-
-### ChatVBT and SearchVBT Architecture
-
-#### ChatVBT Implementation
-
-ChatVBT is VectorBT Pro's built-in integration with language models (LLMs) like OpenAI's GPT or models accessed through OpenRouter. The system implements this functionality through several key components:
-
-1. **ChatVBT Configuration** (`setup_chat_provider()` in `wfo_edge_strategy.py`):
-   - Initializes the LLM connection through VectorBT's API
-   - Configures API keys from environment variables
-   - Sets up knowledge base paths and settings
-
-2. **ChatVBT Usage Flow**:
-   ```
-   User Request → wfo_edge_strategy.py → ask_chat_model() → VectorBT ChatProvider → API Response
-   ```
-
-3. **Fallback Mechanism**:
-   - If ChatVBT initialization fails, system falls back to direct API calls
-   - Failures detected in `setup_chat_provider()` trigger the fallback system
-   - Direct calls bypass VectorBT's chat infrastructure entirely
-
-#### SearchVBT Implementation
-
-SearchVBT allows semantic search across VectorBT's documentation to find relevant information for strategy development:
-
-1. **SearchVBT Configuration** (`search_vectorbt_docs()` in `edge_strategy_assistant.py`):
-   - Initializes VectorBT's search functionality
-   - Configures search parameters (max results, search depth)
-   - Sets up result formatting
-
-2. **Usage Flow**:
-   ```
-   Search Query → EdgeStrategyAssistant → search_vectorbt_docs() → VectorBT Search API → Formatted Results
-   ```
-
-### When Each System is Used
-
-The system intelligently selects which AI interaction method to use based on context and availability:
-
-1. **ChatVBT is used when**:
-   - Running the walk-forward optimization process
-   - Getting parameter suggestions via `get_optimization_advice_from_chat_model()`
-   - Debugging portfolio creation issues via `debug_with_chat()`
-   - Analyzing market conditions via `EnhancedEdgeStrategy.optimize_for_market_condition()`
-
-2. **SearchVBT is used when**:
-   - Researching optimal indicator settings via `research_indicator_settings()`
-   - Looking up VectorBT documentation for specific functions
-   - Finding parameter ranges and best practices from the knowledge base
-
-3. **Direct API Calls are used when**:
-   - ChatVBT initialization fails (API key issues, missing dependencies)
-   - The `direct_chat()` function is explicitly called
-   - Advanced prompts require bypassing VectorBT's formatting
-
-## Coinbase API Integration
-
-The system integrates with Coinbase Advanced API for live trading and market data access:
-
-### REST API Client
-
-The REST API client handles order management, account queries, and trading execution:
-
-```python
-from coinbase.rest import RESTClient
-from trading_system.config import get_api_credentials
-
-# Load credentials from secure environment
-api_key, api_secret = get_api_credentials()
-
-# Initialize the client
-client = RESTClient(api_key=api_key, api_secret=api_secret)
-
-# Get account information
-accounts = client.get_accounts()
-
-# Place a market order
-order = client.market_order_buy(
-    client_order_id="", # Empty string auto-generates a unique ID
-    product_id="BTC-USD", 
-    quote_size="100"  # $100 worth of BTC
-)
-```
-
-### WebSocket Client
-
-The WebSocket client provides real-time market data for responsive trading:
-
-```python
-from coinbase.websocket import WSClient
-from trading_system.config import get_api_credentials
-
-# Load credentials from secure environment
-api_key, api_secret = get_api_credentials()
-
-# Define message handler
-def on_message(msg):
-    # Process real-time data
-    print(msg)
-
-# Initialize the client
-client = WSClient(
-    api_key=api_key, 
-    api_secret=api_secret, 
-    on_message=on_message
-)
-
-# Connect and subscribe to market data
-client.open()
-client.ticker(product_ids=["BTC-USD", "ETH-USD"])
-
-# Keep the connection running with error handling
-try:
-    client.run_forever_with_exception_check()
-except Exception as e:
-    print(f"WebSocket error: {e}")
-    client.close()
-```
-
-### Order Execution Engine
-
-The order execution engine translates strategy signals into actual trades:
-
-```python
-from trading_system.execution import OrderExecutor
-from trading_system.config import get_trade_settings
-
-# Initialize with risk parameters
-executor = OrderExecutor(
-    rest_client=client,
-    risk_per_trade=0.02,  # 2% risk per trade
-    max_positions=3       # Maximum of 3 open positions
-)
-
-# Execute a trade based on strategy signal
-executor.execute_signal(
-    symbol="BTC-USD",
-    signal_type="LONG",
-    entry_price=50000.0,
-    stop_loss=49000.0,
-    take_profit=52000.0
-)
-```
-
-## Key Components
-
-### EdgeMultiFactorStrategy
-
-Base trading strategy that combines multiple technical indicators:
-
-```python
-strategy = EdgeMultiFactorStrategy(
-    rsi_window=14,
-    rsi_entry=30,
-    rsi_exit=70,
-    bb_window=20,
-    bb_dev=2.0,
-    vol_window=20,
-    vol_threshold=1.5,
-    sl_pct=2.0,
-    tp_pct=4.0,
-    risk_per_trade=0.02
-)
-```
-
-### EnhancedEdgeStrategy
-
-Extends the base strategy with AI capabilities:
-
-```python
-enhanced = EnhancedEdgeStrategy()
-suggestions = enhanced.get_parameter_suggestions()
-adaptive_strategy = enhanced.generate_adaptive_strategy()
-```
-
-### LiveTradingSystem
-
-Manages the live trading operations including data feeds, execution, and monitoring:
-
-```python
-from trading_system.live import LiveTradingSystem
-from trading_system.strategies import EdgeMultiFactorStrategy
-
-# Create strategy with optimized parameters
-strategy = EdgeMultiFactorStrategy(**optimized_params)
-
-# Initialize trading system
-trading_system = LiveTradingSystem(
-    strategy=strategy,
-    api_key=api_key,
-    api_secret=api_secret,
-    symbols=["BTC-USD", "ETH-USD"],
-    risk_manager=default_risk_manager
-)
-
-# Start the trading system
-trading_system.start()
-
-# Run for a specified time or until stopped
-trading_system.run_until_stopped()
-```
-
-## Configuration
-
-Key configuration options:
-
-- **Parameters Space**: Defined in `run_walk_forward_optimization()` in `wfo_edge_strategy.py`
-- **Data Settings**: Configure symbol, timeframe and lookback period
-- **Optimization Settings**: Number of trials, performance metrics, and validation criteria
-- **Chat Models**: Configure API keys in the .env file
-- **Trading Parameters**: Configure risk settings, order types, and trading schedule
-- **API Settings**: Configure API keys, rate limits, and timeout settings
-
-## Extending the System
-
-### Adding New Indicators
-
-To add new indicators to the strategy:
-
-1. Add parameters to the `EdgeMultiFactorStrategy` class
-2. Update the signal generation logic in `generate_signals()`
-3. Add the new parameters to the parameter space in `run_walk_forward_optimization()`
-
-### Creating Custom Strategies
-
-Create your own strategy by extending the base classes:
-
-```python
-class MyCustomStrategy(EdgeMultiFactorStrategy):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Add custom initialization
-        
-    def generate_signals(self, data):
-        # Custom signal generation logic
-        pass
-```
-
-### Adding Additional Exchanges
-
-The system can be extended to support additional exchanges:
-
-1. Create a new exchange adapter class in `trading_system/exchanges/`
-2. Implement the required methods (place_order, get_account, etc.)
-3. Update the configuration to include the new exchange
-
-## Troubleshooting
-
-Common issues and solutions:
-
-### API Key Issues
-- Ensure API keys are properly set in the .env file
-- The system will automatically use OPENROUTER_API_KEY if OPENAI_API_KEY is not available
-- Verify that your API keys are valid and have sufficient credits
-- Ensure Coinbase API keys have the correct permissions enabled
-- Check error logs for specific API-related errors
-
-### VectorBT Issues
-- Make sure VectorBT Pro is properly licensed and installed
-- Check for version compatibility issues
-- Ensure data inputs are in the correct format
-- Note that all column names should be lowercase (`close` instead of `Close`)
-- If ChatVBT fails, the system will fall back to direct API calls
-- The system handles vectorbt's inconsistent column naming ('PnL' vs 'pnl') for trade records
-
-### WFO Process Issues
-- If the WFO process fails with no valid parameters, try:
-  - Relaxing the portfolio validation criteria
-  - Expanding the parameter search space
-  - Checking for data quality issues
-  - Running with fewer splits or larger training windows
-- Check the log files for specific error messages
-
-### Coinbase API Issues
-- Check that the API key is in the correct format: `"organizations/{org_id}/apiKeys/{key_id}"`
-- Ensure the API secret is properly formatted with newlines: `"-----BEGIN EC PRIVATE KEY-----\nYOUR KEY\n-----END EC PRIVATE KEY-----\n"`
-- Verify that the API key has the appropriate permissions for the actions you're attempting
-- For WebSocket connection issues, check your network configuration and firewall settings
-- Enable verbose logging for detailed debugging information: `client = RESTClient(verbose=True)`
-
-### Dependencies
-- The system now automatically checks for and installs required dependencies
-- If you encounter missing package errors, manually install them with:
-  ```bash
-  pip install lmdbm vectorbtpro pandas-ta coinbase-advanced-py
-  ```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- **Python**: Version 3.10 or higher.
+- **Database**: SQLite (default for local storage). Other databases can be configured.
+- **Operating System**: Linux, macOS, or Windows.
+- **API Credentials**: Valid Coinbase Advanced API key, secret (PEM format), and passphrase.
+- **AI Assistance**: Anthropic API key (required for Task-Master's AI features).
+- **Dependencies**: See `requirements.txt` (includes FastAPI, Uvicorn, httpx, websockets, pandas, numpy, sqlalchemy, pydantic-settings, coinbase-advanced-py, etc.).
+
+## Environment Setup and Installation
+
+Follow these steps to set up the development environment:
+
+1.  **Clone the Repository**:
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
+
+2.  **Create and Activate Virtual Environment**:
+    ```bash
+    python -m venv venv
+    # On Linux/macOS
+    source venv/bin/activate
+    # On Windows
+    .\venv\Scripts\activate
+    ```
+
+3.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Configure Environment Variables**:
+    Create a `.env` file in the project root directory. Add the following variables, replacing placeholders with your actual credentials. **Ensure the PEM secret key includes the `\n` characters exactly as shown for newlines.**
+
+    ```dotenv
+    # Coinbase Advanced API Credentials
+    COINBASE_API_KEY="organizations/{org_id}/apiKeys/{key_id}"  # Replace with your Key Name/Path
+    # Ensure the secret includes literal \n for newlines
+    COINBASE_API_SECRET="-----BEGIN EC PRIVATE KEY-----\nYOUR_PRIVATE_KEY_LINE_1\nYOUR_PRIVATE_KEY_LINE_2\n...\n-----END EC PRIVATE KEY-----\n"
+    COINBASE_API_PASSPHRASE="your_passphrase_here" # If you set one during key creation
+
+    # Task-Master AI Configuration
+    ANTHROPIC_API_KEY="sk-ant-api03-..." # Replace with your Anthropic key
+
+    # Optional Task-Master Settings (defaults shown)
+    # MODEL="claude-3-7-sonnet-20250219"
+    # MAX_TOKENS=4000
+    # TEMPERATURE=0.7
+    # DEBUG=false
+    # LOG_LEVEL=info
+    # PROJECT_NAME="Crypto Trading Bot"
+    # PROJECT_VERSION="0.5.0"
+
+    # Database Configuration (default is SQLite)
+    # DATABASE_URL="sqlite:///./trading_data.db"
+
+    # Other System Settings (optional)
+    # LOG_FILE_PATH="./logs/trading_bot.log"
+    # MAX_CONCURRENT_TASKS=4
+    ```
+
+5.  **Initialize Database**:
+    Run the database migration script (if applicable, e.g., using Alembic or Django migrations) or ensure the application creates the SQLite file on first run.
+    ```bash
+    # Example command (if using Alembic)
+    # alembic upgrade head
+    ```
+
+6.  **Verify Setup**:
+    Run basic tests or a simple command to confirm installation and configuration.
+    ```bash
+    # Example: Run Task-Master list command
+    task-master list
+    ```
+
+## Architecture Overview: The MCP Server and Core Components
+
+The system is built around a central Market Control Panel (MCP) server implemented using FastAPI. This server coordinates data fetching, strategy execution, risk management, and order placement.
+
+### 1. MCP Server (FastAPI Application)
+
+The core of the system, responsible for:
+
+-   **REST API Endpoints**: Provides endpoints for configuration, status monitoring, manual control, and data retrieval.
+    -   `/status`: Get current system status, active strategies, positions.
+    -   `/config`: View and potentially update system configuration.
+    -   `/trades`: Retrieve historical trade data.
+    -   `/orders`: View open and historical orders.
+    -   `/control`: Endpoints for starting/stopping strategies, pausing trading.
+-   **WebSocket Integration**: Manages WebSocket connections to Coinbase for real-time data and potentially exposes WebSocket endpoints for UI clients.
+-   **Authentication & Security**: Handles API key validation and secure communication.
+-   **Configuration Management**: Loads settings from `.env` file and validates them using Pydantic.
+-   **Task Scheduling**: Manages periodic tasks like data fetching, strategy evaluation, and risk checks.
+-   **Logging**: Centralized logging configuration for all components.
+-   **Error Handling**: Global error handling middleware.
+
+### 2. Data Fetcher & Management
+Responsible for acquiring and managing market data:
+
+-   **Coinbase API Client**: A dedicated module (`coinbase_client.py`) handles interactions with the Coinbase Advanced API.
+    -   **Authentication**: Implements JWT (ES256) signing for all requests.
+    -   **REST Requests**: Functions for fetching historical data, account info, orders.
+    -   **WebSocket Client**: Connects to Coinbase WebSocket feeds (e.g., `level2`, `ticker`, `user`) for real-time data.
+        -   Handles subscription management.
+        -   Implements heartbeat checks and automatic reconnection logic with exponential backoff.
+    -   **Rate Limiting**: Respects Coinbase API rate limits.
+-   **OHLCV Data System**: Manages candle data.
+    -   **Fetching**: Retrieves historical OHLCV data using the REST client.
+    -   **Normalization**: Cleans data (handles NaNs, outliers), ensures consistent timestamp formats (UTC).
+    -   **Storage**: Persists data in the configured database (SQLite default) using SQLAlchemy or similar ORM. Includes indexing for efficient querying.
+    -   **Multi-Timeframe**: Manages data for various intervals (15m, 1H, 4H, etc.), potentially resampling lower timeframes.
+    -   **Maintenance**: Includes logic for detecting and filling data gaps, managing data freshness.
+
+### 3. Strategy Implementation Module
+Contains the trading logic:
+
+-   **Edge Multi-Factor Strategy**: The core strategy implementation.
+    -   Combines signals from RSI, Bollinger Bands, S/D Zones, Trend, and Volatility components.
+    -   Uses configurable parameters optimized via WFO.
+    -   Includes signal generation logic based on confluence rules.
+-   **Exploratory Strategy Framework**: Allows testing new ideas in isolation.
+-   **Signal Generation**: Logic to produce buy/sell/hold signals based on strategy rules.
+-   **Parameter Management**: Handles loading and applying strategy parameters.
+
+### 4. Supply/Demand Zone Detection
+Identifies potential support and resistance areas:
+
+-   **Pattern Recognition**: Detects Drop-Base-Rally (Demand) and Rally-Base-Drop (Supply) patterns.
+-   **Scoring**: Assigns quality scores based on 'freshness' (time since formation) and 'confidence' (pattern characteristics).
+-   **Multi-Timeframe Confluence**: Looks for zones aligning across different timeframes.
+-   **Status Tracking**: Updates zone status (untested, tested, broken) based on price interaction.
+
+### 5. Walk-Forward Optimization (WFO) Engine
+Optimizes and validates strategy parameters:
+
+-   **Time-Series Partitioning**: Splits historical data into sequential training (in-sample) and validation (out-of-sample) windows.
+-   **Parameter Optimization**: Uses search algorithms (grid search, genetic algorithms) to find optimal parameters within each in-sample window based on defined metrics (e.g., Sharpe Ratio, Profit Factor).
+-   **Out-of-Sample Validation**: Tests the optimized parameters on the subsequent unseen out-of-sample window to check for overfitting.
+-   **Parameter Stability Analysis**: Analyzes how parameters change across different optimization windows to assess robustness.
+-   **Reporting**: Generates detailed reports on performance, stability, and recommended parameters.
+-   **Resumable Processing**: Saves state to allow long optimizations to be paused and resumed.
+
+### 6. Risk Management System
+Enforces risk controls:
+
+-   **Position Sizing**: Calculates trade size based on account balance, risk percentage per trade (e.g., 1%), and stop-loss distance.
+-   **Dynamic Adjustments**: Modifies position size based on signal confidence or market volatility.
+-   **Stop-Loss Calculation**: Determines stop-loss levels using methods like ATR multiples or fixed pips/points relative to entry or zone boundaries.
+-   **Take-Profit Targeting**: Sets profit targets based on risk-reward ratios or key technical levels (e.g., opposing S/D zones).
+-   **Circuit Breakers**: Implements rules to temporarily halt trading based on conditions like consecutive losses, daily drawdown limits, or extreme volatility spikes.
+-   **Account Monitoring**: Tracks overall account exposure and drawdown.
+
+### 7. Order Execution Framework
+Manages the process of placing and tracking trades:
+
+-   **Order Placement**: Functions to submit various order types (Market, Limit, Stop-Limit) via the Coinbase API Client.
+-   **Bracket Orders**: Implements logic to place an entry order along with linked stop-loss and take-profit orders (often using OCO - One-Cancels-the-Other logic if supported, or managed locally).
+-   **Signal Confirmation**: Validates signals against risk management rules and market conditions before placing trades.
+-   **Order Tracking**: Monitors the status of open orders (pending, filled, cancelled, rejected) by querying the API or using WebSocket user channel updates.
+-   **Position Monitoring**: Tracks open positions, calculating real-time P&L.
+-   **Emergency Controls**: Provides functionality to quickly cancel all open orders and potentially flatten all positions (kill-switch).
+
+### 8. Performance Analysis & Reporting
+Calculates and presents trading performance:
+
+-   **Metrics Calculation**: Computes standard metrics like Win Rate, Profit Factor, Sharpe Ratio, Sortino Ratio, Maximum Drawdown, Average Win/Loss, etc.
+-   **Trade Logging**: Records detailed information about each trade (entry/exit times, prices, size, P&L, reason for entry/exit, associated signal data).
+-   **Reporting Engine**: Generates performance summaries (e.g., daily, weekly, monthly) and visualizations (equity curves, drawdown charts).
+-   **Data Export**: Allows exporting trade logs and performance data.
+
+### 9. Session Persistence & Recovery
+Ensures system resilience:
+
+-   **State Storage**: Saves critical system state (open orders, positions, strategy parameters, current data pointers) to a persistent store (e.g., database or file).
+-   **Serialization**: Converts in-memory objects to a storable format.
+-   **Recovery Logic**: On startup, loads the last known state and reconciles it with the exchange (fetching current orders/positions) to resume operations accurately after a crash or restart.
+
+### 10. Task-Master CLI
+Manages the development workflow:
+
+-   **Task Management**: Parses, lists, updates, and tracks development tasks stored in `tasks.json`.
+-   **AI Assistance**: Uses an LLM (via Anthropic API) for tasks like complexity analysis, task breakdown (`expand`), and generating new tasks (`add-task`).
+-   **Dependency Handling**: Manages and validates dependencies between tasks.
+-   **Reporting**: Generates markdown reports and diagrams visualizing the task structure and progress.
+
+**For full command details and usage examples, please refer to the [Task-Master Documentation](./scripts/README.md).**
+
+#### Key Task-Master Commands
+
+-   `task-master list`: Display all project tasks with status, ID, title, and dependencies.
+    -   `--status=<status>`: Filter tasks by status (e.g., `pending`, `in_progress`, `done`).
+    -   `--with-subtasks`: Show subtasks nested under parent tasks.
+-   `task-master next`: Show the recommended next task to work on, based on dependencies, priority, and status.
+-   `task-master show <id>`: View detailed information about a specific task (including description, details, test strategy, and subtasks). Use dot notation for subtasks (e.g., `task-master show 6.3`).
+-   `task-master set-status --id=<id> --status=<status>`: Update the status of a specific task or subtask.
+    -   Common statuses: `pending`, `in_progress`, `done`, `deferred`, `blocked`.
+-   `task-master expand --id=<id>`: Break down a complex task into smaller, manageable subtasks using AI assistance.
+    -   `--num=<number>`: Specify the desired number of subtasks.
+    -   `--research`: Leverage Perplexity AI for research-backed expansion (requires PERPLEXITY_API_KEY).
+    -   `--prompt="<context>"`: Provide additional context for the AI.
+    -   `--force`: Regenerate subtasks even if they already exist.
+-   `task-master analyze-complexity`: Evaluate the complexity of pending tasks using AI and generate recommendations for expansion.
+    -   `--research`: Use Perplexity AI for analysis.
+-   `task-master complexity-report`: Display the results of the complexity analysis in a formatted way.
+-   `task-master add-task --prompt="<description>"`: Add a new task based on a natural language description using AI.
+    -   `--dependencies=<ids>`: Specify dependencies (comma-separated).
+    -   `--priority=<level>`: Set priority (high, medium, low).
+-   `task-master add-dependency --id=<id> --depends-on=<id>`: Add a dependency relationship.
+-   `task-master remove-dependency --id=<id> --depends-on=<id>`: Remove a dependency.
+-   `task-master fix-dependencies`: Automatically find and remove invalid dependency references.
+-   `task-master generate`: Regenerate individual task files in the `tasks/` directory based on `tasks.json` (useful after manual edits or dependency changes).
+-   `task-master init`: Initialize Task-Master structure in a new project.
+
+## Development Process with Task-Master
+
+This project uses a task-driven development workflow powered by the Task-Master CLI. This approach facilitates structured development, better planning, and AI-assisted productivity.
+
+### Key Task Workflow
+
+1.  **Start Session**: Run `task-master list` to review the current state of tasks.
+2.  **Select Task**: Use `task-master next` to identify the next logical task based on dependencies and priority.
+3.  **Understand Requirements**: Run `task-master show <id>` for the selected task to fully understand the scope, details, and testing strategy.
+4.  **Analyze & Expand**: If the task is complex (check `analyze-complexity` report or use judgment), break it down using `task-master expand --id=<id> --research`.
+5.  **Begin Implementation**: Set the task status to `in_progress` using `task-master set-status --id=<id> --status=in_progress`. Work on the code, following the task details.
+6.  **Test Rigorously**: Verify the implementation against the specified `testStrategy` in the task details. Write unit/integration tests as needed.
+7.  **Mark Complete**: Once implemented and tested, update the status to `done` using `task-master set-status --id=<id> --status=done`.
+8.  **Handle Changes**: If implementation details deviate significantly, potentially affecting future tasks, consider using `task-master update --from=<future_task_id> --prompt="<explanation>"` to adjust subsequent tasks.
+
+### Contributing to the Project
+
+Follow the task-driven workflow:
+
+1.  Identify an available task (`task-master list --status=pending` or `task-master next`).
+2.  Ensure all its dependencies are `done`.
+3.  Claim the task by setting its status to `in_progress`.
+4.  Implement the feature/fix according to task details and existing code standards.
+5.  Write or update tests as per the task's `testStrategy`.
+6.  Update any relevant documentation.
+7.  Commit changes with clear messages, potentially referencing the task ID.
+8.  Submit a Pull Request for review (if applicable).
+9.  Once merged/verified, mark the task as `done`.
+
+## Strategy Implementation Guide
+
+The Edge Multi-Factor Strategy combines multiple technical indicators and market factors to create a robust trading system with adaptive parameter optimization. This approach provides a systematic framework for identifying high-probability trading opportunities while managing risk.
+
+### Core Strategy Components
+
+1.  **RSI Component**: Identifies overbought/oversold conditions
+    -   Configurable period settings (default: 14, 21, and 50-period)
+    -   Dynamic thresholds based on market volatility
+    -   Divergence detection between price and RSI
+    -   Signal filtering based on RSI slope and rate of change
+    -   Multiple timeframe confirmation (higher TF for trend, lower TF for entry)
+
+2.  **Bollinger Band Component**: Detects volatility contractions and expansions
+    -   Adaptive standard deviation multipliers (1.5, 2.0, 2.5, 3.0)
+    -   Band squeeze detection for breakout anticipation
+    -   Mean reversion signals from band touches
+    -   Dynamic band width tracking for volatility regime detection
+    -   Trend direction confirmation using band slope
+
+3.  **Supply/Demand Zones**: Identifies key support/resistance levels
+    -   Pattern recognition for rally-base-drop and drop-base-rally formations
+    -   Zone quality scoring based on formation characteristics
+    -   Zone "freshness" tracking with score decay over time
+    -   Multi-timeframe zone confluence detection
+    -   Dynamic zone strength adjustment based on price interactions
+    -   Zone visualization with color-coding by strength
+
+4.  **Trend Analysis**: Determines market direction across timeframes
+    -   Multiple moving average systems (SMA, EMA, VWMA)
+    -   Higher timeframe trend alignment checks
+    -   Pullback detection within established trends
+    -   Trend strength metrics using ADX and similar indicators
+    -   Market structure analysis (higher highs/higher lows, etc.)
+    -   Range detection for sideways markets
+
+5.  **Volatility Adjustment**: Adapts parameters based on current volatility
+    -   ATR-based volatility measurement across multiple periods
+    -   Parameter scaling based on volatility regime
+    -   Position sizing adjustment for high-volatility environments
+    -   Stop-loss distance calculation using ATR multiples
+    -   Volatility breakout detection
+    -   Rejection of signals during extreme volatility events
+
+### Strategy Signal Generation
+
+The Edge Multi-Factor Strategy generates signals through the following process:
+
+1.  **Initial Filtering**: Screen for basic conditions across all components
+    -   RSI values within specified ranges
+    -   Price relative to Bollinger Bands
+    -   Proximity to Supply/Demand zones
+    -   Current volatility assessment
+
+2.  **Confluence Analysis**: Combine signals from multiple components
+    -   Minimum required confluence score configuration
+    -   Weighted scoring based on historical component performance
+    -   Priority rules for conflicting signals
+    -   Time-based weighting (recent signals given higher weight)
+
+3.  **Entry Confirmation**: Final validation before trade execution
+    -   Volume confirmation requirements
+    -   Minimum risk/reward ratio check
+    -   Pattern completion verification
+    -   Rejection criteria for false signals
+    -   Timeframe alignment confirmation
+
+4.  **Signal Strength Calculation**: Determine position sizing multiplier
+    -   Base position size from risk management rules
+    -   Adjustment factor from signal strength score
+    -   Maximum position size caps
+    -   Signal decay handling for delayed execution
+
+### Exploratory Strategy Framework
+
+The project includes an exploratory strategy framework that enables systematic investigation of new trading concepts before incorporation into the main Edge Multi-Factor Strategy:
+
+1.  **Isolated Component Testing**: Test individual indicators or concepts
+    -   Standalone backtesting environment
+    -   Performance comparison against benchmark strategies
+    -   Sensitivity analysis for parameter variations
+    -   Correlation analysis with existing components
+
+2.  **Concept Validation Process**:
+    -   Define clear hypothesis for the trading concept
+    -   Create minimal viable implementation
+    -   Backtest across multiple markets and timeframes
+    -   Evaluate using consistent performance metrics
+    -   Document findings in standardized format
+
+3.  **Integration Pathway**:
+    -   Test correlation with existing strategy components
+    -   Determine optimal weighting in combined strategy
+    -   Perform incremental backtesting during integration
+    -   Monitor live performance in parallel before full integration
+    -   Establish fallback mechanisms for unexpected behavior
+
+4.  **Exploratory Strategy Toolbox**:
+    -   Reusable testing frameworks for quick concept validation
+    -   Benchmarking system for performance comparison
+    -   Statistical analysis tools for result validation
+    -   Parameter grid search automation
+    -   Result visualization and reporting tools
+
+### Walk-Forward Optimization Process
+
+The WFO process follows a systematic approach to validate strategy performance while avoiding curve-fitting:
+
+1.  **Data Preparation and Segmentation**
+    -   Divide historical data into multiple in-sample/out-of-sample segments
+    -   Configure segment sizes appropriately (typical IS/OS ratio: 70/30)
+    -   Ensure sufficient history for meaningful optimization (typically 6+ months)
+    -   Apply data cleaning procedures (handling gaps, outliers, etc.)
+    -   Normalize data features when necessary
+
+2.  **In-Sample Optimization Process**:
+    -   Define parameter search space with appropriate ranges
+    -   For each in-sample segment:
+        -   Apply grid search or genetic algorithm optimization
+        -   Optimize parameters for primary metrics (Sharpe, profit factor, etc.)
+        -   Apply ancillary metrics as filters (min. trades, max drawdown, etc.)
+        -   Rank parameter sets by combined performance score
+        -   Select top N parameter sets for out-of-sample testing
+
+3.  **Out-of-Sample Validation**:
+    -   Apply optimal in-sample parameters to corresponding out-of-sample data
+    -   Calculate performance metrics on unseen data
+    -   Measure performance degradation from in-sample to out-of-sample
+    -   Flag excessive degradation as potential overfitting
+    -   Store all results for stability analysis
+
+4.  **Parameter Stability Analysis**:
+    -   Track how optimal parameters change across segments
+    -   Calculate stability metrics for each parameter:
+        -   Standard deviation normalized to parameter range
+        -   Maximum parameter deviation percentage
+        -   Consistency of direction in parameter changes
+    -   Identify most stable parameters across all segments
+    -   Assign stability weights to each parameter
+
+5.  **Robustness Evaluation**:
+    -   Test performance across various market conditions
+        -   Trending vs. ranging markets
+        -   High vs. low volatility periods
+        -   Bull vs. bear market phases
+    -   Analyze sensitivity to parameter variations
+    -   Perform Monte Carlo simulations with parameter perturbations
+    -   Evaluate strategy resilience to execution delays and slippage
+
+6.  **Final Parameter Selection**:
+    -   Combine performance metrics with stability scores
+    -   Weigh recent segments more heavily than older ones
+    -   Calculate expected performance ranges rather than point estimates
+    -   Select parameters with best balance of performance and stability
+    -   Document all findings with visualizations and summary statistics
+
+### WFO Implementation Tips
+
+1.  **Avoiding Curve-Fitting**:
+    -   Use sufficient historical data spanning multiple market regimes
+    -   Limit parameter count to prevent overfitting (parsimony principle)
+    -   Implement strict out-of-sample validation
+    -   Apply complexity penalties to parameter sets
+    -   Watch for excessive performance degradation in out-of-sample testing
+
+2.  **Computational Optimization**:
+    -   Implement parallel processing for faster optimization
+    -   Use smart search algorithms (Bayesian optimization, particle swarm)
+    -   Store intermediate results to enable resumable processing
+    -   Apply early stopping for clearly underperforming parameter sets
+    -   Use parameter sensitivity analysis to reduce search space
+
+3.  **Results Interpretation**:
+    -   Focus on consistency across segments rather than maximum performance
+    -   Look for clusters of parameters that perform well
+    -   Pay attention to parameter stability in recent market conditions
+    -   Consider the trade-off between performance and robustness
+    -   Analyze failure modes in poor-performing segments
+
+4.  **Practical Implementation**:
+    -   Schedule regular re-optimization (monthly or quarterly)
+    -   Implement gradual parameter updates rather than sudden changes
+    -   Monitor tracking error between expected and actual performance
+    -   Create alerts for significant market regime changes
+    -   Document all optimization runs with detailed metadata
+
+## Configuration Requirements
+
+The system requires proper configuration of:
+
+1.  **Coinbase Advanced API Credentials**: With appropriate permissions.
+    -   Required permissions: view, trade, transfer management (adjust as needed for security).
+    -   JWT authentication with ES256 algorithm must be used.
+    -   Private key must be in PEM format with literal `\n` characters for newlines in the `.env` file.
+    -   Ensure system clock is synchronized (e.g., using NTP) for JWT timestamp validation.
+
+2.  **Risk Parameters**: Defined in configuration files or environment variables.
+    -   Maximum position size per trade (e.g., `$1000` or `5%` of equity).
+    -   Account risk percentage per trade (e.g., `1%`).
+    -   Maximum drawdown threshold (e.g., `10%` daily, `25%` total).
+    -   Circuit breaker conditions (e.g., halt after `5` consecutive losses, halt if daily loss exceeds `3%`).
+    -   Trade frequency limits (e.g., max `10` trades per day).
+    -   Correlation exposure limits (e.g., max `20%` exposure to highly correlated assets).
+
+3.  **Strategy Parameters**: Specific settings for the Edge Multi-Factor strategy.
+    -   RSI periods and overbought/oversold levels.
+    -   Bollinger Band period and standard deviation multipliers.
+    -   Supply/Demand zone detection settings (strength thresholds, decay rates).
+    -   Trend identification parameters (MA lengths, timeframe weights).
+    -   Signal confirmation rules (min confluence score, volume multipliers).
+
+4.  **Backtesting Settings**: Configuration for running simulations.
+    -   Historical data date ranges (ensure sufficient length).
+    -   WFO segment sizes (in-sample days, out-of-sample days, step days).
+    -   Exchange fee structure (maker/taker fees).
+    -   Slippage model (e.g., fixed points, percentage, volatility-based).
+    -   Performance metrics to track and report.
+    -   Benchmark strategy or index for comparison.
+    -   Monte Carlo simulation settings (number of runs, parameter perturbation ranges).
+
+## Current Project Status
+
+Based on the `tasks.json` file, the project has the following status:
+
+-   **Completed** (9 tasks):
+    -   Project scaffold and Coinbase API integration (Task 1)
+    -   OHLCV data retrieval and storage (Task 2)
+    -   Supply/Demand zone detection algorithm (Task 3)
+    -   Risk management system (Task 4)
+    -   Order execution framework (Task 5)
+    -   AWS Lambda deployment framework (Conceptual - Task related to deployment)
+    -   Data visualization dashboard (Conceptual - Task related to UI/Reporting)
+    -   Strategy monitoring system (Conceptual - Part of execution/logging)
+    -   Trading Journal Integration (Task 12 - Basic logging likely part of Task 7)
+
+-   **In Progress** (4 tasks):
+    -   Dry-run and backtest modes with Edge Multi-Factor optimization (Task 6)
+    -   Signal generation algorithm refinement (Part of Task 3/Strategy Implementation)
+    -   AI-assisted parameter optimization (Part of AI Assistance / WFO)
+    -   Multi-exchange integration (Likely a future task, not explicitly listed as in progress in provided JSON)
+
+*Note: Status mapping assumes conceptual links where direct task IDs aren't listed.* 
+
+## Troubleshooting Common Issues
+
+### API Authentication Problems
+-   **Key Format**: Verify `COINBASE_API_SECRET` in `.env` has literal `\n` for newlines. Ensure no extra quotes or spaces.
+-   **Permissions**: Confirm the API key has the necessary permissions (view, trade) enabled in Coinbase.
+-   **Clock Skew**: Ensure the server's clock is synchronized (e.g., using NTP) for JWT timestamp validation.
+
+### Backtesting Performance & Accuracy
+-   **Data Quality**: Check historical data for gaps, duplicate entries, or outliers. Implement cleaning procedures.
+-   **Lookahead Bias**: Ensure indicators and strategy logic only use data available *at or before* the current simulation time step. Be careful with pandas functions that might implicitly use future data.
+-   **Slippage & Fees**: Use realistic models. Fixed slippage is often too simplistic; consider percentage-based or volatility-adjusted models. Include accurate commission costs.
+-   **Sample Size**: Ensure enough trades are generated in backtests for statistical significance. Low trade counts make results unreliable.
+-   **Benchmark**: Compare results against a relevant benchmark (e.g., buy-and-hold for the asset) to assess value-add.
+-   **WFO Settings**: Ensure appropriate WFO segment lengths. Too short segments may not capture market dynamics; too long may obscure parameter drift.
+
+### Optimization Challenges (WFO)
+-   **Overfitting**: Monitor the performance drop between in-sample and out-of-sample results. Large drops indicate overfitting. Reduce parameter complexity or increase data/segment length.
+-   **Computational Cost**: WFO is intensive. Use parallel processing, efficient code (vectorization with numpy/pandas), and consider cloud resources. Implement checkpointing.
+-   **Parameter Stability**: If optimal parameters vary wildly between segments, the strategy might not be robust. Favor parameter sets that show consistency.
+-   **Local Optima**: Grid search can be trapped in local optima. Consider more advanced methods like genetic algorithms or Bayesian optimization if needed.
+-   **Search Space**: Ensure the defined parameter ranges are sensible and cover potentially optimal values without being excessively large.
+
+### Task Management (Task-Master)
+-   **API Key**: Ensure `ANTHROPIC_API_KEY` is correctly set in `.env` for AI features.
+-   **Dependencies**: Run `task-master fix-dependencies` if you encounter errors related to task linkage after manual edits to `tasks.json`.
+-   **Task Files**: Remember that `task-master generate` overwrites files in `tasks/`. Keep primary edits in `tasks.json`.
+-   **Complexity**: Use `analyze-complexity` and `expand` to break down large tasks *before* starting implementation to improve planning.
+-   **Status Updates**: Keep task statuses (`set-status`) updated frequently to reflect actual progress accurately.
+
+## Strategy Development Workflow
+
+Follow this structured process for developing and refining trading strategies within this framework:
+
+1.  **Research Phase**
+    -   Identify a market inefficiency or pattern hypothesis.
+    -   Review relevant research papers, articles, or existing indicators.
+    -   Define the core logic, required inputs, and expected outputs/signals.
+    -   Determine suitable markets and timeframes for the concept.
+
+2.  **Prototyping (using Exploratory Framework)**
+    -   Implement the core logic as a standalone component.
+    -   Use the exploratory backtesting tools to perform initial validation on historical data.
+    -   Identify preliminary parameter ranges that show promise.
+    -   Document initial findings, including potential weaknesses or edge cases.
+
+3.  **Rigorous Testing & Optimization**
+    -   Perform Walk-Forward Optimization on the isolated component or strategy.
+    -   Analyze performance across diverse market conditions (trends, ranges, volatility levels).
+    -   Evaluate parameter stability and robustness.
+    -   Conduct sensitivity analysis around optimal parameters.
+    -   Compare results against benchmarks.
+    -   Document all results, configurations, and findings thoroughly.
+
+4.  **Integration (if successful)**
+    -   Analyze the correlation of the new component's signals with the existing Edge Multi-Factor Strategy.
+    -   Determine how to best combine the signals (e.g., as a filter, a confirmation, or an additive factor).
+    -   Define interaction rules and weighting within the combined strategy.
+    -   Re-run WFO on the integrated strategy.
+    -   Test the integrated strategy in dry-run mode before considering live deployment.
+
+5.  **Monitoring and Refinement (Live/Dry-Run)**
+    -   Continuously monitor the strategy's performance against WFO expectations (tracking error).
+    -   Use the trading journal and performance metrics to identify strengths and weaknesses.
+    -   Analyze losing trades and periods of underperformance.
+    -   Periodically re-run WFO (e.g., quarterly) to adapt to changing market conditions.
+    -   Make data-driven adjustments to parameters or logic based on ongoing monitoring.
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Performance Metrics and Trade Analysis
-
-The system incorporates a robust implementation for calculating trade performance metrics, addressing several key challenges in vectorbt's API.
-
-### VectorBT Trade Record Processing
-
-VectorBT provides trade records through its Portfolio object, but has inconsistencies in how it exposes data:
-
-1. **Column Name Inconsistencies**:
-   - The `records_readable` DataFrame uses uppercase 'PnL' for trade profit/loss values
-   - Many vectorbt methods and properties use lowercase 'pnl' 
-   - Our system handles both formats seamlessly with a unified interface
-
-2. **Access Method Handling**:
-   - Some metrics are exposed as properties, others as methods
-   - Count can be either a property or a callable method depending on context
-   - Our implementation intelligently handles all variations
-
-### Metrics Calculation Flow
-
-The system calculates performance metrics through a multi-stage process:
-
-1. **Data Collection**: 
-   ```
-   Portfolio Object → Trade Records → Performance Calculation
-   ```
-
-2. **Column Detection**:
-   ```python
-   # Detect available PnL column format
-   pnl_col = None
-   if 'PnL' in trades_df.columns:
-       pnl_col = 'PnL'
-   elif 'pnl' in trades_df.columns:
-       pnl_col = 'pnl'
-   ```
-
-3. **Metric Extraction**:
-   - Basic metrics (Sharpe, Calmar, max drawdown) from portfolio stats
-   - Trade-specific metrics (win rate, profit factor) from trade records
-   - Risk metrics from portfolio risk functions
-
-4. **Fallback Mechanisms**:
-   - If PnL columns aren't found, defaults to zero values
-   - If trade counts aren't available, uses DataFrame length
-   - If a specific calculation fails, provides sensible defaults
-
-## System Flow and Component Integration
-
-The Crypto Trading Bot integrates multiple components in a cohesive workflow that handles data acquisition, strategy implementation, performance measurement, and AI-assisted optimization. Here's a detailed breakdown of the entire system flow:
-
-### 1. Data Flow
-
-```
-Data Source → Data Fetcher → Data Processing → Strategy Implementation → Backtesting/Live Trading → Performance Analysis
-```
-
-#### Data Acquisition Process
-1. **Data Source Selection**:
-   - Historical data from Coinbase via API
-   - Real-time data from WebSocket connections
-   - Data cached locally for performance
-   - Configurable timeframes and symbols
-
-2. **Data Transformation**:
-   - Normalization of column names to lowercase
-   - Calculation of derived values (returns, volatility)
-   - Splitting into training/testing periods for walk-forward optimization
-
-3. **Data Enhancement**:
-   - Addition of technical indicators
-   - Market regime identification
-   - Volume profile analysis
-
-### 2. Strategy Execution Flow
-
-```
-Market Data → Technical Indicators → Signal Generation → Position Sizing → Order Execution → Performance Tracking
-```
-
-#### Signal Generation Process
-1. **Indicator Calculation**:
-   - Calculate RSI, Bollinger Bands, and volatility indicators
-   - Apply multiple timeframe analysis when configured
-   - Generate boolean signal arrays (entry/exit conditions)
-
-2. **Signal Combination**:
-   - Combine multiple indicators using configurable weights
-   - Apply regime filters for market condition adaptivity
-   - Generate final long/short signals
-
-3. **Position Management**:
-   - Calculate position sizes based on risk parameters
-   - Implement stop-loss and take-profit levels
-   - Handle entry/exit timing logic
-
-### 3. Live Trading Flow
-
-```
-Strategy Signals → Risk Management → Order Creation → API Communication → Order Execution → Position Monitoring
-```
-
-#### Trade Execution Process
-1. **Order Preparation**:
-   - Validate signal against current market conditions
-   - Apply risk management rules (position size, max positions)
-   - Calculate appropriate order parameters (size, price)
-
-2. **API Interaction**:
-   - Create and sign API requests with proper JWT authentication
-   - Submit orders via REST API
-   - Handle response status and confirmation
-
-3. **Position Tracking**:
-   - Monitor open positions through WebSocket feeds
-   - Update stop-loss/take-profit levels as needed
-   - Record execution details for performance analysis
-
-### 4. AI Integration Flow
-
-```
-Trading Context → AI System → Model Selection → Query Processing → Strategy Enhancement
-```
-
-#### AI Assistance Process
-1. **Context Preparation**:
-   - Gather market data and performance metrics
-   - Formulate precise queries for AI models
-   - Include relevant context for accurate responses
-
-2. **Model Selection**:
-   - Choose between ChatVBT (primary) and direct API (fallback)
-   - Select appropriate model based on task complexity
-   - Handle API authentication and rate limiting
-
-3. **Response Processing**:
-   - Parse AI responses into structured formats
-   - Extract actionable recommendations
-   - Integrate suggestions into strategy parameters
-
-4. **Continuous Improvement**:
-   - Log AI interactions for review
-   - Feedback loop to improve prompts
-   - Evolution of strategy based on AI insights
-
-### 5. Integrated Parameter Optimization Workflow (NEW)
-
-The system now incorporates a two-stage optimization process:
-
-1.  **Enhanced Parameter Suggestion (Initial Tuning):**
-    *   Run `python scripts/strategies/enhanced_parameter_suggestions.py`.
-    *   This script analyzes the current market conditions (over the last 30 days) to identify the market regime.
-    *   It generates strategy parameter suggestions tailored to this regime.
-    *   These suggestions are then validated against a longer historical backtest (365 days by default).
-    *   If the backtest shows improved performance (Return and Sharpe Ratio) compared to baseline parameters, the suggested parameters are saved to `config/optimized_strategy_params.json`.
-
-2.  **Walk-Forward Optimization (Fine-tuning & Adaptation):**
-    *   Run `python scripts/strategies/wfo_edge_strategy.py`.
-    *   Before optimizing each walk-forward window, the script attempts to load the parameters from `config/optimized_strategy_params.json`.
-    *   If found, these parameters are used as the *initial guess* (first trial) for the Optuna optimization process within that specific WFO window.
-    *   If the file is not found, Optuna starts its search from scratch for that window.
-    *   The WFO process then proceeds as usual, optimizing parameters for each training split and evaluating on the subsequent out-of-sample period.
-
-**Benefits of this workflow:**
-
-*   **Better Starting Point:** WFO starts its optimization search from a more informed position based on recent market analysis and long-term validation, potentially leading to faster convergence and better final parameters.
-*   **Adaptation + Robustness:** Combines long-term validation (from the suggestion script) with rolling window adaptation (from WFO).
-*   **Flexibility:** You can run the suggestion script periodically to update the baseline optimized parameters used by WFO.
-
-## Future Roadmap
-
-The Crypto Trading Bot system is continuously evolving. Here are the planned enhancements for upcoming releases:
-
-### Upcoming in v1.5.0
-- **Multi-Exchange Support**: Integration with additional cryptocurrency exchanges
-- **Enhanced Position Management**: Dynamic adjustment of positions based on real-time market conditions
-- **Portfolio Optimization**: Cross-asset allocation optimization for improved risk-adjusted returns
-- **Improved Data Analytics**: Advanced visualization and reporting of trading performance
-
-### Planned for v2.0.0
-- **Strategy Marketplace**: Platform for sharing and subscribing to trading strategies
-- **Web Dashboard**: Complete web interface for monitoring and controlling the trading system
-- **Custom Indicator Builder**: AI-assisted creation of custom technical indicators
-- **Sentiment Analysis Integration**: Incorporate market sentiment from news and social media
-
-### Long-term Vision
-- **Automated Strategy Evolution**: Self-improving strategies using reinforcement learning
-- **Advanced Market Regime Detection**: ML-based classification of market conditions
-- **Cross-Exchange Arbitrage**: Identify and exploit price differences across exchanges
-- **Options and Derivatives Integration**: Support for advanced trading instruments
-
-These roadmap items represent our commitment to continuously improve the system based on user feedback and market developments. Contributions aligned with these goals are particularly welcome.

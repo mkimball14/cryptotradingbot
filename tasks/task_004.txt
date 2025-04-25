@@ -58,7 +58,7 @@ Implementation steps:
    - Low confidence (<50%): Use 50% of calculated size or skip trade
 4. Implement position size caps based on volatility measures
 5. Add methods to document confidence factors for each trade
-6. Create unit tests with various confidence scenarios
+6. Create unit tests for all calculation methods
 7. Implement integration tests with mock zone analysis data
 8. Add configuration options for confidence thresholds and modifiers
 

@@ -1,6 +1,6 @@
 # Task ID: 6
 # Title: Implement Dry-Run and Backtest Modes
-# Status: pending
+# Status: in-progress
 # Dependencies: 2, 3, 5
 # Priority: medium
 # Description: Create simulation capabilities for strategy validation without real money
@@ -8,10 +8,8 @@
 1. Implement dry-run mode with simulated order execution
 2. Create backtest engine for historical data testing
 3. Add performance metrics calculation (win rate, risk-reward, drawdown)
-4. Implement trade simulation with various market conditions
+4. Implement Edge Multi-Factor strategy optimization
 5. Create reporting functionality for backtest results
-6. Add parameter optimization capabilities
-7. Develop comparison tools for strategy variations
 
 # Test Strategy:
 Compare backtest results with manual analysis. Verify dry-run execution against expected outcomes. Test performance metrics accuracy against known outcomes.
@@ -47,12 +45,12 @@ Implementation steps:
 6. Implement proper handling of OHLCV data and order book snapshots
 7. Create time-aware context switching to ensure strategy logic uses only data available at simulation time
 
-## 3. Implement Performance Metrics Calculation [done]
+## 3. Implement Edge Multi-Factor Strategy Performance Metrics [done]
 ### Dependencies: 6.1, 6.2
-### Description: Create a comprehensive metrics system that calculates key performance indicators for trading strategies based on backtest or dry-run results.
+### Description: Create a comprehensive metrics system that calculates key performance indicators for the Edge Multi-Factor strategy based on backtest or dry-run results.
 ### Details:
 Implementation steps:
-1. Implement core performance metrics calculations:
+1. Implement core performance metrics calculations for Edge Multi-Factor Strategy:
    - Win rate and loss rate
    - Profit factor and expectancy
    - Maximum drawdown and recovery time
@@ -62,10 +60,12 @@ Implementation steps:
 3. Add time-based analysis (performance by hour, day, month)
 4. Implement trade-sequence analysis for detecting patterns
 5. Create visualization helpers for key metrics
+6. Add specific metrics for RSI, Bollinger Band, and volatility components
+7. Implement comparison metrics between different parameter sets
 
 ## 4. Develop Trade Simulation with Variable Market Conditions [pending]
 ### Dependencies: 6.2, 6.3
-### Description: Enhance the backtest engine to simulate different market conditions and scenarios to test strategy robustness.
+### Description: Enhance the backtest engine to simulate different market conditions and scenarios to test Edge Multi-Factor strategy robustness.
 ### Details:
 Implementation steps:
 1. Create a MarketScenarioGenerator class to modify historical data
@@ -77,10 +77,11 @@ Implementation steps:
 3. Add Monte Carlo simulation capabilities to randomize conditions
 4. Implement stress testing for extreme market conditions
 5. Create a scenario comparison system to evaluate strategy performance across conditions
+6. Add specific tests for Edge Multi-Factor strategy in different regimes
 
-## 5. Create Reporting and Optimization Framework [pending]
+## 5. Create Edge Multi-Factor Strategy Optimization Framework [pending]
 ### Dependencies: 6.3, 6.4
-### Description: Build a comprehensive reporting system and parameter optimization capabilities to analyze backtest results and improve strategies.
+### Description: Build a comprehensive reporting system and parameter optimization capabilities for the Edge Multi-Factor strategy.
 ### Details:
 Implementation steps:
 1. Implement detailed HTML/PDF report generation with:
@@ -88,77 +89,14 @@ Implementation steps:
    - Equity curves and drawdown visualization
    - Trade distribution analysis
    - Market condition performance breakdown
-2. Create a ParameterOptimizer class for strategy tuning:
+2. Create a ParameterOptimizer class for Edge Multi-Factor strategy tuning:
    - Grid search capability across parameter combinations
    - Genetic algorithm implementation for optimization
    - Walk-forward testing framework
-3. Implement strategy comparison tools:
+3. Implement strategy comparison tools for different parameter sets:
    - Side-by-side metric comparison
-   - Correlation analysis between strategies
-   - Portfolio simulation with multiple strategies
+   - Correlation analysis between parameter variations
+   - Portfolio simulation with multiple parameter sets
 4. Add export/import functionality for results sharing
-
-## 6. Implement RSI Momentum with Regime Filter Strategy [in_progress]
-### Dependencies: 6.2
-### Description: Only trade in clean uptrends, avoid whipsaws in downtrends
-### Details:
-Implementation steps:
-1. Implement regime detection using 20-MA slope + ATR
-2. Entry Rule:
-   - RSI(14) crosses above 55
-   - Regime == 'uptrend'
-3. Exit on RSI < 45 or regime == 'downtrend'
-4. Skip trades when regime is 'downtrend'
-5. Compare with RSI-only strategy in backtest
-
-## 7. Implement Bollinger Band Reversion + RSI Strategy [in_progress]
-### Dependencies: 6.2, 6.6
-### Description: Buy short-term oversold dips during volatility spikes
-### Details:
-Implementation steps:
-1. Fetch 4H BTC-USD candles from Coinbase API (last 60-90 days)
-2. Calculate Bollinger Bands (20 SMA, 2 std dev) and RSI(14)
-3. Entry Rule:
-   - Price closes below lower BB
-   - RSI < 30
-   - Optional: high volume or bullish candle
-4. Exit when price returns to middle band or RSI > 50
-5. Add stop-loss below recent swing low
-6. Backtest and log: Win rate, Sharpe, drawdown, equity curve
-
-## 8. Implement Supply & Demand Zone Bounces Strategy [pending]
-### Dependencies: 6.2, 6.6
-### Description: Buy near support zones with confirmation
-### Details:
-Implementation steps:
-1. Detect demand zones from swing lows + volume clusters
-2. Entry Rule:
-   - Price touches demand zone
-   - Bullish reversal candle
-   - Optional: RSI > 30 or MACD cross
-3. Stop-loss just below zone, exit at mid-range or resistance
-4. Backtest independently
-
-## 9. Implement Breakout Shorting with Volatility Squeeze Strategy [pending]
-### Dependencies: 6.2, 6.7
-### Description: Catch breakdowns from low-volatility consolidations
-### Details:
-Implementation steps:
-1. Detect Bollinger Band 'squeezes' using bandwidth percentile
-2. Entry Rule:
-   - Break below range low during squeeze
-   - Volume spike
-   - RSI < 50 or MACD bear cross
-3. Stop-loss above range high, 2:1 risk/reward
-4. Backtest on BTC-USD, ETH-USD (1H or 4H)
-
-## 10. Implement LSTM Confirmation Model Strategy [pending]
-### Dependencies: 6.2, 6.6, 6.7
-### Description: Add AI prediction filter to reduce false signals
-### Details:
-Implementation steps:
-1. Train LSTM model to predict 4H direction (1 = up, 0 = down)
-2. Use features: OHLCV + RSI, MACD, Bollinger position
-3. Use model to confirm RSI or BB strategy entries
-4. Compare with and without LSTM filter in backtest
+5. Create visualizations for parameter sensitivity analysis
 
