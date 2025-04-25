@@ -13,6 +13,14 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
     *   *Suggestion:* Start by adding 1-2 more `signal_threshold` values or 1-2 `macd_signal_window` options.
 4.  **Refine Strategy Logic:** Based on results (especially if consistently poor even after grid expansion), consider refactoring or adjusting the core logic within `RefactoredEdgeStrategy`.
 
+## WFO & Strategy Refinement
+
+*   **Run Full WFO:** Execute `wfo_runner.py` with the complete `EDGE_MULTI_FACTOR_PARAM_GRID` in `config.py` (ensure `QUICK_TEST = False` in config if applicable) to perform proper parameter optimization across the defined ranges.
+*   **Analyze Full WFO Results:** Review the `wfo_results.csv` generated from the full run. Identify parameter ranges or combinations that lead to better and more stable performance across splits.
+*   **Investigate Split 5:** Determine why Split 5 failed to find valid parameters even with the previously fixed single set. Check data quality or constraint triggers for that specific period.
+*   **Refine Strategy/Grid:** Based on the full WFO analysis, refine the strategy logic (e.g., signal generation, filters) or adjust the parameter grid ranges in `config.py` for further optimization.
+*   **Add Unit Tests:** Implement unit tests for indicator calculations and signal generation logic in `indicators.py` and `signals.py` to ensure robustness, following the testing strategy defined in user rules.
+
 ## Longer-Term Goals
 
 *   **Implement Strategy Refactoring Plan:** Follow the steps outlined in `docs/strategy_refactoring_plan.md` to modularize the strategy code (indicators, signals, regime, config, etc.).

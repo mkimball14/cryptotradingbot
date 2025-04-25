@@ -26,4 +26,14 @@ This log tracks significant changes, improvements, and lessons learned during th
 *   The last WFO split (Pair 4/4) failed optimization (no valid parameters found) even with the reduced grid, suggesting potential issues with the strategy logic or its suitability for the specific market data in that period (~mid-2023 to mid-2024).
 *   Saving detailed WFO results is crucial for diagnosing issues and comparing performance across runs.
 
+## Session: 2025-04-24
+
+*   **WFO Debugging:** Successfully ran the `refactored_edge/wfo_runner.py` script end-to-end.
+    *   Resolved the `TypeError` related to `calculate_volatility` argument passing.
+    *   Identified and fixed the issue where the `vol_threshold` parameter was set too high, preventing any trades.
+    *   Adjusted the `vol_threshold` range in `config.py`'s `EDGE_MULTI_FACTOR_PARAM_GRID` to `(0.002, 0.02, 0.004)` based on observed indicator values.
+    *   Confirmed that trades are now generated and the WFO process completes for all splits.
+    *   Results are successfully saved to `data/results/wfo_results.csv`.
+    *   **Finding:** Initial test run with a *single parameter set* (due to debugging focus) showed consistently negative performance across most splits, indicating the need for full grid optimization.
+
 **Next Steps:** See `docs/NEXT_STEPS.md`.

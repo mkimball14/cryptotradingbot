@@ -20,11 +20,38 @@ RSI = vbt.IndicatorFactory(
 
 # Bollinger Bands (BBands)
 # Modified to accept window and std_dev for consistency with typical vbt usage
-@njit
 def bbands_talib_wrapper(close, window, std_dev):
-    # Map to TA-Lib's parameter names
-    # Assuming nbdevup and nbdevdn are the same
-    upper, middle, lower = vbt.talib('BBANDS').run(close, timeperiod=window, nbdevup=std_dev, nbdevdn=std_dev)
+    """
+    Numba-compatible wrapper for TA-Lib BBANDS.
+
+    Args:
+        close (np.ndarray or pd.Series): Closing prices.
+        window (int): Rolling window size.
+        std_dev (float): Number of standard deviations for bands.
+
+    Returns:
+        tuple: (upper, middle, lower) band arrays.
+    """
+    # Ensure input is a NumPy array
+    if hasattr(close, "values"):
+        close_np = close.values
+    else:
+        close_np = close
+    # Call TA-Lib BBANDS function directly via vbt.talib
+    # It returns an object, not a tuple directly
+    bbands_result = vbt.talib('BBANDS').run(
+        close_np,
+        timeperiod=window,
+        nbdevup=std_dev,
+        nbdevdn=std_dev,
+        matype=0 # SMA
+    )
+    # Access the output bands from the result object
+    upper = bbands_result.upperband
+    middle = bbands_result.middleband
+    lower = bbands_result.lowerband
+
+    # Return the results as a tuple expected by vbt.IndicatorFactory
     return upper, middle, lower
 
 BBANDS = vbt.IndicatorFactory(
@@ -77,32 +104,23 @@ SMA = vbt.IndicatorFactory(
 # ==============================================================================
 
 # --- Volatility Indicator ---
-@njit
-def rolling_volatility_nb(close, window):
-    """Calculate rolling annualized volatility using Numba."""
-    returns = np.diff(close) / close[:-1]
-    # Need to handle the initial window size where rolling std is NaN
-    rolling_std = np.full_like(close, np.nan, dtype=np.float_)
-    if len(close) > window:
-        for i in range(window, len(close)):
-             # Calculate std dev on the *returns* slice
-            rolling_std[i] = np.std(returns[i-window:i])
-    # Annualize (assuming daily returns -> 252 trading days)
-    # If using intraday, adjust sqrt factor (e.g., sqrt(252*X) where X is bars per day)
-    # For now, let's not annualize here, do it in signals if needed.
-    # annualized_vol = rolling_std * np.sqrt(252)
-    return rolling_std
+def calculate_volatility(close, timeperiod):
+    """Calculates rolling standard deviation of percentage returns."""
+    returns = close.pct_change()
+    timeperiod = int(timeperiod)
+    volatility = returns.rolling(window=timeperiod).std() * np.sqrt(timeperiod) # Annualized Std Dev
+    return volatility
 
 Volatility = vbt.IndicatorFactory(
     class_name="Volatility",
     short_name="volatility",
     input_names=["close"],
-    param_names=["window"],
+    param_names=["timeperiod"],
     output_names=["vol"]
 ).with_apply_func(
-    rolling_volatility_nb,
+    calculate_volatility,
     keep_pd=True,
-    window=20 # Default window, will be overridden by params
+    timeperiod=20 # Default window, will be overridden by params
 )
 
 # TODO:

@@ -133,18 +133,32 @@ def generate_edge_signals(
     Returns:
         tuple[pd.Series, pd.Series]: Boolean Series for long entries and long exits.
     """
+    # DEBUG: Print input parameters
+    print(f"DEBUG (SigGen): Params - rsi_entry={rsi_entry_threshold}, rsi_exit={rsi_exit_threshold}, vol_thresh={volatility_threshold}, trend_strict={trend_strict}")
+
     # 1. Calculate Individual Conditions
     rsi_entry_cond = rsi < rsi_entry_threshold
     rsi_exit_cond = rsi > rsi_exit_threshold
     bb_entry_cond = close < bb_lower # Price touches or below lower band
     bb_exit_cond = close > bb_upper  # Price touches or above upper band
 
+    # DEBUG: Print individual condition counts
+    print(f"DEBUG (SigGen): Cond Counts - RSI Entry={rsi_entry_cond.sum()}, RSI Exit={rsi_exit_cond.sum()}, BB Entry={bb_entry_cond.sum()}, BB Exit={bb_exit_cond.sum()}")
+
+    # DEBUG: Print volatility stats
+    print(f"DEBUG (SigGen): Volatility min={volatility.min()}, max={volatility.max()}, last5={volatility.values[-5:]}")
     # 2. Apply Filters
     volatility_filter = volatility > volatility_threshold
     trend_filter = close > trend_ma if trend_strict else pd.Series(True, index=close.index) # Always True if not strict
 
+    # DEBUG: Print filter counts
+    print(f"DEBUG (SigGen): Filter Counts - Vol={volatility_filter.sum()}, Trend={trend_filter.sum()}")
+
     # Combine filters
     trade_allowed = volatility_filter & trend_filter
+
+    # DEBUG: Print combined filter count
+    print(f"DEBUG (SigGen): Combined Filters - Trade Allowed={trade_allowed.sum()}")
 
     # 3. Combine Conditions for Entry/Exit (Long Only for now)
     # Entry: RSI oversold AND price near/below lower BB AND filters allow
@@ -153,11 +167,17 @@ def generate_edge_signals(
     # (Exit conditions usually don't need the entry filters applied)
     exits = rsi_exit_cond | bb_exit_cond
 
+    # DEBUG: Print raw combined signal counts
+    print(f"DEBUG (SigGen): Raw Signal Counts - Entries={entries.sum()}, Exits={exits.sum()}")
+
     # Clean signals: Ensure exit happens after entry if signals overlap
     # entries = entries.vbt.signals.first(True)
     # exits = exits.vbt.signals.first(True)
     # Simple cleaning: remove entry on the same bar as exit
     entries = entries & ~exits
+
+    # DEBUG: Print cleaned signal counts
+    print(f"DEBUG (SigGen): Cleaned Signal Counts - Entries={entries.sum()}, Exits={exits.sum()}")
 
     # Fill NaNs introduced by indicators/filters before returning
     entries = entries.fillna(False)

@@ -82,12 +82,13 @@ def evaluate_single_params(params, data, metric):
         # open_ = data['open'] # Not directly used in current signals/indicators
 
         # 1. Calculate Indicators using factories and params
-        rsi = indicators.RSI.run(close, window=params['rsi_window']).rsi
+        rsi = indicators.RSI.run(close, timeperiod=params['rsi_window']).rsi
         bb = indicators.BBANDS.run(close, window=params['bb_window'], std_dev=params['bb_std_dev'])
-        volatility = indicators.Volatility.run(close, window=params['vol_window']).volatility
-        trend_ma = indicators.SMA.run(close, window=params['trend_window']).sma
+        volatility = indicators.Volatility.run(close, timeperiod=params['vol_window']).volatility
+        trend_ma = indicators.SMA.run(close, timeperiod=params['trend_window']).sma
 
         # 2. Generate Signals
+        print(f"DEBUG (Eval): Attempting to call generate_edge_signals for params {params}")
         entries, exits = signals.generate_edge_signals(
             close=close,
             rsi=rsi,
@@ -118,6 +119,7 @@ def evaluate_single_params(params, data, metric):
 
         # Check if any trades were made
         if pf.trades.count() == 0:
+            print(f"DEBUG (Eval Fail): No trades for params {params}")
             return -np.inf # Penalize heavily if no trades
 
         # 4. Calculate Performance
@@ -126,22 +128,26 @@ def evaluate_single_params(params, data, metric):
 
         # Check for NaN or infinite scores
         if score is None or not np.isfinite(score):
-            # print(f"DEBUG (Eval Fail): Invalid score ({score}) for params {params}") # Keep commented
+            print(f"DEBUG (Eval Fail): Invalid score ({score}) for metric '{metric}' with params {params}")
             return -np.inf
 
         # Optional: Apply constraints (e.g., minimum trades, max drawdown)
         if pf.trades.count() < config.MIN_TOTAL_TRADES:
+            print(f"DEBUG (Eval Fail): Min trades constraint ({pf.trades.count()} < {config.MIN_TOTAL_TRADES}) for params {params}")
             return -np.inf
-        if performance_stats['Max Drawdown [%]'] / 100.0 < config.MAX_DRAWDOWN: # drawdown is negative
-             return -np.inf
-        if performance_stats['Win Rate [%]'] / 100.0 < config.MIN_WIN_RATE:
-             return -np.inf
+        # Note: Max Drawdown in vbt stats is positive, config is negative threshold
+        if performance_stats['Max Drawdown [%]'] > abs(config.MAX_DRAWDOWN * 100.0):
+            print(f"DEBUG (Eval Fail): Max drawdown constraint ({performance_stats['Max Drawdown [%]']:.2f}% > {abs(config.MAX_DRAWDOWN*100.0):.2f}%) for params {params}")
+            return -np.inf
+        if performance_stats['Win Rate [%]'] < config.MIN_WIN_RATE * 100.0:
+            print(f"DEBUG (Eval Fail): Min win rate constraint ({performance_stats['Win Rate [%]']:.2f}% < {config.MIN_WIN_RATE*100.0:.2f}%) for params {params}")
+            return -np.inf
 
+        # print(f"DEBUG (Eval OK): Returning score={score} for params={params}. Stats keys: {list(performance_stats.keys())}")
         return score
 
     except Exception as e:
-        # print(f"Error evaluating params {params}: {e}")
-        # traceback.print_exc() # Uncomment for detailed traceback
+        traceback.print_exc()
         return -np.inf # Penalize heavily on any error
 
 
@@ -168,6 +174,12 @@ def optimize_params_parallel(data, param_combinations, metric, n_jobs=-1):
 
     if not valid_results:
         print("No valid parameter combinations found during optimization.")
+        # --- Debugging: Show why no valid results --- 
+        print(f"  Attempted {len(param_combinations)} parameter combinations.")
+        print(f"  Raw results count: {len(results)}")
+        # Print first few raw results to avoid flooding console if list is huge
+        print(f"  First 5 raw results (score): {results[:5]}") 
+        # --- End Debugging ---
         return None, None, None # Return None for params, score, and stats
 
     # Find the best score and corresponding parameters
@@ -179,10 +191,10 @@ def optimize_params_parallel(data, param_combinations, metric, n_jobs=-1):
     try:
         # Recalculate indicators and signals with best params
         close = data['close']
-        rsi = indicators.RSI.run(close, window=best_params['rsi_window']).rsi
+        rsi = indicators.RSI.run(close, timeperiod=best_params['rsi_window']).rsi
         bb = indicators.BBANDS.run(close, window=best_params['bb_window'], std_dev=best_params['bb_std_dev'])
-        volatility = indicators.Volatility.run(close, window=best_params['vol_window']).volatility
-        trend_ma = indicators.SMA.run(close, window=best_params['trend_window']).sma
+        volatility = indicators.Volatility.run(close, timeperiod=best_params['vol_window']).volatility
+        trend_ma = indicators.SMA.run(close, timeperiod=best_params['trend_window']).sma
         
         entries, exits = signals.generate_edge_signals(
             close=close,
@@ -380,9 +392,9 @@ if __name__ == "__main__":
         # Find best parameters on training data
         best_params, best_train_score, best_train_performance_stats = optimize_params_parallel(
             data=train_data,
-            param_combinations=param_grid_list, 
+            param_combinations=param_grid_list[:1], # <<< ONLY EVALUATE FIRST PARAM COMBINATION
             metric='Sharpe Ratio', # Optimizing for risk-adjusted return
-            n_jobs=N_JOBS
+            n_jobs=1 # <<< FORCE SERIAL EXECUTION
         )
 
         if best_params is None:
@@ -416,10 +428,10 @@ if __name__ == "__main__":
             test_high = test_data['high']
             test_low = test_data['low']
 
-            test_rsi = indicators.RSI.run(test_close, window=best_params['rsi_window']).rsi
+            test_rsi = indicators.RSI.run(test_close, timeperiod=best_params['rsi_window']).rsi
             test_bb = indicators.BBANDS.run(test_close, window=best_params['bb_window'], std_dev=best_params['bb_std_dev'])
-            test_volatility = indicators.Volatility.run(test_close, window=best_params['vol_window']).volatility
-            test_trend_ma = indicators.SMA.run(test_close, window=best_params['trend_window']).sma
+            test_volatility = indicators.Volatility.run(test_close, timeperiod=best_params['vol_window']).volatility
+            test_trend_ma = indicators.SMA.run(test_close, timeperiod=best_params['trend_window']).sma
 
             test_entries, test_exits = signals.generate_edge_signals(
                 close=test_close,

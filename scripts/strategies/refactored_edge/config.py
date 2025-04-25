@@ -107,7 +107,7 @@ EDGE_MULTI_FACTOR_PARAM_GRID = {
 
     # Volatility parameters
     'vol_window': (10, 30, 10),     # Range: 10, 20, 30 (3 steps)
-    'vol_threshold': (0.8, 1.6, 0.4),# Range: 0.8, 1.2, 1.6 (3 steps)
+    'vol_threshold': (0.002, 0.02, 0.004), # Range: 0.002, 0.006, 0.01, 0.014, 0.018
 
     # Trend parameters
     'trend_window': [200],          # Example: Fixed 200 period SMA for trend
