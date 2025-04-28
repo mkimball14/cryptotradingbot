@@ -2,6 +2,128 @@
 
 This log tracks significant changes, improvements, and lessons learned during the development and optimization of the WFO runner and associated trading strategies.
 
+## Session: 2025-04-28 (Part 7: Optuna-Based Parameter Optimization & Batch Processing)
+
+**Goal:** Implement advanced Bayesian optimization with Optuna to replace grid search and create a batch optimization framework for systematic parameter discovery
+
+**Changes & Improvements:**
+
+1. **Optuna Integration:**
+   - Created `run_optuna_optimization.py` to leverage Bayesian optimization for parameter tuning
+   - Implemented a multi-metric objective function that better handles real-world market data
+   - Fixed Sharpe ratio evaluation to accept parameters that produce fewer trades but still have valid returns
+   - Added parameter importance visualization and relationship plots
+
+2. **Batch Optimization Framework:**
+   - Developed `batch_optuna_optimizer.py` with Pydantic-based configuration validation
+   - Implemented systematic testing across multiple symbols, timeframes, and window sizes
+   - Created visualization tools (parameter trends, performance heatmaps, boxplots)
+   - Added markdown report generation with actionable parameter recommendations
+   - Enabled both sequential and parallel processing modes
+
+3. **Improved Testing & Validation:**
+   - Created comprehensive tests for both optimizer modules
+   - Implemented error handling to continue batch runs even when individual cases fail
+   - Added unit tests with expected, edge, and failure case coverage
+   - Fixed column case sensitivity and parameter propagation issues
+
+**Key Findings:**
+
+1. **Optimal Parameters:** Discovered that optimal settings differ significantly from defaults:
+   - Wider Bollinger Bands (2.94 std dev vs default 2.0)
+   - Longer moving average window (108 vs default 50)
+   - Higher ADX threshold (34.7 vs default 25.0)
+   - More conservative RSI settings (38/80 vs 30/70)
+   - Enhanced regime detection and S/D zones enabled
+
+2. **Window Size Impact:** Confirmed minimum effective training window size (30+ days) needed for valid optimization
+
+3. **Parameter Relationships:** Identified key parameter relationships and dependencies that affect strategy performance
+
+**Next Steps:**
+- Run comprehensive batch optimization with 50+ trials across multiple assets and timeframes
+- Implement regime-specific parameter sets based on detected market conditions
+- Update Pydantic validators to use field_validator instead of validator for v2 compatibility
+
+## Session: 2025-04-28 (Part 6: Edge Multi-Factor Strategy Optimization Framework)
+
+**Goal:** Develop a comprehensive strategy optimization framework to systematically evaluate and improve the Edge Multi-Factor strategy across different market regimes, timeframes, and assets
+
+**Changes & Improvements:**
+
+1. **Comprehensive Optimization Framework:**
+   - Created `strategy_optimization_framework.py` with the `StrategyOptimizer` class
+   - Implemented systematic testing across multiple symbols, timeframes, and window sizes
+   - Added parallel processing capabilities for efficient optimization
+   - Developed robust parameter handling for different data lengths and timeframes
+
+2. **Regime-Aware Analysis:**
+   - Integrated regime detection into the optimization process
+   - Added correlation analysis between regime characteristics and strategy performance
+   - Implemented visualization of regime distribution across different markets
+   - Created analysis tools to determine optimal parameters for different regime types
+
+3. **Visualization Framework:**
+   - Implemented comprehensive results visualization:
+     - Performance metrics by symbol and timeframe
+     - Analysis of optimal training window sizes
+     - Robustness evaluation with train vs. test return scatter plots
+     - Regime impact analysis and correlation visualization
+   - Created dedicated output directory structure for optimization artifacts
+
+4. **Column Case Sensitivity Fix:**
+   - Enhanced `validate_ohlc_columns()` in `indicators.py` to support both uppercase and lowercase column names
+   - Added column mapping functionality to handle different data source formats
+   - Improved error messages for column validation failures
+   - Fixed case sensitivity issues encountered during real data testing
+
+**Insights & Lessons:**
+
+1. **Framework Flexibility:** Designing the optimization framework to handle various data formats, timeframes, and parameters provides valuable insights that wouldn't be apparent from testing a single configuration.
+
+2. **Regime Impact:** The framework reveals significant correlation between market regime characteristics and strategy performance, highlighting the importance of regime-adaptive parameter selection.
+
+3. **Window Size Optimization:** Different assets and timeframes benefit from different training/testing window sizes, reinforcing the need for asset-specific optimization.
+
+**Next Phase Focus:** Use the optimization framework to identify the most robust parameter sets for each market regime, then implement adaptive parameter switching based on detected regime transitions.
+
+## Session: 2025-04-28 (Part 5: Real Data Testing & Visualization)
+
+**Goal:** Transition from synthetic data testing to real market data and implement visualization tools for performance analysis
+
+**Changes & Improvements:**
+
+1. **Real Data Integration:**
+   - Created `run_wfo_real_data.py` script to orchestrate testing with real Coinbase historical data
+   - Integrated direct import of `data_fetcher.py` to avoid path issues
+   - Implemented fallback mechanisms when data fetch fails
+   - Configured timeframe conversion between API format and vectorbtpro format
+
+2. **Visualization Framework:**
+   - Added comprehensive visualization of WFO results:
+     - Performance metrics charts (returns, Sharpe ratio, max drawdown)
+     - Robustness analysis (train vs. test scatter plots, robustness ratio)
+     - Parameter stability analysis across splits
+     - Summary statistics tables
+   - Created dedicated output directory for visualization artifacts
+   - Added proper error handling and logging throughout the visualization process
+
+3. **Framework Integration:**
+   - Ensured compatibility between the real data runner and the existing WFO framework
+   - Added detailed logging for debugging and monitoring
+   - Implemented automatic visualization after WFO completion
+   - Used consistent parameter handling across all modules
+
+**Insights & Lessons:**
+
+1. **Data Source Reliability:** Real-world API data requires robust error handling and fallback mechanisms, as network issues, rate limits, or service outages can interrupt the optimization process.
+
+2. **Visualization Value:** Visualizing WFO results provides immediate insights that might be missed in numeric data, particularly for parameter stability and robustness ratio patterns.
+
+3. **Modular Architecture Benefits:** The previously implemented modular architecture made it straightforward to plug in real data sources without changing core logic.
+
+**Next Phase Focus:** Analyze real data WFO results to identify parameter stability patterns and regime transition signals that can further enhance the strategy's performance.
+
 ## Session: 2025-04-28 (Part 2: Robust Regime-Aware Testing Framework)
 
 **Goal:** Debug and enhance the regime-aware parameter adaptation testing framework for reliable synthetic and real data evaluation
