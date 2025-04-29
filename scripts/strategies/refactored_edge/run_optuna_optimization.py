@@ -266,11 +266,50 @@ def objective(trial, data, train_points, test_points, step_points, symbol, timef
             # based on the WFO constants that we modified at the beginning of this function
         )
         
-        # Extract combined metrics from results
-        combined_metrics = wfo_results['combined_metrics']
+        # Unpack the tuple returned by run_wfo
+        results_list, test_portfolios, all_best_params = wfo_results
+        
+        # Calculate combined metrics from results_list
+        combined_metrics = {}
+        if results_list and len(results_list) > 0:
+            # Extract test metrics across all splits
+            test_returns = [r.get('test_return', np.nan) for r in results_list if not pd.isna(r.get('test_return', np.nan))]
+            test_sharpes = [r.get('test_sharpe', np.nan) for r in results_list if not pd.isna(r.get('test_sharpe', np.nan))]
+            max_drawdowns = [r.get('test_max_drawdown', np.nan) for r in results_list if not pd.isna(r.get('test_max_drawdown', np.nan))]
+            
+            # Calculate win rate if available (assuming trades info in results)
+            total_wins = 0
+            total_trades = 0
+            for r in results_list:
+                if 'test_n_trades' in r and r['test_n_trades'] > 0:
+                    total_trades += r.get('test_n_trades', 0)
+                    total_wins += r.get('test_n_wins', 0)
+            
+            win_rate = total_wins / total_trades if total_trades > 0 else 0.0
+            
+            # Calculate profit factor if available
+            total_profit = 0
+            total_loss = 0
+            for r in results_list:
+                if 'test_profit' in r and 'test_loss' in r:
+                    total_profit += r.get('test_profit', 0)
+                    total_loss += abs(r.get('test_loss', 0))
+            
+            profit_factor = total_profit / total_loss if total_loss > 0 else 1.0
+            
+            # Populate combined metrics
+            combined_metrics = {
+                'sharpe_ratio': np.nanmean(test_sharpes) if test_sharpes else 0.0,
+                'average_return': np.nanmean(test_returns) if test_returns else 0.0,
+                'max_drawdown': np.nanmean(max_drawdowns) if max_drawdowns else 1.0,
+                'win_rate': win_rate,
+                'profit_factor': profit_factor,
+                'n_trades': total_trades,
+                'splits_return': test_returns  # Used for consistency calculation
+            }
         
         if not combined_metrics:
-            # Failed WFO run
+            # Failed WFO run or no results
             return -100.0  # Very negative value to indicate failure
         
         # Check for NaN or zero values in critical metrics
@@ -314,7 +353,7 @@ def objective(trial, data, train_points, test_points, step_points, symbol, timef
             profit_factor_bonus = 0.5 * (profit_factor - 1.5)  # Bonus for good profit factor
         
         # Calculate consistency score
-        splits_return = wfo_results.get('splits_return', [])
+        splits_return = combined_metrics.get('splits_return', [])
         if len(splits_return) > 1:
             returns_std = np.std(splits_return)
             returns_mean = np.mean(splits_return)

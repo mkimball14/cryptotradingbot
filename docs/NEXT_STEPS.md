@@ -14,12 +14,15 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 
 ## Current Priorities (as of 2025-04-28)
 
-1. **Integrate & Test Balanced Signal Generation:**
-   * [x] Create balanced signal generation module with configurable strictness levels
-   * [x] Implement comprehensive unit tests for balanced signal generation
-   * [x] Update `wfo_evaluation.py` to use balanced signal mode during optimization
-   * [x] Add configuration option for strictness level in `config.py`
-   * [x] Run comparative analysis of strict vs. balanced vs. relaxed signal generation
+1. **Optimize & Test for Multi-Asset Strategy:**
+   * [x] Fix tuple indexing in the objective function of run_optuna_optimization.py
+   * [x] Update Pydantic validators to V2 style in batch_optuna_optimizer.py
+   * [x] Create test script to verify the fixes with a small-scale optimization run
+   * [x] Fix multi-asset test script to use correct functions from asset_profiles.py
+   * [x] Run and verify multi-asset batch optimization across BTC-USD, ETH-USD, and SOL-USD
+   * [ ] Run extended batch optimization with more trials (50+) and assets for production use
+   * [ ] Create visualization dashboard comparing asset-specific parameters
+   * [ ] Document asset-specific optimal parameters in STRATEGY_OVERVIEW.md
 
 2. **Complete WFO Integration Test:**
    * [x] Fix optimization test failures by standardizing regime information key to 'predominant_regime'

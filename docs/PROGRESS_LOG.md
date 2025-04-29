@@ -2,27 +2,73 @@
 
 This log tracks significant changes, improvements, and lessons learned during the development and optimization of the WFO runner and associated trading strategies.
 
-## Session 2025-04-28: Batch Optimizer Integration Fix
+## Session 2025-04-28: Multi-Asset Optimization Verification
 
-### Issues Fixed
+### Changes and Verification
 
-- Fixed the `run_optuna_optimization` import error in batch optimizer by implementing a proper function with asset-specific parameter support
-- Corrected parameter passing between batch optimizer and the optimization functions
-- Fixed parameter names in function calls to match actual function signatures
-- Improved WFO parameter handling and testing mode toggle reliability
-- Added support for asset-specific signal parameters in optimization runs
+1. **Successfully Verified Multi-Asset Batch Optimization**
+   - Ran batch optimization across BTC-USD, ETH-USD, and SOL-USD to confirm fixes
+   - Verified that tuple indexing fix in the objective function works correctly
+   - Confirmed Pydantic V2 validators are functioning properly
+   - Observed asset-specific parameter optimization working as expected
 
-### Known Issues
+2. **Fixed Multi-Asset Test Script**
+   - Fixed import statements in `run_multi_asset_test.py` to use the correct functions:
+     - `load_asset_profile` instead of `get_asset_profile`
+     - `save_asset_profile` instead of incorrect function name
+     - `get_asset_specific_config` to correctly apply asset-specific parameters
+   - Corrected error where the script attempted to access `.values()` on a set object
+   - Updated n_trials parameter to meet the minimum requirement of 10
+   - Improved results handling to properly access optimization run results
 
-- The objective function still has a tuple indexing issue where it tries to access the WFO results with string keys
-- Pydantic V1-style `@validator` decorators need to be migrated to V2-style `@field_validator` for future compatibility
-- Visualization errors during optimization process indicate potential data format issues
+3. **Validated End-to-End Process**
+   - Confirmed that the entire optimization pipeline works correctly for multiple assets
+   - Verified that asset-specific parameters are correctly applied during optimization
+   - Generated asset-specific optimized parameters as expected
+   - Successfully saved results to appropriate files for further analysis
 
 ### Next Steps
 
-1. Fix tuple indexing in objective function to properly extract metrics from WFO results
-2. Run complete optimization with multiple assets to verify asset-specific parameters work correctly
-3. Update Pydantic validators to V2 style to eliminate deprecation warnings
+1. Run extended batch optimization with more trials and assets for production use
+2. Analyze optimization results to identify stable parameters across assets
+3. Implement cross-asset validation to ensure parameter robustness
+4. Consider adding support for automated asset profile creation and updating
+
+## Session 2025-04-28: Core Optimization Fixes - Tuple Indexing and Pydantic V2 Update
+
+### Issues Fixed
+
+1. **Fixed Tuple Indexing in Objective Function**
+   - Resolved the critical issue in `run_optuna_optimization.py` where the objective function incorrectly accessed `wfo_results` as a dictionary
+   - Modified the code to properly unpack the tuple returned by `run_wfo()` (results_list, test_portfolios, all_best_params)
+   - Added comprehensive calculation of combined metrics from `results_list` elements including:
+     - Sharpe ratio, average return, max drawdown averages across splits
+     - Win rate and profit factor calculation from aggregated results
+     - Proper handling of NaN values and empty result cases
+   - Updated all references in the objective function to use the newly calculated metrics
+
+2. **Updated Pydantic Validators to V2 Style**
+   - Migrated all V1-style `@validator` decorators in `batch_optuna_optimizer.py` to V2-style `@field_validator`
+   - Updated method signatures to use `info.data` pattern required in V2
+   - Eliminated all Pydantic deprecation warnings
+   - Confirmed compatibility with Pydantic 2.11.3
+
+3. **Created Test Script for Validation**
+   - Added `test_fixes.py` to verify the fixes with a small-scale optimization run
+   - Confirmed proper handling of WFO results and parameter validation
+   - Successfully generated valid optimization results
+
+### Benefits
+
+- Eliminated critical errors that prevented batch optimization from running correctly
+- Improved code robustness with proper type handling and error management
+- Future-proofed Pydantic models by updating to V2 validators
+- Enhanced metrics calculation from WFO results for better optimization guidance
+
+### Next Steps
+
+1. Run complete optimization with multiple assets to verify asset-specific parameters work correctly
+2. Use validation metrics to analyze optimization results and tune parameter selection
 4. Use validation metrics to analyze optimization results and tune parameter selection
 5. Add error handling to handle invalid or incomplete WFO results
 

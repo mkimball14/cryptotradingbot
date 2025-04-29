@@ -23,7 +23,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from tqdm import tqdm
 
 # Set up Python path to match integration test pattern
@@ -126,7 +126,7 @@ class BatchOptimizerConfig(BaseModel):
         description="Whether to analyze and create new asset profiles if they don't exist"
     )
     
-    @validator('timeframes')
+    @field_validator('timeframes')
     def timeframes_must_be_supported(cls, v):
         """Validate that timeframes are supported by the data fetcher."""
         for tf in v:
@@ -135,9 +135,10 @@ class BatchOptimizerConfig(BaseModel):
                                f"Supported timeframes: {list(GRANULARITY_MAP_SECONDS.keys())}")
         return v
     
-    @validator('testing_windows')
-    def validate_testing_windows(cls, v, values):
+    @field_validator('testing_windows')
+    def validate_testing_windows(cls, v, info):
         """Ensure testing windows match training windows."""
+        values = info.data
         if 'training_windows' in values:
             train_windows = values['training_windows']
             # Convert list of dicts to a single dict
