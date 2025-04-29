@@ -31,7 +31,7 @@ def generate_signals(
 ) -> Tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     """
     Centralized signal generation function that handles signal generation
-    based on the specified strictness level or testing mode.
+    based on the specified strictness level, regime information, and testing mode.
     
     Args:
         close: Series of closing prices
@@ -54,6 +54,7 @@ def generate_signals(
     min_hold_period = params.get('min_hold_period', 2)
     trend_threshold_pct = params.get('trend_threshold_pct', 0.01)
     zone_influence = params.get('zone_influence', 0.5)
+    use_regime_filter = params.get('use_regime_filter', False)
     
     # Ensure zone data is available, create empty zone data if not
     if price_in_demand_zone is None or price_in_supply_zone is None:
@@ -70,6 +71,47 @@ def generate_signals(
     if testing_mode:
         logger.info(f"Using RELAXED signals due to testing mode environment variable")
         signal_strictness = SignalStrictness.RELAXED
+    
+    # Apply regime-specific parameter adjustments if regime filtering is enabled
+    if use_regime_filter and '_regime_info' in params:
+        # Get regime information
+        regime_info = params.get('_regime_info', {})
+        predominant_regime = regime_info.get('predominant_regime', 'ranging')
+        trending_pct = regime_info.get('trending_pct', 50)
+        ranging_pct = regime_info.get('ranging_pct', 50)
+        
+        # Log regime information
+        logger.info(f"Applying regime-specific adjustments for {predominant_regime} market "  
+                   f"(trending: {trending_pct:.1f}%, ranging: {ranging_pct:.1f}%)")
+        
+        # Adjust parameters based on predominant market regime
+        if predominant_regime == 'trending':
+            # In trending markets:
+            # - Use wider RSI thresholds to avoid premature exits
+            # - Enforce trend direction more strictly
+            # - Use longer hold periods to capture trends
+            rsi_lower_threshold = max(25, rsi_lower_threshold - 5)  # More aggressive entry
+            rsi_upper_threshold = min(75, rsi_upper_threshold + 5)  # Less aggressive exit
+            trend_strict = True  # Always respect trend
+            min_hold_period = max(min_hold_period, 3)  # Hold longer in trends
+            zone_influence = min(0.3, zone_influence)  # Reduce zone influence in trending markets
+            
+            logger.debug(f"Adjusted parameters for trending market: rsi_lower={rsi_lower_threshold}, "  
+                        f"rsi_upper={rsi_upper_threshold}, hold_period={min_hold_period}")
+            
+        else:  # ranging regime
+            # In ranging markets:
+            # - Use tighter RSI thresholds for more selective entries/exits
+            # - Reduce trend strictness to allow counter-trend trades
+            # - Use shorter hold periods to capture reversals
+            rsi_lower_threshold = min(35, rsi_lower_threshold + 5)  # More selective entry
+            rsi_upper_threshold = max(65, rsi_upper_threshold - 5)  # More selective exit
+            trend_strict = False  # Allow counter-trend trades in ranges
+            min_hold_period = min(min_hold_period, 2)  # Hold shorter in ranges
+            zone_influence = max(0.7, zone_influence)  # Increase zone influence in ranging markets
+            
+            logger.debug(f"Adjusted parameters for ranging market: rsi_lower={rsi_lower_threshold}, "  
+                        f"rsi_upper={rsi_upper_threshold}, hold_period={min_hold_period}")
     
     logger.info(f"Generating signals with strictness={signal_strictness}, "
                 f"use_zones={use_zones}, trend_strict={trend_strict}")
