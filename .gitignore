@@ -53,3 +53,7 @@ cdp_api_key.json
 auth_config.json
 secrets/
 credentials/
+
+# Documentation
+docs/VectorBTDocumentation/
+VectorBTDocumentation/

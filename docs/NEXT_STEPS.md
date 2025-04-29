@@ -14,7 +14,18 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 
 ## Current Priorities (as of 2025-04-29)
 
-1. **Leverage New Robust Architecture:**
+1. **Regime-Aware Trading & Visualization:**
+   * [x] Enhance signals_integration.py to adapt trading parameters based on market regime
+   * [x] Create interactive regime-aware signal visualization tools using Plotly
+   * [x] Implement parameter modification logic for trending vs. ranging markets
+   * [x] Add visual comparison tools to validate regime-aware parameter adaptation
+   * [x] Create summary statistics to quantify signal differences by regime
+   * [ ] Implement position sizing that adapts to detected market regime
+   * [ ] Add unit tests for regime-aware signal generation
+   * [ ] Run optimization with regime-aware settings to quantify performance improvements
+   * [ ] Create real-data backtests comparing regime-aware vs. standard approaches
+
+2. **Leverage Robust Architecture:**
    * [x] Create comprehensive utilities module with data validation and error handling
    * [x] Fix circular dependencies throughout the codebase
    * [x] Resolve regime detection errors with proper percentage calculations

@@ -2,6 +2,49 @@
 
 This log tracks significant changes, improvements, and lessons learned during the development and optimization of the WFO runner and associated trading strategies.
 
+## Session 2025-04-29: Regime-Aware Signal Visualization & Testing
+
+### Major Improvements
+
+1. **Regime-Aware Signal Generation**
+   - Enhanced `signals_integration.py` to adapt trading parameters based on detected market regime
+   - Implemented parameter modification based on trending vs. ranging markets
+   - Added automatic adjustment of RSI thresholds, trend strictness, zone influence, and hold periods
+   - Fixed bug in regime percentage calculation that was causing incorrect regime detection
+
+2. **Comprehensive Visualization Tools**
+   - Created `visualize_regime_signals.py` with interactive Plotly-based visualizations
+   - Implemented regime background shading to clearly show market conditions
+   - Added visual comparison of standard vs. regime-optimized signals
+   - Created segment-specific visualizations for detailed regime analysis
+
+3. **Testing & Validation**
+   - Created `simplified_regime_test.py` for easy demonstration of regime adaptation
+   - Added clear signal distribution statistics showing numerical evidence of adaptation
+   - Implemented error handling with graceful fallbacks throughout visualization process
+   - Added summary statistics to quantify differences in trading behavior by regime
+
+### Results & Observations
+
+1. **Signal Adaptation Patterns**
+   - **Ranging Markets:** Regime-optimized signals generated ~2x more trades with relaxed constraints
+   - **Trending Markets:** Regime-optimized signals were more selective and conservative
+   - Signal strictness and zone influence successfully adapted to market conditions
+   - Clear adaptation patterns visible in segment-by-segment analysis
+
+2. **Implementation Insights**
+   - Achieved proper separation of visualization from core trading logic
+   - Successfully transitioned from matplotlib to Plotly for interactive visualizations
+   - Added robust error handling to handle missing data or visualization failures
+   - Created multiple visualization approaches with appropriate fallbacks
+
+### Next Steps
+
+1. Run optimization with regime-aware settings to quantify performance improvements
+2. Add unit tests for regime-aware signal generation logic
+3. Integrate regime-aware adaptation with position sizing for enhanced risk management
+4. Create real-data backtests comparing regime-aware vs. standard approaches
+
 ## Session 2025-04-29: Architectural Improvements & Regime Detection Fixes
 
 ### Major Architectural Improvements
