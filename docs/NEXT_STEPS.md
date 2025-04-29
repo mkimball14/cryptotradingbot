@@ -12,15 +12,28 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - [ ] Create asset-specific signal configurations based on volatility profiles.
 - [ ] Implement improved validation metrics to better evaluate signal quality.
 
-## Current Priorities (as of 2025-04-28)
+## Current Priorities (as of 2025-04-29)
 
-1. **Optimize & Test for Multi-Asset Strategy:**
+1. **Leverage New Robust Architecture:**
+   * [x] Create comprehensive utilities module with data validation and error handling
+   * [x] Fix circular dependencies throughout the codebase
+   * [x] Resolve regime detection errors with proper percentage calculations
+   * [x] Implement consistent error handling patterns with decorators
+   * [x] Fix unbound local variable errors in optimization workflows
+   * [ ] Add comprehensive unit tests for utility functions
+   * [ ] Implement logging configuration with configurable verbosity levels
+   * [ ] Create standardized validation patterns for all configuration objects
+   * [ ] Apply consistent error handling across remaining modules
+
+2. **Extended Multi-Asset Optimization & Analysis:**
    * [x] Fix tuple indexing in the objective function of run_optuna_optimization.py
    * [x] Update Pydantic validators to V2 style in batch_optuna_optimizer.py
    * [x] Create test script to verify the fixes with a small-scale optimization run
    * [x] Fix multi-asset test script to use correct functions from asset_profiles.py
    * [x] Run and verify multi-asset batch optimization across BTC-USD, ETH-USD, and SOL-USD
-   * [ ] Run extended batch optimization with more trials (50+) and assets for production use
+   * [x] Fix regime detection to correctly calculate trending/ranging percentages
+   * [ ] Run extended batch optimization with more trials (50+) and additional assets for production use
+   * [ ] Analyze optimization results to identify stable parameters across assets
    * [ ] Create visualization dashboard comparing asset-specific parameters
    * [ ] Document asset-specific optimal parameters in STRATEGY_OVERVIEW.md
 
@@ -211,3 +224,11 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
   - Build portfolio allocation layer
   - Add real-time regime detection for live trading ✅ (implemented enhanced regime detection)
   - Implement regime-specific position sizing and risk management
+
+- **Advanced vectorbtpro Integration**
+  - **Purged Walk-Forward Cross-Validation:** Implement WFO with purging/embargoing (`Splitter.from_purged_kfold`) for improved robustness.
+  - **Advanced Portfolio Optimization:** Integrate `PyPortfolioOpt` or `Riskfolio-Lib` for dynamic, risk-based position sizing.
+  - **Specialized Indicators:** Explore incorporating Hurst exponent (trend persistence) or Smart Money Concepts (institutional levels).
+  - **Conditional Parameter Optimization:** Add `condition` logic to `vbt.Param` to skip illogical parameter combinations during optimization.
+  - **Custom Numba Functions:** Investigate writing custom Numba-accelerated functions for unique or performance-critical calculations.
+  - **Signal Unraveling:** Explore backtesting individual signal instances for more granular performance analysis.

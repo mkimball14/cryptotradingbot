@@ -2,37 +2,92 @@
 
 This log tracks significant changes, improvements, and lessons learned during the development and optimization of the WFO runner and associated trading strategies.
 
-## Session 2025-04-28: Multi-Asset Optimization Verification
+## Session 2025-04-29: Architectural Improvements & Regime Detection Fixes
 
-### Changes and Verification
+### Major Architectural Improvements
+
+1. **Created Comprehensive Utility Module** (`utils.py`)
+   - Added robust data validation functions with comprehensive error handling
+   - Implemented safe column access with case-insensitive fallbacks
+   - Created error handling decorators for consistent exception management
+   - Added utilities for configuration validation and dynamic importing
+   - Implemented standardized regime percentage calculation functions
+
+2. **Fixed Circular Dependencies**
+   - Identified and resolved circular import chains throughout the codebase
+   - Moved imports inside functions to break dependency cycles
+   - Implemented dynamic module loading with error handling
+   - Created safe import patterns to ensure reliable module access
+
+3. **Corrected Regime Detection Logic**
+   - Fixed persistent unbound local variable errors in regime detection
+   - Corrected the `determine_market_regime_for_params` function to properly calculate percentage distributions
+   - Ensured consistent regime assignment even when errors occur (default to "ranging")
+   - Added validation to prevent zero or unreasonable regime percentages
+   - Fixed scope issues in nested function contexts to prevent variable access errors
+
+4. **Enhanced Error Handling Throughout**
+   - Added with_error_handling decorator for consistent exception handling
+   - Improved all optimization functions with proper error boundaries
+   - Added detailed logging for error diagnosis
+   - Created nested function structure for better scope management
+   - Fixed unbound local variable errors by improving variable scope handling
+
+5. **Improved Optimization Flow**
+   - Enhanced Optuna objective function with better error handling
+   - Fixed scope issues in parameter handling for asset-specific optimization
+   - Preserved compatibility with balanced signal generation approach
+   - Maintained proper integration with Supply/Demand zone logic
+   - Added compatibility with case-insensitive DataFrame column access
+
+### Verification
+
+- **Running the Extended Multi-Asset Optimization** now works without unbound local errors
+- **Regime Detection** now correctly calculates trending_pct and ranging_pct (previously always 0.0)
+- **Signal Generation** works with all three strictness levels (STRICT, BALANCED, RELAXED)
+- **Asset-Specific Parameters** are properly applied during optimization
+
+### Key Files Modified
+
+- `utils.py`: Created from scratch with comprehensive utility functions
+- `wfo_optimization.py`: Fixed regime detection logic
+- `run_optuna_optimization.py`: Enhanced error handling and parameter management
+- Several other files: Applied consistent error handling patterns
+
+## Session 2025-04-29: Multi-Asset Optimization Verification - Extended Confirmation
+
+### Fixes and Verification
 
 1. **Successfully Verified Multi-Asset Batch Optimization**
    - Ran batch optimization across BTC-USD, ETH-USD, and SOL-USD to confirm fixes
    - Verified that tuple indexing fix in the objective function works correctly
-   - Confirmed Pydantic V2 validators are functioning properly
+   - Confirmed Pydantic V2 validators are functioning properly 
    - Observed asset-specific parameter optimization working as expected
+   - Generated valid results with different optimal parameters for each asset
 
-2. **Fixed Multi-Asset Test Script**
-   - Fixed import statements in `run_multi_asset_test.py` to use the correct functions:
-     - `load_asset_profile` instead of `get_asset_profile`
-     - `save_asset_profile` instead of incorrect function name
-     - `get_asset_specific_config` to correctly apply asset-specific parameters
-   - Corrected error where the script attempted to access `.values()` on a set object
-   - Updated n_trials parameter to meet the minimum requirement of 10
-   - Improved results handling to properly access optimization run results
+2. **Fixed Core Issues**
+   - **Tuple Indexing in Objective Function**: Successfully unpacked tuple returned by run_wfo() and calculated combined metrics correctly from the results list
+   - **Pydantic V2 Validators**: Replaced deprecated @validator decorators with @field_validator and adjusted method signatures to use info.data
+   - **Multi-Asset Test Script**: 
+     - Fixed import statements in `run_multi_asset_test.py` to use proper function names (load_asset_profile, save_asset_profile, get_asset_specific_config)
+     - Corrected error where it tried to access `.values()` on a set object
+     - Updated n_trials parameter to meet the minimum requirement of 10
+     - Improved results handling to properly access optimization run results
 
 3. **Validated End-to-End Process**
    - Confirmed that the entire optimization pipeline works correctly for multiple assets
    - Verified that asset-specific parameters are correctly applied during optimization
    - Generated asset-specific optimized parameters as expected
    - Successfully saved results to appropriate files for further analysis
+   - Confirmed that the batch optimization produces valid results for all tested assets
 
 ### Next Steps
 
-1. Run extended batch optimization with more trials and assets for production use
+1. Run extended batch optimization with more trials (50+) and additional assets for production use
 2. Analyze optimization results to identify stable parameters across assets
-3. Implement cross-asset validation to ensure parameter robustness
-4. Consider adding support for automated asset profile creation and updating
+3. Create visualization dashboards comparing asset-specific parameters
+4. Document asset-specific optimal parameters in STRATEGY_OVERVIEW.md
+5. Implement cross-asset validation to ensure parameter robustness
 
 ## Session 2025-04-28: Core Optimization Fixes - Tuple Indexing and Pydantic V2 Update
 

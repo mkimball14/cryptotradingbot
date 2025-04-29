@@ -9,11 +9,17 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm import tqdm
 import traceback
+import logging
+from typing import Dict, Any, Union, List, Optional, Tuple
 
 # Local imports
 from scripts.strategies.refactored_edge import regime
 from scripts.strategies.refactored_edge.wfo_evaluation import evaluate_single_params
+from scripts.strategies.refactored_edge.config import EdgeConfig
+from scripts.strategies.refactored_edge import indicators
 
+# Configure logger
+log = logging.getLogger(__name__)
 
 def optimize_params_parallel(data, param_combinations, metric, n_jobs=-1):
     """
@@ -107,63 +113,89 @@ def optimize_params_parallel(data, param_combinations, metric, n_jobs=-1):
     return best_params, best_score, best_params_by_regime
 
 
-def determine_market_regime_for_params(data, regime_window=None):
+def determine_market_regime_for_params(data, config):
     """
-    Determine the market regime for the given data and add it to parameter information.
+    Determine the market regime for the given data using the provided configuration.
     
     Args:
         data (pd.DataFrame): The price data
-        regime_window (int, optional): Window for regime calculation
+        config: The configuration object for the current trial/split
         
     Returns:
         dict: Regime information including percentages and predominant regime
     """
-    try:
-        # Make sure we have the necessary indicators
-        # We need adx, plus_di, minus_di, atr and close for regime detection
-        if not all(col in data.columns for col in ['adx', 'plus_di', 'minus_di', 'atr']):
-            print("Adding indicators for regime detection...")
-            # Create a complete temporary config with all required attributes
-            from scripts.strategies.refactored_edge import indicators
-            temp_config = type('EdgeConfig', (), {})()
-            # Standard indicator parameters
-            temp_config.rsi_window = 14
-            temp_config.bb_window = 20
-            temp_config.bb_std_dev = 2.0
-            temp_config.trend_ma_window = 50  # Different name from ma_window
-            temp_config.atr_window = 14
-            temp_config.atr_window_sizing = 14
-            temp_config.adx_window = 14
-            # Signal parameters
-            temp_config.rsi_entry_threshold = 30
-            temp_config.rsi_exit_threshold = 70
-            # Disable zone calculations for simplicity
-            temp_config.use_zones = False
-            
-            # Get indicators including ADX for regime detection
-            indicator_df = indicators.add_indicators(data, temp_config)
-            
-            # Extract indicators (ensuring lowercase names)
-            adx = indicator_df['adx']
-            plus_di = indicator_df['plus_di']
-            minus_di = indicator_df['minus_di']
-            atr = indicator_df['atr']
-        else:
-            # Extract existing indicators
-            adx = data['adx']
-            plus_di = data['plus_di']
-            minus_di = data['minus_di']
-            atr = data['atr']
+    # Import modules inside function to avoid circular dependencies
+    from scripts.strategies.refactored_edge.utils import (
+        safe_get_column, get_numeric_column, ensure_config_attributes,
+        calculate_regime_percentages, determine_predominant_regime,
+        logger, with_error_handling
+    )
+    
+    @with_error_handling(default_return={'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'})
+    def _determine_regime():
+        # Validate configuration attributes first
+        required_config_attrs = [
+            'use_enhanced_regimes', 'adx_threshold', 'volatility_threshold', 
+            'momentum_lookback', 'momentum_threshold'
+        ]
         
-        # Use appropriate case for close price
-        close = data.get('close', data.get('Close', None))
-        if close is None:
-            print("WARNING: Close price not found for regime detection")
+        # If using enhanced regimes, also check for strong_adx_threshold
+        if hasattr(config, 'use_enhanced_regimes') and config.use_enhanced_regimes:
+            required_config_attrs.append('strong_adx_threshold')
+            
+        if not ensure_config_attributes(config, required_config_attrs):
+            logger.warning("Using default configuration attributes for missing values")
+        
+        # We need adx, plus_di, minus_di, atr and close for regime detection
+        required_indicators = ['adx', 'plus_di', 'minus_di', 'atr']
+        
+        # Check if we need to add indicators
+        if not all(col in data.columns for col in required_indicators):
+            logger.info("Adding indicators for regime detection using provided config...")
+            # Import here to avoid circular dependencies
+            from scripts.strategies.refactored_edge import indicators
+            
+            # Get indicators using the passed config - make a copy to avoid side effects
+            indicator_df = indicators.add_indicators(data.copy(), config)
+            
+            # Verify indicators were properly generated
+            if not all(col in indicator_df.columns for col in required_indicators):
+                logger.error(f"Required regime indicators {required_indicators} not generated by add_indicators")
+                return {'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'}
+            
+            # Extract the required indicators safely
+            adx = safe_get_column(indicator_df, 'adx')
+            plus_di = safe_get_column(indicator_df, 'plus_di')
+            minus_di = safe_get_column(indicator_df, 'minus_di')
+            atr = safe_get_column(indicator_df, 'atr')
+            close = safe_get_column(indicator_df, 'close', alternatives=['Close'])
+        else:
+            # Extract existing indicators safely
+            adx = safe_get_column(data, 'adx')
+            plus_di = safe_get_column(data, 'plus_di')
+            minus_di = safe_get_column(data, 'minus_di')
+            atr = safe_get_column(data, 'atr')
+            close = safe_get_column(data, 'close', alternatives=['Close'])
+        
+        # Validate required data
+        if close is None or adx is None:
+            logger.warning("Missing critical data for regime detection (close price or ADX)")
             return {'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'}
         
-        # Determine market regime (using regime.py's function)
-        # Check if we should use the advanced regime detection or the simple one
-        if hasattr(temp_config, 'use_enhanced_regimes') and temp_config.use_enhanced_regimes:
+        # Import regime module here to avoid circular dependencies
+        from scripts.strategies.refactored_edge import regime
+        
+        # Determine market regime based on configuration
+        use_enhanced = getattr(config, 'use_enhanced_regimes', False)
+        adx_threshold = getattr(config, 'adx_threshold', 25.0)  # Default if not in config
+        
+        if use_enhanced:
+            # Get other config parameters with defaults
+            strong_adx_threshold = getattr(config, 'strong_adx_threshold', 35.0)
+            volatility_threshold = getattr(config, 'volatility_threshold', 0.01)
+            momentum_lookback = getattr(config, 'momentum_lookback', 5)
+            momentum_threshold = getattr(config, 'momentum_threshold', 0.005)
+            
             # Use advanced regime detection with all indicators
             regimes = regime.determine_market_regime_advanced(
                 adx=adx,
@@ -171,39 +203,67 @@ def determine_market_regime_for_params(data, regime_window=None):
                 minus_di=minus_di,
                 atr=atr,
                 close=close,
-                threshold=temp_config.adx_threshold if hasattr(temp_config, 'adx_threshold') else 25.0,
-                strong_threshold=temp_config.strong_adx_threshold if hasattr(temp_config, 'strong_adx_threshold') else 35.0,
-                volatility_threshold=temp_config.volatility_threshold if hasattr(temp_config, 'volatility_threshold') else 0.01
+                high=safe_get_column(data, 'high', alternatives=['High']),
+                low=safe_get_column(data, 'low', alternatives=['Low']),
+                volume=safe_get_column(data, 'volume', alternatives=['Volume']),
+                adx_threshold=adx_threshold,
+                strong_adx_threshold=strong_adx_threshold,
+                volatility_threshold=volatility_threshold,
+                momentum_lookback=momentum_lookback,
+                momentum_threshold=momentum_threshold,
+                use_enhanced_classification=True
             )
         else:
             # Use simple regime detection with just ADX
-            regimes = regime.determine_market_regime(
-                adx=adx,
-                threshold=temp_config.adx_threshold if hasattr(temp_config, 'adx_threshold') else 25.0
-            )
+            regimes = regime.determine_market_regime(adx, adx_threshold)
         
-        # Calculate percentage of each regime
-        total_periods = len(regimes)
-        if total_periods == 0:
-            return {'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'}
-            
-        trending_periods = (regimes == 'trending').sum()
-        ranging_periods = (regimes == 'ranging').sum()
+        # Calculate regime distribution
+        regime_percentages = calculate_regime_percentages(regimes)
+        logger.debug(f"Raw regime percentages: {regime_percentages}")
         
-        trending_pct = 100 * trending_periods / total_periods
-        ranging_pct = 100 * ranging_periods / total_periods
-        
-        # Determine the predominant regime (for simplicity, just use majority)
-        predominant = 'trending' if trending_pct > ranging_pct else 'ranging'
-        
-        return {
-            'trending_pct': trending_pct,
-            'ranging_pct': ranging_pct,
-            'predominant_regime': predominant
+        # Initialize result with default values
+        result = {
+            'trending_pct': 0,
+            'ranging_pct': 0,
+            'predominant_regime': 'ranging'  # Default to ranging
         }
         
-    except Exception as e:
-        print(f"Error detecting market regime: {str(e)}")
-        traceback.print_exc()
-        # Default to ranging (it's usually the safer assumption)
-        return {'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'}
+        # Update with actual regime percentages based on classification type
+        if not use_enhanced:
+            # Simple trending/ranging classification
+            result['trending_pct'] = regime_percentages.get('trending', 0)
+            result['ranging_pct'] = regime_percentages.get('ranging', 0)
+        else:
+            # Enhanced classification - group regimes into trending and ranging categories
+            trending_regimes = [
+                'trending', 'strong_uptrend', 'weak_uptrend', 'strong_downtrend', 'weak_downtrend',
+                'breakout', 'breakdown', 'TRENDING', 'STRONG_UPTREND', 'WEAK_UPTREND', 'STRONG_DOWNTREND', 
+                'WEAK_DOWNTREND', 'BREAKOUT', 'BREAKDOWN'
+            ]
+            ranging_regimes = [
+                'ranging', 'volatile_range', 'quiet_range', 'RANGING', 'VOLATILE_RANGE', 'QUIET_RANGE'
+            ]
+            
+            # Calculate trending and ranging percentages
+            for regime_type in trending_regimes:
+                result['trending_pct'] += regime_percentages.get(regime_type, 0)
+            
+            for regime_type in ranging_regimes:
+                result['ranging_pct'] += regime_percentages.get(regime_type, 0)
+        
+        # Safety check to ensure percentages add up to something reasonable
+        total_pct = result['trending_pct'] + result['ranging_pct']
+        if total_pct < 1:  # Less than 1% is suspiciously low
+            logger.warning(f"Total regime percentages ({total_pct}%) are too low, using defaults")
+            # Default to ranging when data is inadequate
+            result['ranging_pct'] = 100
+            result['trending_pct'] = 0
+        
+        # Determine predominant regime
+        result['predominant_regime'] = 'trending' if result['trending_pct'] > result['ranging_pct'] else 'ranging'
+        
+        logger.debug(f"Final regime distribution: {result}")
+        return result
+    
+    # Execute the inner function with error handling
+    return _determine_regime()
