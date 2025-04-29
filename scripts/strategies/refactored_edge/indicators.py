@@ -12,22 +12,87 @@ logger = logging.getLogger(__name__)
 
 
 def validate_ohlc_columns(df: pd.DataFrame):
-    required_cols = ['Open', 'High', 'Low', 'Close'] 
-    if not all(col in df.columns for col in required_cols):
-        missing = [col for col in required_cols if col not in df.columns]
-        raise ValueError(f"Input DataFrame missing one or more required columns: {missing}")
+    """Validate that the dataframe contains OHLC columns in either uppercase or lowercase format.
+    
+    Args:
+        df: DataFrame to validate
+        
+    Returns:
+        tuple: (column_format, column_map)
+            column_format: 'upper' or 'lower' depending on which format was found
+            column_map: dictionary mapping standardized column names to actual column names
+        
+    Raises:
+        ValueError: If the dataframe is missing required OHLC columns
+    """
+    # Check for required columns in both uppercase and lowercase forms
+    upper_required = ['Open', 'High', 'Low', 'Close']
+    lower_required = ['open', 'high', 'low', 'close']
+    
+    # Check for uppercase columns
+    upper_missing = [col for col in upper_required if col not in df.columns]
+    upper_has_all = len(upper_missing) == 0
+    
+    # Check for lowercase columns
+    lower_missing = [col for col in lower_required if col not in df.columns]
+    lower_has_all = len(lower_missing) == 0
+    
+    # If neither format has all required columns, we have a problem
+    if not (upper_has_all or lower_has_all):
+        # Choose which format had more columns to provide a more helpful error message
+        if len(upper_missing) <= len(lower_missing):
+            missing = upper_missing
+            format_tried = "uppercase"
+        else:
+            missing = lower_missing
+            format_tried = "lowercase"
+            
+        raise ValueError(f"Input DataFrame missing required OHLC columns (tried {format_tried}): {missing}")
+    
+    # Determine which format was found and create a mapping
+    if upper_has_all:
+        column_format = 'upper'
+        column_map = {
+            'Open': 'Open', 
+            'High': 'High', 
+            'Low': 'Low', 
+            'Close': 'Close'
+        }
+    else:  # lower_has_all must be True at this point
+        column_format = 'lower'
+        column_map = {
+            'Open': 'open', 
+            'High': 'high', 
+            'Low': 'low', 
+            'Close': 'close'
+        }
+    
+    return column_format, column_map
 
 
 def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
+    """Add technical indicators to OHLC data based on the provided configuration.
+    
+    Handles both uppercase and lowercase OHLC column formats.
+    
+    Args:
+        ohlc_data: DataFrame with OHLC data
+        config: Configuration with indicator parameters
+        
+    Returns:
+        DataFrame with added indicators or None if validation fails
+    """
     try:
-        validate_ohlc_columns(ohlc_data)
+        column_format, column_map = validate_ohlc_columns(ohlc_data)
+        logger.debug(f"Using {column_format}case OHLC columns")
     except ValueError as e:
         logger.error(f"OHLC column validation failed: {e}")
         return None
 
-    close = ohlc_data['Close'].copy()
-    high = ohlc_data['High'].copy()
-    low = ohlc_data['Low'].copy()
+    # Use the column map to get the correct column names
+    close = ohlc_data[column_map['Close']].copy()
+    high = ohlc_data[column_map['High']].copy()
+    low = ohlc_data[column_map['Low']].copy()
 
     indicators_df = pd.DataFrame(index=ohlc_data.index)
 
@@ -44,12 +109,12 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         indicators_df['atr_stops'] = talib.ATR(high, low, close, timeperiod=config.atr_window)
         indicators_df['atr'] = indicators_df['atr_stops'].copy()  # Add atr column for regime detection
         
-        # Get atr_window_sizing - either use the attribute or fall back to atr_window
-        atr_window_sizing = config.atr_window
-        if hasattr(config, 'atr_window_sizing'):
-            atr_window_sizing = config.atr_window_sizing
+        # Get atr_window_sizing with proper fallback handling using getattr
+        atr_window_sizing = getattr(config, 'atr_window_sizing', config.atr_window)
+        if atr_window_sizing != config.atr_window:
+            logger.debug(f"Using custom atr_window_sizing={atr_window_sizing} (different from atr_window={config.atr_window})")
         else:
-            logger.warning(f"atr_window_sizing not found in config, using atr_window ({config.atr_window}) instead")
+            logger.debug(f"Using atr_window_sizing={atr_window_sizing} (same as atr_window)")
             
         indicators_df['atr_sizing'] = talib.ATR(high, low, close, timeperiod=atr_window_sizing)
         
@@ -63,12 +128,9 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         logger.error(f"Error calculating standard indicators: {e}", exc_info=True)
         return None
 
-    # Check if use_zones is available, default to False if not
-    use_zones = False
-    if hasattr(config, 'use_zones'):
-        use_zones = config.use_zones
-    else:
-        logger.warning("use_zones parameter not found in config, defaulting to False")
+    # Check for use_zones with proper fallback handling using getattr
+    use_zones = getattr(config, 'use_zones', False)
+    logger.debug(f"Supply/Demand zone analysis {'enabled' if use_zones else 'disabled'} (use_zones={use_zones})")
     
     if use_zones:
         try:
@@ -120,7 +182,7 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         indicators_df['price_in_supply_zone'] = False
 
     # Standardize column names to snake_case using centralized utility function
-    from scripts.strategies.refactored_edge.wfo_utils import standardize_column_names
+    from .wfo_utils import standardize_column_names
     indicators_df = standardize_column_names(indicators_df)
 
     final_df = pd.concat([ohlc_data, indicators_df], axis=1)

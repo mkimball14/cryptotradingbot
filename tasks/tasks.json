@@ -316,7 +316,7 @@
       "id": 6,
       "title": "Implement Dry-Run and Backtest Modes",
       "description": "Create simulation capabilities for strategy validation without real money",
-      "status": "in-progress",
+      "status": "done",
       "dependencies": [
         2,
         3,
@@ -367,7 +367,7 @@
             3
           ],
           "details": "Implementation steps:\n1. Create a MarketScenarioGenerator class to modify historical data\n2. Implement various market condition simulations:\n   - Volatility spikes and crashes\n   - Gap events and flash crashes\n   - Trending and sideways markets\n   - Liquidity changes and spread widening\n3. Add Monte Carlo simulation capabilities to randomize conditions\n4. Implement stress testing for extreme market conditions\n5. Create a scenario comparison system to evaluate strategy performance across conditions\n6. Add specific tests for Edge Multi-Factor strategy in different regimes",
-          "status": "pending",
+          "status": "done",
           "parentTaskId": 6
         },
         {
@@ -379,7 +379,7 @@
             4
           ],
           "details": "Implementation steps:\n1. Implement detailed HTML/PDF report generation with:\n   - Performance metrics tables and charts\n   - Equity curves and drawdown visualization\n   - Trade distribution analysis\n   - Market condition performance breakdown\n2. Create a ParameterOptimizer class for Edge Multi-Factor strategy tuning:\n   - Grid search capability across parameter combinations\n   - Genetic algorithm implementation for optimization\n   - Walk-forward testing framework\n3. Implement strategy comparison tools for different parameter sets:\n   - Side-by-side metric comparison\n   - Correlation analysis between parameter variations\n   - Portfolio simulation with multiple parameter sets\n4. Add export/import functionality for results sharing\n5. Create visualizations for parameter sensitivity analysis",
-          "status": "pending",
+          "status": "done",
           "parentTaskId": 6
         }
       ]
@@ -662,7 +662,7 @@
           "dependencies": [
             1
           ],
-          "status": "in_progress",
+          "status": "done",
           "parentTaskId": 14
         },
         {
@@ -672,7 +672,7 @@
           "dependencies": [
             1
           ],
-          "status": "pending",
+          "status": "done",
           "parentTaskId": 14
         },
         {
@@ -683,7 +683,7 @@
             1,
             3
           ],
-          "status": "pending",
+          "status": "done",
           "parentTaskId": 14
         },
         {
@@ -693,7 +693,7 @@
           "dependencies": [
             1
           ],
-          "status": "pending",
+          "status": "in_progress",
           "parentTaskId": 14
         },
         {

@@ -1,10 +1,55 @@
+# Virtual environments and package managers
 venv/
+.venv/
+env/
+env.bak/
 .env
+pipenv/
+
+# Python artifacts
 *.pyc
+*.pyo
 __pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Data and logs
 data/
 *.log
+logs/
+
+# IDE and editor files
 .vscode/
 .idea/
+*.swp
+*.swo
+*.swn
+*~
+
+# OS generated files
 *.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 node_modules
+
+# Credentials and API keys - NEVER commit these!
+cdp_api_key.json
+*_api_key.json
+*_key.json
+*_secret.json
+*_credentials.json
+*credentials*.json
+*secrets*.json
+*apikey*.json
+*token*.json
+*_auth.json
+auth_config.json
+secrets/
+credentials/

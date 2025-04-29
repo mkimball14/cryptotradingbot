@@ -1,6 +1,6 @@
 # Task ID: 6
 # Title: Implement Dry-Run and Backtest Modes
-# Status: in-progress
+# Status: done
 # Dependencies: 2, 3, 5
 # Priority: medium
 # Description: Create simulation capabilities for strategy validation without real money
@@ -63,7 +63,7 @@ Implementation steps:
 6. Add specific metrics for RSI, Bollinger Band, and volatility components
 7. Implement comparison metrics between different parameter sets
 
-## 4. Develop Trade Simulation with Variable Market Conditions [pending]
+## 4. Develop Trade Simulation with Variable Market Conditions [done]
 ### Dependencies: 6.2, 6.3
 ### Description: Enhance the backtest engine to simulate different market conditions and scenarios to test Edge Multi-Factor strategy robustness.
 ### Details:
@@ -79,7 +79,7 @@ Implementation steps:
 5. Create a scenario comparison system to evaluate strategy performance across conditions
 6. Add specific tests for Edge Multi-Factor strategy in different regimes
 
-## 5. Create Edge Multi-Factor Strategy Optimization Framework [pending]
+## 5. Create Edge Multi-Factor Strategy Optimization Framework [done]
 ### Dependencies: 6.3, 6.4
 ### Description: Build a comprehensive reporting system and parameter optimization capabilities for the Edge Multi-Factor strategy.
 ### Details:

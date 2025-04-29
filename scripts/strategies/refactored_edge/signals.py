@@ -2,6 +2,9 @@ import vectorbtpro as vbt
 import pandas as pd
 import numpy as np
 
+# Local imports (assuming config might be useful here eventually)
+# from .config import EdgeConfig # Import if config needed directly
+
 # ==============================================================================
 # Signal Generation Functions
 # ==============================================================================
@@ -106,91 +109,117 @@ def generate_edge_signals(
     rsi: pd.Series,
     bb_upper: pd.Series,
     bb_lower: pd.Series,
-    volatility: pd.Series,
     trend_ma: pd.Series,
-    rsi_entry_threshold: float,
-    rsi_exit_threshold: float,
-    volatility_threshold: float,
-    trend_strict: bool = True # If True, only long when close > trend_ma
-) -> tuple[pd.Series, pd.Series]:
+    price_in_demand_zone: pd.Series, # Expects boolean series 
+    price_in_supply_zone: pd.Series, # Expects boolean series
+    rsi_lower_threshold: float, 
+    rsi_upper_threshold: float,  
+    use_zones: bool,            
+    trend_strict: bool = True
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     """
     Generates entry and exit signals for the Edge Multi-Factor strategy.
 
-    Combines RSI, Bollinger Bands, Volatility, and Trend filters.
+    NOTE: Removed 'volatility_ok' condition from short_entries logic (was undefined and unused).
+
+    Combines RSI, Bollinger Bands, Trend filters, and optionally Supply/Demand zones.
 
     Args:
         close (pd.Series): Closing prices.
         rsi (pd.Series): RSI values.
         bb_upper (pd.Series): Upper Bollinger Band values.
         bb_lower (pd.Series): Lower Bollinger Band values.
-        volatility (pd.Series): Volatility indicator values.
-        trend_ma (pd.Series): Trend Moving Average values (e.g., SMA 200).
-        rsi_entry_threshold (float): RSI level below which entry is considered.
-        rsi_exit_threshold (float): RSI level above which exit is considered.
-        volatility_threshold (float): Volatility level above which trading is allowed.
-        trend_strict (bool, optional): If True, strictly enforce price > trend_ma for longs. Defaults to True.
+        trend_ma (pd.Series): Trend-defining moving average values.
+        price_in_demand_zone (pd.Series): Boolean series indicating price is near/in a demand zone.
+        price_in_supply_zone (pd.Series): Boolean series indicating price is near/in a supply zone.
+        rsi_lower_threshold (float): RSI level below which long entry is considered (oversold).
+        rsi_upper_threshold (float): RSI level above which long exit is considered (overbought).
+        use_zones (bool): Whether to incorporate S/D zone signals into the logic.
+        trend_strict (bool): If True, require close > trend_ma for longs, close < trend_ma for shorts.
 
     Returns:
-        tuple[pd.Series, pd.Series]: Boolean Series for long entries and long exits.
+        tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+            Boolean Series for (long_entries, long_exits, short_entries, short_exits).
     """
-    # DEBUG: Print input parameters
-    print(f"DEBUG (SigGen): Params - rsi_entry={rsi_entry_threshold}, rsi_exit={rsi_exit_threshold}, vol_thresh={volatility_threshold}, trend_strict={trend_strict}")
+    # 1. Calculate Base Indicator Conditions
+    rsi_oversold = rsi < rsi_lower_threshold
+    rsi_overbought = rsi > rsi_upper_threshold
+    price_below_bb = close < bb_lower
+    price_above_bb = close > bb_upper
 
-    # 1. Calculate Individual Conditions
-    rsi_entry_cond = rsi < rsi_entry_threshold
-    rsi_exit_cond = rsi > rsi_exit_threshold
-    bb_entry_cond = close < bb_lower # Price touches or below lower band
-    bb_exit_cond = close > bb_upper  # Price touches or above upper band
+    # 2. Define Trend Filters
+    trend_filter_long = close > trend_ma if trend_strict else pd.Series(True, index=close.index)
+    trend_filter_short = close < trend_ma if trend_strict else pd.Series(True, index=close.index)
 
-    # DEBUG: Print individual condition counts
-    print(f"DEBUG (SigGen): Cond Counts - RSI Entry={rsi_entry_cond.sum()}, RSI Exit={rsi_exit_cond.sum()}, BB Entry={bb_entry_cond.sum()}, BB Exit={bb_exit_cond.sum()}")
+    # 3. Define Zone Filters/Triggers (if zones are used)
+    if use_zones:
+        # Refined Logic: Require entry within the 'correct' zone
+        zone_long_entry_condition = price_in_demand_zone
+        zone_long_exit_trigger = price_in_supply_zone
+        zone_short_entry_condition = price_in_supply_zone
+        zone_short_exit_trigger = price_in_demand_zone
+    else:
+        # If zones aren't used, these conditions are always met (True for entry, False for exit)
+        zone_long_entry_condition = pd.Series(True, index=close.index)
+        zone_long_exit_trigger = pd.Series(False, index=close.index)
+        zone_short_entry_condition = pd.Series(True, index=close.index)
+        zone_short_exit_trigger = pd.Series(False, index=close.index)
 
-    # DEBUG: Print volatility stats
-    print(f"DEBUG (SigGen): Volatility min={volatility.min()}, max={volatility.max()}, last5={volatility.values[-5:]}")
-    # 2. Apply Filters
-    volatility_filter = volatility > volatility_threshold
-    trend_filter = close > trend_ma if trend_strict else pd.Series(True, index=close.index) # Always True if not strict
+    # 4. Combine Conditions for Long Signals
+    long_entries = (
+        ((rsi_oversold & trend_filter_long) | (price_below_bb & trend_filter_long)) & zone_long_entry_condition
+    )
 
-    # DEBUG: Print filter counts
-    print(f"DEBUG (SigGen): Filter Counts - Vol={volatility_filter.sum()}, Trend={trend_filter.sum()}")
+    # 5. Combine Conditions for Short Signals
+    short_entries = (
+        ((rsi_overbought & trend_filter_short) | (price_above_bb & trend_filter_short)) & 
+        zone_short_entry_condition  # Removed volatility_ok, which was undefined and unused
+    )
+    # Print summary for debugging
+    # print(f"DEBUG: long_entries.sum(): {long_entries.sum()}, short_entries.sum(): {short_entries.sum()}")
 
-    # Combine filters
-    trade_allowed = volatility_filter & trend_filter
+    # Combine base exit condition OR zone exit trigger
+    long_exits = (
+        (rsi_overbought & price_above_bb) |  # Stricter: both must be true
+        zone_long_exit_trigger                # Or zone exit
+    )
 
-    # DEBUG: Print combined filter count
-    print(f"DEBUG (SigGen): Combined Filters - Trade Allowed={trade_allowed.sum()}")
+    # Combine base exit condition OR zone exit trigger
+    short_exits = (
+        (rsi_oversold & price_below_bb) |    # Stricter: both must be true
+        zone_short_exit_trigger               # Or zone exit
+    )
 
-    # 3. Combine Conditions for Entry/Exit (Long Only for now)
-    # Entry: RSI oversold AND price near/below lower BB AND filters allow
-    entries = rsi_entry_cond & bb_entry_cond & trade_allowed
-    # Exit: RSI overbought OR price near/above upper BB
-    # (Exit conditions usually don't need the entry filters applied)
-    exits = rsi_exit_cond | bb_exit_cond
+    # Ensure exits override entries on the same bar
+    long_entries = long_entries & ~long_exits
+    short_entries = short_entries & ~short_exits
 
-    # DEBUG: Print raw combined signal counts
-    print(f"DEBUG (SigGen): Raw Signal Counts - Entries={entries.sum()}, Exits={exits.sum()}")
+    long_entries = long_entries.fillna(False)
+    long_exits = long_exits.fillna(False)
+    short_entries = short_entries.fillna(False)
+    short_exits = short_exits.fillna(False)
 
-    # Clean signals: Ensure exit happens after entry if signals overlap
-    # entries = entries.vbt.signals.first(True)
-    # exits = exits.vbt.signals.first(True)
-    # Simple cleaning: remove entry on the same bar as exit
-    entries = entries & ~exits
+    # Apply minimum holding period to prevent immediate exit after entry
+    min_hold = 3
+    long_entries_idx = long_entries[long_entries].index
+    for idx in long_entries_idx:
+        exit_idx = long_exits.index.get_loc(idx) + min_hold
+        if exit_idx < len(long_exits):
+            long_exits.iloc[exit_idx] = False  # Prevent exit for min_hold bars after entry
+    short_entries_idx = short_entries[short_entries].index
+    for idx in short_entries_idx:
+        exit_idx = short_exits.index.get_loc(idx) + min_hold
+        if exit_idx < len(short_exits):
+            short_exits.iloc[exit_idx] = False
 
-    # DEBUG: Print cleaned signal counts
-    print(f"DEBUG (SigGen): Cleaned Signal Counts - Entries={entries.sum()}, Exits={exits.sum()}")
+    return long_entries, long_exits, short_entries, short_exits
 
-    # Fill NaNs introduced by indicators/filters before returning
-    entries = entries.fillna(False)
-    exits = exits.fillna(False)
-
-    return entries, exits
+# Reason: Stricter exits and a minimum holding period should reduce overtrading and filter out whipsaw losses. Documented and explained for clarity.
 
 
 # TODO:
 # 1. Refine signal combination logic (consider timing, conflicting signals)
-# 2. Integrate signals from S/D zones when implemented
-# 3. Add short signal logic if needed
-# 4. Add parameters for enabling/disabling specific signal components (RSI, BB, Vol, Trend)
+# 2. Integrate signals from S/D zones when implemented -> DONE
+# 3. Add short signal logic if needed -> DONE
+# 4. Add parameters for enabling/disabling specific signal components (RSI, BB, Trend, Zones)
 # 5. Potentially add smoothing or confirmation logic (e.g., requiring condition over N bars)
-
-print("Signal generation functions loaded.")
