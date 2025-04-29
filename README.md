@@ -4,26 +4,86 @@ A comprehensive cryptocurrency trading bot featuring advanced Walk-Forward Optim
 
 ## Features
 
-- **Walk-Forward Optimization Engine**: Systematic approach to strategy validation with time-series partitioning, parameter stability analysis, and robustness testing.
-- **Edge Multi-Factor Strategy**: Combines RSI, Bollinger Bands, Supply/Demand Zones, Trend Analysis, and Volatility Adjustment with dynamic parameter optimization.
-- **Coinbase Advanced API Integration**: Robust WebSocket and REST API connectivity with secure JWT authentication (ES256), rate limiting, and reconnection logic.
-- **Supply/Demand Zone Detection**: Algorithmic identification of high-probability support/resistance zones with quality scoring and multi-timeframe confluence.
-- **Risk Management Framework**: Dynamic position sizing based on account risk and volatility, multi-layered stop-loss implementation, and configurable circuit breakers.
-- **Backtesting System**: Historical performance simulation with realistic fee/slippage modeling, Monte Carlo analysis, and detailed performance metrics.
-- **Task-Master CLI**: AI-powered task-driven development workflow for planning, tracking, complexity analysis, and dependency management.
-- **AWS Lambda Integration**: Framework for potential serverless deployment of trading strategies or components.
-- **AI Strategy Assistant**: Provides guidance for parameter selection, strategy modification, and performance analysis insights.
-- **Exploratory Strategy Framework**: Enables systematic testing and validation of new trading concepts before integration.
-- **Session Persistence**: Mechanisms for saving and restoring system state to handle restarts and crashes.
-- **Web UI Dashboard (Planned)**: Future interface for monitoring system status, visualizing trades, and controlling operations.
+### Core Trading Strategy
+
+- **Edge Multi-Factor Strategy**: A sophisticated trading system that combines multiple technical indicators, market context awareness, and adaptive parameterization to identify high-probability trading opportunities across different market regimes.
+  - **Primary Signal Indicators**: RSI, Bollinger Bands, Moving Averages, and ATR
+  - **Signal Validation**: Supply/Demand Zones, Trend Analysis, and ADX confirmation
+  - **Signal Strictness Modes**: Configurable STRICT, BALANCED, and RELAXED signal generation approaches
+  - **Market Regime Detection**: Automated classification of trending vs. ranging market conditions
+
+### System Architecture
+
+- **Modular Design**: Core strategy logic separated from execution and optimization components
+- **Robust Error Handling**: Comprehensive utilities for data validation and exception management
+- **Dependency Management**: Elimination of circular dependencies through dynamic imports
+- **Market Regime Classification**: Enhanced regime detection with percentage calculations and safe fallbacks
+
+### Risk Management
+
+- **Multi-Layered Position Sizing**: Dynamic sizing based on account risk percentage, volatility, and market regime
+- **Comprehensive Stop-Loss System**: Fixed percentage, ATR-based, and zone-based exit mechanisms
+- **Global Risk Controls**: Maximum concurrent positions, drawdown circuit breakers, and correlation-based exposure limits
+
+### Framework & Infrastructure
+
+- **Walk-Forward Optimization Engine**: Systematic approach to strategy validation with time-series partitioning and parameter stability analysis
+- **Coinbase Advanced API Integration**: Robust WebSocket and REST API connectivity with secure JWT authentication
+- **Supply/Demand Zone Detection**: Algorithmic identification of high-probability support/resistance zones
+- **Backtesting System**: Historical performance simulation with realistic market conditions modeling
+- **Task-Master CLI**: AI-powered task-driven development workflow for planning and tracking
+- **AWS Lambda Integration**: Framework for potential serverless deployment
+- **Session Persistence**: Mechanisms for saving and restoring system state
+- **Web UI Dashboard (Planned)**: Future interface for monitoring system status
+
+## Walk-Forward Optimization (WFO) Framework
+
+The project implements a sophisticated Walk-Forward Optimization framework to ensure strategy robustness and adaptability across changing market conditions:
+
+### Methodology
+
+1. **Data Partitioning**:
+   - Historical data is systematically divided into multiple time windows
+   - Each window contains in-sample (training) and out-of-sample (testing) periods
+   - Windows may overlap to increase statistical significance while preventing overfitting
+
+2. **Optimization Process**:
+   - Parameters are optimized on in-sample data for each window using Optuna
+   - Multi-objective optimization balances return, Sharpe ratio, drawdown, and win rate
+   - Parameter stability is measured across windows to prevent curve-fitting
+   - Asset-specific optimizations adapt parameters to individual market characteristics
+
+3. **Validation and Regime Analysis**:
+   - Out-of-sample performance is evaluated using a comprehensive metrics suite
+   - Market regimes are classified (trending vs. ranging) for regime-specific parameter sets
+   - Monte Carlo simulations assess strategy robustness to randomness
+   - Robustness ratio calculations identify strategies with consistent performance
+
+4. **Implementation Features**:
+   - Circular dependency prevention through robust architecture
+   - Error-resistant design with comprehensive validation and fallbacks
+   - Configurable optimization metrics and validation criteria
+   - Parallel processing for efficient multi-asset optimization
 
 ## Version History
 
-### v0.5.0 (Current Development)
-- Enhanced Walk-Forward Optimization with parameter stability analysis and robustness checks.
-- Implemented advanced risk management protocols including dynamic position sizing and circuit breakers.
-- Integrated Trading Journal functionality for better performance tracking.
-- Developed AI assistance features for enhanced parameter suggestions.
+### v0.5.5 (Current Development - April 2025)
+- **Architectural Robustness Improvements**:
+  - Created comprehensive utils.py module with robust data validation and error handling
+  - Fixed circular dependencies throughout the codebase using dynamic imports
+  - Implemented error handling decorators for consistent exception management
+  - Enhanced regime detection with correct percentage calculations and fallbacks
+  - Fixed unbound local variable errors in optimization workflow
+- **Signal Generation Improvements**:
+  - Implemented configurable signal strictness levels (STRICT, BALANCED, RELAXED)
+  - Enhanced Supply/Demand zone proximity filters for better entry/exit timing
+  - Created regime-specific parameter optimization framework
+
+### v0.5.0
+- Enhanced Walk-Forward Optimization with parameter stability analysis and robustness checks
+- Implemented advanced risk management protocols including dynamic position sizing
+- Integrated Trading Journal functionality for better performance tracking
+- Developed AI assistance features for enhanced parameter suggestions
 
 ### v0.4.0
 - Enabled live trading capabilities via Coinbase Advanced API.
