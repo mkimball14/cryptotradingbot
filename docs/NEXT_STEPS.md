@@ -8,10 +8,20 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - [x] Confirm that the WFO runner script executes past the previous blocker.
 - [x] Investigate and resolve why training metrics (`train_return`, `train_sharpe`, `train_max_drawdown`) are missing from `wfo_results.csv`.
 - [x] Continue automation loop: after fixing metrics, proceed with diagnostics and further enhancements as part of the self-improving workflow.
+- [x] Implement balanced signal generation approach with configurable strictness levels.
+- [ ] Create asset-specific signal configurations based on volatility profiles.
+- [ ] Implement improved validation metrics to better evaluate signal quality.
 
 ## Current Priorities (as of 2025-04-28)
 
-1. **Complete WFO Integration Test:**
+1. **Integrate & Test Balanced Signal Generation:**
+   * [x] Create balanced signal generation module with configurable strictness levels
+   * [x] Implement comprehensive unit tests for balanced signal generation
+   * [x] Update `wfo_evaluation.py` to use balanced signal mode during optimization
+   * [x] Add configuration option for strictness level in `config.py`
+   * [x] Run comparative analysis of strict vs. balanced vs. relaxed signal generation
+
+2. **Complete WFO Integration Test:**
    * [x] Fix optimization test failures by standardizing regime information key to 'predominant_regime'
    * [x] Fix portfolio parameter warnings by creating portfolio creation helper function
    * [x] Create infrastructure for integration testing with small synthetic datasets
@@ -60,18 +70,30 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 
 1. ✅ **Implement Optuna Optimization:** Replace grid search with Bayesian optimization for more efficient parameter discovery.
 2. ✅ **Create Batch Optimization Framework:** Develop system to run optimizations across multiple symbols, timeframes, and window sizes.
-3. **Run Comprehensive Batch Optimization:** Execute the optimized batch framework with the following configuration:
+3. ✅ **Run Batch Optimization:** Initial run showed parameter propagation issues and produced no valid trades.
+4. **Fix Parameter Propagation Issues:**
+   - Update WFO to properly handle `atr_window_sizing` and `use_zones` parameters
+   - Ensure all strategy parameters are correctly passed through the optimization chain
+   - Track and verify parameter propagation with detailed logging
+5. **Implement & Test Balanced Signal Generation:** ✅
+   - ✅ Created `balanced_signals.py` with configurable strictness levels
+   - ✅ Implemented balanced signal approach between strict and relaxed modes
+   - ✅ Added configurable parameters for trend threshold, zone influence, and holding period
+   - ✅ Created comprehensive unit tests in `test_balanced_signals.py`
+   - ✅ Added `signals_integration.py` module for centralized signal generation
+   - ✅ Integrated balanced signals into the WFO evaluation pipeline
+   - ✅ Verified different strictness levels generate appropriate signal quantities
+6. **Run More Targeted Optimization:**
    ```python
-   # Recommended configuration
-   symbols = ['BTC-USD', 'ETH-USD', 'SOL-USD']
-   timeframes = ['1h', '4h', '1d']
-   train_days = [30, 60]
-   n_trials = 50
+   # Modified configuration with looser parameters
+   symbols = ['BTC-USD']
+   timeframes = ['1h']
+   train_days = [90]  # Longer training window
+   n_trials = 20      # Fewer trials for faster iteration
    ```
-4. **Analyze Parameter Relationships:** Study the visualization artifacts from batch optimization to identify key parameter interactions.
-5. **Incorporate Optimized Parameters:** Update the Edge strategy with the discovered parameter values (wider BB bands, longer MA window, higher ADX threshold).
-6. **Implement Regime-Specific Parameter Sets:** Use the optimization results to create specialized parameter sets for trending and ranging markets.
-7. **Enhance Regime Transition Detection:** Develop a more sensitive regime transition detection mechanism to enable timely parameter switching.
+7. **Expand Parameter Ranges:**
+   - Update parameter ranges in `config.py` to be significantly wider
+   - Add tests for more aggressive parameter combinations
 5. **Incorporate Benchmark Comparison:** Add performance comparison against standard benchmarks (buy-and-hold, simple MA crossover) to all evaluation reports.
 
 ✅ **Completed Major Tasks:**
@@ -84,7 +106,9 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 
 ## Previously Completed Actions
 
-1. ✅ **Fixed Indicator Calculation Bugs:** Corrected indicator references in `optimize_params_parallel` function.
+1. ✅ **Implemented Balanced Signal Generation:** Created a configurable approach between strict and relaxed modes with fine-tuning parameters for trend threshold, zone influence, and holding period.
+
+2. ✅ **Fixed Indicator Calculation Bugs:** Corrected indicator references in `optimize_params_parallel` function.
 2. ✅ **Implemented Cross-Validation:** Added parameter stability validation through training data segmentation. 
 3. ✅ **Fixed S/D Zone Calculation:** Ensured proper zone signal generation in optimization process.
 4. ✅ **Run WFO with Anti-Overfitting Measures:** Successfully executed WFO with improved parameter stability testing.
@@ -144,6 +168,9 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - Moderate parameter stability (return std dev ~0.06) suggests the strategy has reasonable but not ideal adaptability
 
 #### Open Questions / Next Research Areas
+- What is the optimal balance between signal quantity and quality for different assets and timeframes?
+- Which signal strictness level (strict, balanced, relaxed) performs best in different market regimes?
+- How should zone influence vary based on market volatility and trading volume?
 - Which regime classification system (basic vs. enhanced) provides better overall trading performance?
 - What are the optimal threshold values for enhanced regime detection (ADX, volatility, momentum)?  
 - How significant is the impact of S/D zones compared to regime-aware adaptation?

@@ -10,7 +10,9 @@ import numpy as np
 import vectorbtpro as vbt
 
 # Local imports
-from scripts.strategies.refactored_edge import indicators, signals, test_signals
+from scripts.strategies.refactored_edge import indicators, signals, test_signals, balanced_signals
+from scripts.strategies.refactored_edge.balanced_signals import SignalStrictness
+from scripts.strategies.refactored_edge.signals_integration import generate_signals
 from scripts.strategies.refactored_edge.wfo_utils import INIT_CAPITAL, is_testing_mode, get_ohlc_columns
 
 
@@ -128,42 +130,20 @@ def evaluate_with_params(data, params):
                     'win_rate': 0.0
                 }
         
-        # 2. Generate Signals
-        # Check environment variable for testing mode
-        testing_mode = is_testing_mode()
-        
-        if testing_mode:
-            print(f"DEBUG (Eval): Using RELAXED test signals for params {params} (Testing Mode Enabled via Environment)")
-            long_entries, long_exits, short_entries, short_exits = test_signals.generate_test_edge_signals(
-                close=close,
-                rsi=rsi,
-                bb_upper=bb_upper,
-                bb_lower=bb_lower,
-                trend_ma=trend_ma,
-                price_in_demand_zone=price_in_demand_zone,
-                price_in_supply_zone=price_in_supply_zone,
-                rsi_lower_threshold=params.get('rsi_lower_threshold', 30),
-                rsi_upper_threshold=params.get('rsi_upper_threshold', 70),
-                use_zones=params.get('use_zones', False),
-                trend_strict=params.get('trend_strict', True),
-                relaxed_mode=True  # Enable relaxed mode for more trades
-            )
-            print(f"DEBUG: Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries")
-        else:
-            print(f"DEBUG (Eval): Using standard signals for params {params}")
-            long_entries, long_exits, short_entries, short_exits = signals.generate_edge_signals(
-                close=close,
-                rsi=rsi,
-                bb_upper=bb_upper,
-                bb_lower=bb_lower,
-                trend_ma=trend_ma,
-                price_in_demand_zone=price_in_demand_zone,
-                price_in_supply_zone=price_in_supply_zone,
-                rsi_lower_threshold=params.get('rsi_lower_threshold', 30),
-                rsi_upper_threshold=params.get('rsi_upper_threshold', 70),
-                use_zones=params.get('use_zones', False),
-                trend_strict=params.get('trend_strict', True)
-            )
+        # 2. Generate Signals using the centralized signals integration module
+        # This handles signal strictness levels and testing mode automatically
+        print(f"DEBUG (Eval): Generating signals using signals_integration module with params {params}")
+        long_entries, long_exits, short_entries, short_exits = generate_signals(
+            close=close,
+            rsi=rsi,
+            bb_upper=bb_upper,
+            bb_lower=bb_lower,
+            trend_ma=trend_ma,
+            price_in_demand_zone=price_in_demand_zone,
+            price_in_supply_zone=price_in_supply_zone,
+            params=params
+        )
+        print(f"DEBUG: Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries")
         
         # 3. Create Portfolio using helper function
         # This ensures we only pass valid parameters to avoid warnings
@@ -279,42 +259,20 @@ def evaluate_single_params(params, data, metric):
             print(f"Missing indicators: {missing_indicators}")
             return -np.inf
 
-        # 2. Generate Signals
-        # Check environment variable for testing mode
-        testing_mode = is_testing_mode()
-        
-        if testing_mode:
-            print(f"DEBUG (Eval): Using RELAXED test signals for params {params} (Testing Mode Enabled via Environment)")
-            long_entries, long_exits, short_entries, short_exits = test_signals.generate_test_edge_signals(
-                close=close,
-                rsi=rsi,
-                bb_upper=bb_upper,
-                bb_lower=bb_lower,
-                trend_ma=trend_ma,
-                price_in_demand_zone=price_in_demand_zone,
-                price_in_supply_zone=price_in_supply_zone,
-                rsi_lower_threshold=params.get('rsi_lower_threshold', 30),
-                rsi_upper_threshold=params.get('rsi_upper_threshold', 70),
-                use_zones=params.get('use_zones', False),
-                trend_strict=params.get('trend_strict', True),
-                relaxed_mode=True  # Enable relaxed mode for more trades
-            )
-            print(f"DEBUG: Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries")
-        else:
-            print(f"DEBUG (Eval): Using standard signals for params {params}")
-            long_entries, long_exits, short_entries, short_exits = signals.generate_edge_signals(
-                close=close,
-                rsi=rsi,
-                bb_upper=bb_upper,
-                bb_lower=bb_lower,
-                trend_ma=trend_ma,
-                price_in_demand_zone=price_in_demand_zone,
-                price_in_supply_zone=price_in_supply_zone,
-                rsi_lower_threshold=params.get('rsi_lower_threshold', 30),
-                rsi_upper_threshold=params.get('rsi_upper_threshold', 70),
-                use_zones=params.get('use_zones', False),
-                trend_strict=params.get('trend_strict', True)
-            )
+        # 2. Generate Signals using the centralized signals integration module
+        # This handles signal strictness levels and testing mode automatically
+        print(f"DEBUG (Eval): Generating signals using signals_integration module with params {params}")
+        long_entries, long_exits, short_entries, short_exits = generate_signals(
+            close=close,
+            rsi=rsi,
+            bb_upper=bb_upper,
+            bb_lower=bb_lower,
+            trend_ma=trend_ma,
+            price_in_demand_zone=price_in_demand_zone,
+            price_in_supply_zone=price_in_supply_zone,
+            params=params
+        )
+        print(f"DEBUG: Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries")
             
         # 3. Create Portfolio using helper function
         # This ensures we only pass valid parameters to avoid warnings
