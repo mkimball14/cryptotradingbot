@@ -179,6 +179,33 @@ def with_error_handling(default_return: Any = None):
     return decorator
 
 
+def normalize_regime_type(regime_value: Any) -> str:
+    """
+    Normalize regime type values to a consistent string format.
+    
+    Handles enum values, string variations, and other types.
+    
+    Args:
+        regime_value: The regime value to normalize
+        
+    Returns:
+        Normalized string representation of the regime value
+    """
+    if regime_value is None:
+        return "unknown"
+        
+    # Convert to string, ensuring enums are handled properly
+    regime_str = str(regime_value)
+    
+    # Remove any class prefixes that might be present in enum string representations
+    # Example: MarketRegimeType.TRENDING becomes TRENDING
+    if '.' in regime_str:
+        regime_str = regime_str.split('.')[-1]
+    
+    # Normalize to lowercase for consistent comparison
+    return regime_str.lower()
+
+
 def calculate_regime_percentages(regimes: pd.Series) -> Dict[str, float]:
     """
     Calculate percentage distribution of different regime types in a series.
@@ -189,14 +216,28 @@ def calculate_regime_percentages(regimes: pd.Series) -> Dict[str, float]:
     Returns:
         Dictionary with regime types as keys and percentages as values
     """
-    if regimes.empty:
+    if regimes is None or regimes.empty:
+        logger.warning("Received empty or None regimes series in percentage calculation")
         return {}
-        
+    
+    # Handle potential NaN values
+    clean_regimes = regimes.fillna('unknown')
+    
+    # Normalize all regime values to consistent string format
+    normalized_regimes = clean_regimes.apply(normalize_regime_type)
+    
     # Calculate regime distribution
-    counts = regimes.value_counts(normalize=True) * 100
+    counts = normalized_regimes.value_counts(normalize=True) * 100
     
     # Convert to dictionary with 0 as default for missing regimes
-    return {str(regime): float(pct) for regime, pct in counts.items()}
+    result = {str(regime): float(pct) for regime, pct in counts.items()}
+    
+    # Add debug logging
+    logger.debug(f"Original regime values: {regimes.value_counts().to_dict()}")
+    logger.debug(f"Normalized regime values: {normalized_regimes.value_counts().to_dict()}")
+    logger.debug(f"Calculated regime percentages: {result}")
+    
+    return result
 
 
 def determine_predominant_regime(regime_percentages: Dict[str, float], 

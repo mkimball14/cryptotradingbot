@@ -128,7 +128,7 @@ def determine_market_regime_for_params(data, config):
     from scripts.strategies.refactored_edge.utils import (
         safe_get_column, get_numeric_column, ensure_config_attributes,
         calculate_regime_percentages, determine_predominant_regime,
-        logger, with_error_handling
+        logger, with_error_handling, normalize_regime_type
     )
     
     @with_error_handling(default_return={'trending_pct': 0, 'ranging_pct': 100, 'predominant_regime': 'ranging'})
@@ -189,12 +189,20 @@ def determine_market_regime_for_params(data, config):
         use_enhanced = getattr(config, 'use_enhanced_regimes', False)
         adx_threshold = getattr(config, 'adx_threshold', 25.0)  # Default if not in config
         
+        # Log indicator values for debugging
+        logger.debug(f"ADX range: min={adx.min():.2f}, max={adx.max():.2f}, mean={adx.mean():.2f}")
+        logger.debug(f"Using ADX threshold: {adx_threshold} for regime detection")
+        
         if use_enhanced:
             # Get other config parameters with defaults
             strong_adx_threshold = getattr(config, 'strong_adx_threshold', 35.0)
             volatility_threshold = getattr(config, 'volatility_threshold', 0.01)
             momentum_lookback = getattr(config, 'momentum_lookback', 5)
             momentum_threshold = getattr(config, 'momentum_threshold', 0.005)
+            
+            # Log enhanced parameters
+            logger.debug(f"Using enhanced regime detection with params: strong_adx={strong_adx_threshold}, "
+                       f"volatility={volatility_threshold}, momentum_threshold={momentum_threshold}")
             
             # Use advanced regime detection with all indicators
             regimes = regime.determine_market_regime_advanced(
@@ -217,9 +225,12 @@ def determine_market_regime_for_params(data, config):
             # Use simple regime detection with just ADX
             regimes = regime.determine_market_regime(adx, adx_threshold)
         
+        # Log raw regime counts
+        if not regimes.empty:
+            logger.debug(f"Raw regime counts: {regimes.value_counts().to_dict()}")
+        
         # Calculate regime distribution
         regime_percentages = calculate_regime_percentages(regimes)
-        logger.debug(f"Raw regime percentages: {regime_percentages}")
         
         # Initialize result with default values
         result = {
@@ -228,33 +239,34 @@ def determine_market_regime_for_params(data, config):
             'predominant_regime': 'ranging'  # Default to ranging
         }
         
-        # Update with actual regime percentages based on classification type
-        if not use_enhanced:
-            # Simple trending/ranging classification
-            result['trending_pct'] = regime_percentages.get('trending', 0)
-            result['ranging_pct'] = regime_percentages.get('ranging', 0)
-        else:
-            # Enhanced classification - group regimes into trending and ranging categories
-            trending_regimes = [
-                'trending', 'strong_uptrend', 'weak_uptrend', 'strong_downtrend', 'weak_downtrend',
-                'breakout', 'breakdown', 'TRENDING', 'STRONG_UPTREND', 'WEAK_UPTREND', 'STRONG_DOWNTREND', 
-                'WEAK_DOWNTREND', 'BREAKOUT', 'BREAKDOWN'
-            ]
-            ranging_regimes = [
-                'ranging', 'volatile_range', 'quiet_range', 'RANGING', 'VOLATILE_RANGE', 'QUIET_RANGE'
-            ]
+        # Simplified trending regime list - all normalized to lowercase
+        trending_regimes = [
+            'trending', 'strong_uptrend', 'weak_uptrend', 'strong_downtrend', 'weak_downtrend',
+            'breakout', 'breakdown'
+        ]
+        
+        # Simplified ranging regime list - all normalized to lowercase
+        ranging_regimes = [
+            'ranging', 'volatile_range', 'quiet_range', 'unknown'
+        ]
+        
+        # Update with actual regime percentages
+        # Use normalized keys when looking up percentages
+        for regime_type, percentage in regime_percentages.items():
+            normalized_type = normalize_regime_type(regime_type)
             
-            # Calculate trending and ranging percentages
-            for regime_type in trending_regimes:
-                result['trending_pct'] += regime_percentages.get(regime_type, 0)
-            
-            for regime_type in ranging_regimes:
-                result['ranging_pct'] += regime_percentages.get(regime_type, 0)
+            if normalized_type in trending_regimes:
+                result['trending_pct'] += percentage
+            elif normalized_type in ranging_regimes:
+                result['ranging_pct'] += percentage
+            else:
+                # Unknown regime type, log it
+                logger.warning(f"Unknown regime type: {regime_type} (normalized: {normalized_type})")
         
         # Safety check to ensure percentages add up to something reasonable
         total_pct = result['trending_pct'] + result['ranging_pct']
         if total_pct < 1:  # Less than 1% is suspiciously low
-            logger.warning(f"Total regime percentages ({total_pct}%) are too low, using defaults")
+            logger.warning(f"Total regime percentages ({total_pct:.2f}%) are too low, using defaults")
             # Default to ranging when data is inadequate
             result['ranging_pct'] = 100
             result['trending_pct'] = 0
@@ -262,7 +274,8 @@ def determine_market_regime_for_params(data, config):
         # Determine predominant regime
         result['predominant_regime'] = 'trending' if result['trending_pct'] > result['ranging_pct'] else 'ranging'
         
-        logger.debug(f"Final regime distribution: {result}")
+        logger.debug(f"Final regime distribution: trending={result['trending_pct']:.2f}%, "
+                   f"ranging={result['ranging_pct']:.2f}%, predominant={result['predominant_regime']}")
         return result
     
     # Execute the inner function with error handling
