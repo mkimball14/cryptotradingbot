@@ -43,6 +43,13 @@ if str(current_dir) not in sys.path:
 # Import required modules
 from scripts.strategies.refactored_edge import config
 from scripts.strategies.refactored_edge.data.data_fetcher import GRANULARITY_MAP_SECONDS
+from scripts.strategies.refactored_edge.wfo_utils import set_testing_mode, is_testing_mode
+from scripts.strategies.refactored_edge.asset_profiles import (
+    analyze_asset_volatility, recommend_signal_parameters,
+    get_asset_specific_config, load_asset_profile, save_asset_profile,
+    generate_and_save_default_profiles
+)
+from scripts.strategies.refactored_edge.data.fetch_data import fetch_data
 
 # Set up logging
 logging.basicConfig(
@@ -107,6 +114,16 @@ class BatchOptimizerConfig(BaseModel):
         default=2,
         description="Maximum number of parallel workers if parallel=True",
         ge=1
+    )
+    
+    use_asset_profiles: bool = Field(
+        default=True,
+        description="Whether to use asset-specific volatility profiles for configuration"
+    )
+    
+    analyze_new_profiles: bool = Field(
+        default=True,
+        description="Whether to analyze and create new asset profiles if they don't exist"
     )
     
     @validator('timeframes')
@@ -198,7 +215,7 @@ class BatchOptimizer:
         return f"{symbol}_{timeframe}_train{train_days}_test{test_days}"
     
     def run_single_optimization(self, symbol: str, timeframe: str, 
-                               train_days: int, test_days: int) -> Dict[str, Any]:
+                           train_days: int, test_days: int) -> Dict[str, Any]:
         """
         Run a single optimization case.
         
@@ -213,53 +230,161 @@ class BatchOptimizer:
         """
         case_key = self._get_case_key(symbol, timeframe, train_days, test_days)
         
+        # Save current testing mode state before doing anything else
+        previous_testing_mode = is_testing_mode()
+        
         try:
             logger.info(f"Starting optimization case: {case_key}")
             
-            # Import run_optimization dynamically to avoid circular imports
-            from scripts.strategies.refactored_edge.run_optuna_optimization import run_optimization
-            
-            start_time = time.time()
-            
-            # Run the optimization
-            result = run_optimization(
-                symbol=symbol,
-                timeframe=timeframe,
-                train_days=train_days,
-                test_days=test_days,
-                n_trials=self.config.n_trials,
-                n_splits=self.config.n_splits,
-                timeout=self.config.timeout
+            # Import only what's needed here to avoid circular imports
+            from scripts.strategies.refactored_edge.run_optuna_optimization import (
+                run_optuna_optimization,
+                ensure_directories,
+                save_results,
+                save_study_visualizations
             )
             
-            elapsed_time = time.time() - start_time
+            # Check if we already have a result for this case
+            if case_key in self.completed_runs:
+                logger.info(f"Optimization case {case_key} already completed, skipping")
+                return self.results[symbol][timeframe][case_key]
             
-            # Add additional metadata
-            result.update({
-                "case_key": case_key,
-                "elapsed_time": elapsed_time,
-                "timestamp": datetime.datetime.now().isoformat()
-            })
+            # Always set testing mode to True for optimization
+            set_testing_mode(True)
+            logger.info(f"Set testing mode to True for optimization")
             
-            if result["status"] == "success":
-                logger.info(f"Optimization case {case_key} completed successfully "
-                          f"in {elapsed_time:.2f} seconds")
-                self.completed_runs.add(case_key)
-            else:
-                logger.error(f"Optimization case {case_key} failed: {result.get('error', 'Unknown error')}")
+            # Fetch data for optimization
+            data = fetch_data(
+                symbol=symbol,
+                timeframe=timeframe,
+                days=train_days + test_days
+            )
+            
+            if data is None or len(data) < 100:  # Minimum data threshold
+                logger.error(f"Insufficient data for {symbol} {timeframe}")
+                # Create a basic result with error status
+                error_result = {
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'train_days': train_days,
+                    'test_days': test_days,
+                    'case_key': case_key,
+                    'status': 'error',
+                    'error': 'Insufficient data',
+                    'asset_specific_params': {}
+                }
+                # Add to failed runs set
                 self.failed_runs.add(case_key)
+                # Restore testing mode
+                set_testing_mode(previous_testing_mode)
+                return error_result
+                
+            # Apply asset-specific configuration if enabled
+            asset_specific_params = {}
+            if self.config.use_asset_profiles:
+                # Check if we already have a profile for this asset
+                asset_profile = load_asset_profile(symbol)
+                
+                # If no profile exists and analysis is enabled, create one
+                if asset_profile is None and self.config.analyze_new_profiles:
+                    try:
+                        logger.info(f"Creating new asset profile for {symbol}")
+                        volatility_metrics = analyze_asset_volatility(data)
+                        recommended_params = recommend_signal_parameters(
+                            volatility_metrics["volatility_profile"],
+                            volatility_metrics["avg_daily_volatility"]
+                        )
+                        
+                        # Create asset profile model
+                        from scripts.strategies.refactored_edge.asset_profiles import AssetConfig
+                        asset_profile = AssetConfig(
+                            symbol=symbol,
+                            volatility_profile=volatility_metrics["volatility_profile"],
+                            avg_daily_volatility=volatility_metrics["avg_daily_volatility"],
+                            **recommended_params
+                        )
+                        save_asset_profile(asset_profile)
+                        
+                        logger.info(f"Created asset profile for {symbol}: "  
+                                   f"Volatility={asset_profile.volatility_profile}, "
+                                   f"Strictness={asset_profile.signal_strictness}")
+                    except Exception as e:
+                        logger.error(f"Error creating asset profile for {symbol}: {e}")
+                        # Continue with default parameters if profile creation fails
+                
+                # If we have a profile, use its parameters to guide optimization
+                if asset_profile:
+                    asset_specific_params = {
+                        "signal_strictness": asset_profile.signal_strictness,
+                        "trend_threshold_pct": asset_profile.trend_threshold_pct,
+                        "zone_influence": asset_profile.zone_influence,
+                        "min_hold_period": asset_profile.min_hold_period
+                    }
+                    logger.info(f"Using asset-specific parameters for {symbol}: {asset_specific_params}")
             
-            return result
+            # Run optimization with asset-specific parameters if available
+            try:
+                result = run_optuna_optimization(
+                    data=data,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    n_trials=self.config.n_trials,
+                    timeout=self.config.timeout,
+                    n_splits=self.config.n_splits,
+                    train_days=train_days,
+                    test_days=test_days,
+                    **asset_specific_params
+                )
+                
+                # Add case information
+                result['symbol'] = symbol
+                result['timeframe'] = timeframe
+                result['train_days'] = train_days
+                result['test_days'] = test_days
+                result['case_key'] = case_key
+                result['status'] = 'success'
+                result['asset_specific_params'] = asset_specific_params if self.config.use_asset_profiles else {}
+                
+                # Add to completed runs set
+                self.completed_runs.add(case_key)
+                
+                return result
+            except Exception as e:
+                logger.error(f"Error in optimization run for {case_key}: {e}")
+                error_result = {
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'train_days': train_days,
+                    'test_days': test_days,
+                    'case_key': case_key,
+                    'status': 'error',
+                    'error': str(e),
+                    'asset_specific_params': asset_specific_params
+                }
+                # Add to failed runs set
+                self.failed_runs.add(case_key)
+                return error_result
             
         except Exception as e:
             logger.error(f"Error in optimization case {case_key}: {e}")
-            self.failed_runs.add(case_key)
-            return {
-                "status": "failed",
-                "error": str(e),
-                "case_key": case_key,
-                "timestamp": datetime.datetime.now().isoformat()
+            # Create a basic result with error status
+            error_result = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'train_days': train_days,
+                'test_days': test_days,
+                'case_key': case_key,
+                'status': 'error',
+                'error': str(e),
+                'asset_specific_params': {}
             }
+            # Add to failed runs set
+            self.failed_runs.add(case_key)
+            return error_result
+        finally:
+            # Always restore previous testing mode state
+            set_testing_mode(previous_testing_mode)
+            logger.info(f"Restored testing mode to previous state: {previous_testing_mode}")
     
     def run_batch_sequential(self) -> Dict[str, Dict[str, Any]]:
         """
@@ -685,6 +810,15 @@ def parse_args():
     parser.add_argument('--max-workers', type=int, default=2,
                        help='Maximum number of parallel workers if using parallel mode')
     
+    parser.add_argument('--use-asset-profiles', action='store_true', 
+                       help='Use asset-specific volatility profiles for optimization')
+    
+    parser.add_argument('--no-asset-profiles', action='store_true',
+                       help='Disable asset-specific volatility profiles')
+    
+    parser.add_argument('--analyze-new-profiles', action='store_true',
+                       help='Analyze and create new asset profiles if they do not exist')
+    
     return parser.parse_args()
 
 
@@ -697,6 +831,13 @@ def main():
     # Use 1:2 ratio (e.g., 30-day training → 15-day testing)
     test_windows = [{train: train // 2} for train in args.train_days]
     
+    # Determine asset profile settings
+    use_asset_profiles = True
+    if args.no_asset_profiles:
+        use_asset_profiles = False
+    elif args.use_asset_profiles:
+        use_asset_profiles = True
+    
     # Create configuration
     config = BatchOptimizerConfig(
         symbols=args.symbols,
@@ -706,7 +847,9 @@ def main():
         n_trials=args.n_trials,
         timeout=args.timeout,
         parallel=args.parallel,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        use_asset_profiles=use_asset_profiles,
+        analyze_new_profiles=args.analyze_new_profiles
     )
     
     # Create and run batch optimizer

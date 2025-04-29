@@ -42,6 +42,7 @@ from scripts.strategies.refactored_edge import (
 from scripts.strategies.refactored_edge.config import EdgeConfig
 from scripts.strategies.refactored_edge.wfo import run_wfo
 from scripts.strategies.refactored_edge.wfo_utils import validate_ohlc_data
+from scripts.strategies.refactored_edge.balanced_signals import SignalStrictness
 
 # Set up logging
 logging.basicConfig(
@@ -161,112 +162,221 @@ def objective(trial, data, train_points, test_points, step_points, symbol, timef
     Returns:
         Optimization score (higher is better)
     """
-    # Define the parameter space
-    params = {
-        'rsi_window': trial.suggest_int('rsi_window', 5, 30),
-        'bb_window': trial.suggest_int('bb_window', 10, 50),
-        'bb_std_dev': trial.suggest_float('bb_std_dev', 1.0, 3.0),
-        'ma_window': trial.suggest_int('ma_window', 20, 200),
-        'atr_window': trial.suggest_int('atr_window', 5, 30),
-        'atr_window_sizing': trial.suggest_int('atr_window_sizing', 5, 30),
+    # Save original WFO parameters
+    original_wfo_train = getattr(wfo, 'WFO_TRAIN_POINTS', None)
+    original_wfo_test = getattr(wfo, 'WFO_TEST_POINTS', None)
+    original_wfo_step = getattr(wfo, 'STEP_POINTS', None)
+    
+    original_utils_train = getattr(wfo_utils, 'WFO_TRAIN_POINTS', None)
+    original_utils_test = getattr(wfo_utils, 'WFO_TEST_POINTS', None)
+    original_utils_step = getattr(wfo_utils, 'STEP_POINTS', None)
+    
+    # Override WFO parameters for this run
+    if hasattr(wfo, 'WFO_TRAIN_POINTS'):
+        wfo.WFO_TRAIN_POINTS = train_points
+    if hasattr(wfo, 'WFO_TEST_POINTS'):
+        wfo.WFO_TEST_POINTS = test_points
+    if hasattr(wfo, 'STEP_POINTS'):
+        wfo.STEP_POINTS = step_points
+    
+    if hasattr(wfo_utils, 'WFO_TRAIN_POINTS'):
+        wfo_utils.WFO_TRAIN_POINTS = train_points
+    if hasattr(wfo_utils, 'WFO_TEST_POINTS'):
+        wfo_utils.WFO_TEST_POINTS = test_points
+    if hasattr(wfo_utils, 'STEP_POINTS'):
+        wfo_utils.STEP_POINTS = step_points
+    
+    config_dict = {
+        # RSI parameters
+        'rsi_window': trial.suggest_int('rsi_window', 7, 21),
         'rsi_entry_threshold': trial.suggest_int('rsi_entry_threshold', 20, 40),
         'rsi_exit_threshold': trial.suggest_int('rsi_exit_threshold', 60, 80),
-        'adx_window': trial.suggest_int('adx_window', 5, 30),
-        'adx_threshold': trial.suggest_float('adx_threshold', 15.0, 35.0),
+        
+        # Bollinger Bands parameters
+        'bb_window': trial.suggest_int('bb_window', 10, 30),
+        'bb_std_dev': trial.suggest_float('bb_std_dev', 1.5, 3.0),
+        
+        # Trend MA parameters
+        'trend_ma_window': trial.suggest_int('trend_ma_window', 20, 100),
+        
+        # ATR parameters
+        'atr_window': trial.suggest_int('atr_window', 7, 21),
+        
+        # ADX parameters
+        'adx_window': trial.suggest_int('adx_window', 7, 21),
+        'adx_threshold': trial.suggest_float('adx_threshold', 15.0, 40.0),
+        
+        # Regime filter parameters
         'use_regime_filter': trial.suggest_categorical('use_regime_filter', [True, False]),
-        'use_enhanced_regimes': trial.suggest_categorical('use_enhanced_regimes', [True, False]),
-        'use_zones': trial.suggest_categorical('use_zones', [True, False]),
+        'use_enhanced_regimes': trial.suggest_categorical('use_enhanced_regimes', [True, False])
     }
     
+    # Optionally include Supply/Demand zones
+    config_dict['use_zones'] = trial.suggest_categorical('use_zones', [True, False])
+    
+    if config_dict['use_zones']:
+        config_dict['zone_proximity_pct'] = trial.suggest_float('zone_proximity_pct', 0.001, 0.01)
+    
+    # Add signal balancing parameters (from asset profiles)
+    config_dict['signal_strictness'] = trial.suggest_categorical(
+        'signal_strictness', 
+        [SignalStrictness.STRICT, SignalStrictness.BALANCED, SignalStrictness.RELAXED]
+    )
+    
+    # Add additional signal parameters with reasonable defaults based on strictness
+    if config_dict['signal_strictness'] == SignalStrictness.STRICT:
+        default_trend_threshold = 0.03
+        default_zone_influence = 0.8
+        default_min_hold = 4
+    elif config_dict['signal_strictness'] == SignalStrictness.RELAXED:
+        default_trend_threshold = 0.005
+        default_zone_influence = 0.3
+        default_min_hold = 1
+    else:  # BALANCED
+        default_trend_threshold = 0.015
+        default_zone_influence = 0.5
+        default_min_hold = 2
+    
+    # Add the parameters with defaults that match the strictness level
+    config_dict['trend_threshold_pct'] = trial.suggest_float(
+        'trend_threshold_pct', 0.005, 0.03, step=0.005, 
+        log=False  # Linear scale for better coverage
+    )
+    
+    config_dict['zone_influence'] = trial.suggest_float(
+        'zone_influence', 0.1, 0.9, step=0.1
+    )
+    
+    config_dict['min_hold_period'] = trial.suggest_int(
+        'min_hold_period', 1, 5
+    )
+        
     try:
-        # Create config from params
-        config_obj = EdgeConfig(**params)
+        # Create config object
+        config = EdgeConfig(**config_dict)
         
-        # Save original WFO parameters
-        original_wfo_train = wfo.WFO_TRAIN_POINTS
-        original_wfo_test = wfo.WFO_TEST_POINTS
-        original_wfo_step = wfo.STEP_POINTS
+        # Run WFO using the parameters it actually accepts
+        wfo_results = run_wfo(
+            data=data,      # Pre-fetched data
+            config=config,  # Configuration with parameters
+            n_splits=n_splits,  # Number of WFO splits
+            symbol=symbol,     # Symbol for reporting
+            timeframe=timeframe  # Timeframe for reporting
+            # Note: train_points and test_points will be used internally by run_wfo
+            # based on the WFO constants that we modified at the beginning of this function
+        )
         
-        original_utils_train = wfo_utils.WFO_TRAIN_POINTS
-        original_utils_test = wfo_utils.WFO_TEST_POINTS
-        original_utils_step = wfo_utils.STEP_POINTS
+        # Extract combined metrics from results
+        combined_metrics = wfo_results['combined_metrics']
         
-        # Override WFO parameters for this run
-        wfo.WFO_TRAIN_POINTS = train_points
-        wfo.WFO_TEST_POINTS = test_points
-        wfo.STEP_POINTS = step_points
+        if not combined_metrics:
+            # Failed WFO run
+            return -100.0  # Very negative value to indicate failure
         
-        wfo_utils.WFO_TRAIN_POINTS = train_points
-        wfo_utils.WFO_TEST_POINTS = test_points
-        wfo_utils.STEP_POINTS = step_points
+        # Check for NaN or zero values in critical metrics
+        sharpe_ratio = combined_metrics.get('sharpe_ratio', 0.0)
+        if pd.isna(sharpe_ratio) or sharpe_ratio == 0.0:
+            return -50.0  # Negative value to indicate bad metrics
         
-        try:
-            # Run WFO with these parameters
-            results, portfolios, best_params = run_wfo(
-                symbol=symbol,
-                timeframe=timeframe,
-                data=data,
-                config=config_obj,
-                n_splits=n_splits,
-                n_jobs=1  # Use single process within Optuna
-            )
-            
-            # Extract different metrics from results
-            sharpe_ratios = [res.get('test_sharpe_ratio', float('-inf')) for res in results]
-            returns = [res.get('test_return_pct', 0.0) for res in results]
-            win_rates = [res.get('test_win_rate', 0.0) for res in results]
-            trade_counts = [res.get('test_trade_count', 0) for res in results]
-            
-            # Check if we have any valid metrics
-            valid_sharpes = [s for s in sharpe_ratios if s != float('-inf') and not np.isnan(s)]
-            valid_returns = [r for r in returns if r != float('-inf') and not np.isnan(r)]
-            
-            # Calculate overall score based on available metrics
-            if len(valid_sharpes) > 0:
-                # Ideal case: We have valid Sharpe ratios
-                avg_sharpe = np.mean(valid_sharpes)
-                stability_ratio = len(valid_sharpes) / len(sharpe_ratios)
-                score = avg_sharpe * stability_ratio
-            elif sum(trade_counts) > 0:
-                # Less ideal: At least we have some trades, use returns
-                avg_return = np.mean([r for r, c in zip(returns, trade_counts) if c > 0] or [0])
-                avg_win_rate = np.mean([w for w, c in zip(win_rates, trade_counts) if c > 0] or [0.5])
-                # Construct a score that prefers higher returns and win rates
-                score = (avg_return * 0.01) * (avg_win_rate * 2)  # Scale to be in a similar range as Sharpe
-                stability_ratio = sum(1 for c in trade_counts if c > 0) / len(trade_counts)
+        # Calculate trades per month (to avoid strategies that hardly trade)
+        n_trades = combined_metrics.get('n_trades', 0)
+        backtest_days = len(data) / 24  # Assuming hourly data
+        trades_per_month = (n_trades / backtest_days) * 30  # 30 days in a month
+        
+        # Calculate trade rate penalty
+        # - Too few trades (<1 per month) -> significant penalty
+        # - Reasonable trade rate (1-10 per month) -> no penalty or slight bonus
+        # - Too many trades (>10 per month) -> increasing penalty with trade frequency
+        trade_rate_score = 0.0
+        if trades_per_month < 1.0:
+            trade_rate_score = -5.0 * (1.0 - trades_per_month)  # Penalize for too few trades
+        elif trades_per_month <= 10.0:
+            trade_rate_score = 0.2  # Small bonus for optimal trading frequency
+        else:
+            trade_rate_score = -0.2 * (trades_per_month - 10.0)  # Penalize for too many trades
+        
+        # Calculate win rate penalty
+        win_rate = combined_metrics.get('win_rate', 0.0)
+        win_rate_penalty = 0.0
+        if win_rate < 0.4:
+            win_rate_penalty = -10.0 * (0.4 - win_rate)  # Significant penalty for poor win rates
+        
+        # Calculate drawdown penalty
+        max_drawdown = combined_metrics.get('max_drawdown', 1.0)
+        drawdown_penalty = 0.0
+        if max_drawdown > 0.2:  # 20% drawdown threshold
+            drawdown_penalty = -5.0 * (max_drawdown - 0.2)  # Increasing penalty for large drawdowns
+        
+        # Calculate profit factor bonus
+        profit_factor = combined_metrics.get('profit_factor', 1.0)
+        profit_factor_bonus = 0.0
+        if profit_factor > 1.5:  # Good profit factor
+            profit_factor_bonus = 0.5 * (profit_factor - 1.5)  # Bonus for good profit factor
+        
+        # Calculate consistency score
+        splits_return = wfo_results.get('splits_return', [])
+        if len(splits_return) > 1:
+            returns_std = np.std(splits_return)
+            returns_mean = np.mean(splits_return)
+            if returns_mean > 0 and returns_std > 0:
+                # Lower coefficient of variation indicates more consistent returns
+                cv = returns_std / returns_mean
+                consistency_score = 1.0 / (1.0 + cv) - 0.5  # Range: -0.5 to 0.5
             else:
-                # No valid trades at all
-                logger.warning(f"Trial {trial.number}: No valid trades generated with these parameters")
-                # Return a small negative value so it's not completely rejected but ranked low
-                return -1.0
-            
-            # Store additional info in trial
-            trial.set_user_attr('valid_splits', len(valid_sharpes))
-            trial.set_user_attr('total_splits', len(sharpe_ratios))
-            trial.set_user_attr('stability', stability_ratio)
-            trial.set_user_attr('avg_sharpe', np.mean(valid_sharpes) if valid_sharpes else float('nan'))
-            trial.set_user_attr('avg_return', np.mean(valid_returns) if valid_returns else float('nan'))
-            trial.set_user_attr('total_trades', sum(trade_counts))
-            
-            logger.info(f"Trial {trial.number}: score={score:.4f}, "
-                      f"stability={stability_ratio:.2f}, "
-                      f"trades={sum(trade_counts)}")
-            
-            return score
-            
-        finally:
-            # Restore original parameters
-            wfo.WFO_TRAIN_POINTS = original_wfo_train
-            wfo.WFO_TEST_POINTS = original_wfo_test
-            wfo.STEP_POINTS = original_wfo_step
-            
-            wfo_utils.WFO_TRAIN_POINTS = original_utils_train
-            wfo_utils.WFO_TEST_POINTS = original_utils_test
-            wfo_utils.STEP_POINTS = original_utils_step
-            
+                consistency_score = -0.5  # Penalize negative or zero mean returns
+        else:
+            consistency_score = 0.0  # Neutral if only one split
+        
+        # Calculate number of consecutive losing splits
+        losing_splits = [r < 0 for r in splits_return]
+        max_consecutive_losses = 0
+        current_streak = 0
+        for is_loss in losing_splits:
+            if is_loss:
+                current_streak += 1
+                max_consecutive_losses = max(max_consecutive_losses, current_streak)
+            else:
+                current_streak = 0
+                
+        consecutive_loss_penalty = -0.3 * max_consecutive_losses
+        
+        # Combine all components
+        penalized_sharpe = (
+            sharpe_ratio +          # Base score
+            trade_rate_score +      # Trade frequency adjustment
+            win_rate_penalty +      # Win rate quality
+            drawdown_penalty +      # Drawdown risk
+            profit_factor_bonus +   # Profit factor quality
+            consistency_score +     # Consistency across splits
+            consecutive_loss_penalty # Penalty for consecutive losses
+        )
+        
+        # Log the results
+        logger.info(f"Trial {trial.number}: penalized_sharpe={penalized_sharpe:.4f}, " 
+                   f"sharpe={sharpe_ratio:.2f}, trades={n_trades}")
+        
+        return penalized_sharpe
+    
     except Exception as e:
-        logger.error(f"Error in trial {trial.number}: {e}")
-        return float('-inf')
+        logger.error(f"Error in objective function: {e}")
+        return -10.0  # Negative value to indicate error
+        
+    finally:
+        # Restore original WFO parameters
+        if original_wfo_train is not None and hasattr(wfo, 'WFO_TRAIN_POINTS'):
+            wfo.WFO_TRAIN_POINTS = original_wfo_train
+        if original_wfo_test is not None and hasattr(wfo, 'WFO_TEST_POINTS'):
+            wfo.WFO_TEST_POINTS = original_wfo_test
+        if original_wfo_step is not None and hasattr(wfo, 'STEP_POINTS'):
+            wfo.STEP_POINTS = original_wfo_step
+        
+        # Restore original WFO utils parameters
+        if original_utils_train is not None and hasattr(wfo_utils, 'WFO_TRAIN_POINTS'):
+            wfo_utils.WFO_TRAIN_POINTS = original_utils_train
+        if original_utils_test is not None and hasattr(wfo_utils, 'WFO_TEST_POINTS'):
+            wfo_utils.WFO_TEST_POINTS = original_utils_test
+        if original_utils_step is not None and hasattr(wfo_utils, 'STEP_POINTS'):
+            wfo_utils.STEP_POINTS = original_utils_step
 
 
 def save_study_visualizations(study, study_name):
@@ -333,6 +443,133 @@ def save_results(result, study_name):
     logger.info(f"Results saved to {json_file}")
 
 
+def run_optuna_optimization(data, symbol, timeframe, n_trials=100, timeout=3600, n_splits=3, train_days=30, test_days=15,
+                           signal_strictness=None, trend_threshold_pct=None, zone_influence=None, min_hold_period=None):
+    """
+    Run Optuna optimization with support for asset-specific configuration.
+    
+    This function is designed to work seamlessly with the asset profiles system,
+    allowing for customized signal generation parameters for each asset based on
+    its volatility profile.
+    
+    Args:
+        data: OHLCV DataFrame (already fetched)
+        symbol: Trading symbol
+        timeframe: Timeframe
+        n_trials: Number of trials
+        timeout: Timeout in seconds
+        n_splits: Number of WFO splits
+        train_days: Training window size in days
+        test_days: Testing window size in days
+        signal_strictness: Optional asset-specific signal strictness level
+        trend_threshold_pct: Optional asset-specific trend threshold percentage
+        zone_influence: Optional asset-specific zone influence factor
+        min_hold_period: Optional asset-specific minimum holding period
+        
+    Returns:
+        Dict with optimization results
+    """
+    try:
+        # Ensure output directories exist
+        ensure_directories()
+        
+        # Calculate WFO parameters
+        train_points, test_points, step_points = calculate_wfo_parameters(
+            timeframe, train_days, test_days
+        )
+        
+        # Log optimization parameters
+        logger.info(f"Starting optimization for {symbol} ({timeframe})")
+        logger.info(f"WFO parameters: {train_points} train points, "
+                   f"{test_points} test points, {step_points} step points")
+        logger.info(f"Using {n_splits} splits, {n_trials} trials, {timeout}s timeout")
+        
+        # Log asset-specific parameters if provided
+        asset_specific_params = {}
+        if signal_strictness is not None:
+            asset_specific_params['signal_strictness'] = signal_strictness
+            logger.info(f"Using asset-specific signal strictness: {signal_strictness}")
+        if trend_threshold_pct is not None:
+            asset_specific_params['trend_threshold_pct'] = trend_threshold_pct
+            logger.info(f"Using asset-specific trend threshold: {trend_threshold_pct}")
+        if zone_influence is not None:
+            asset_specific_params['zone_influence'] = zone_influence
+            logger.info(f"Using asset-specific zone influence: {zone_influence}")
+        if min_hold_period is not None:
+            asset_specific_params['min_hold_period'] = min_hold_period
+            logger.info(f"Using asset-specific min hold period: {min_hold_period}")
+        
+        # Create unique study name
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        study_name = f"{symbol}_{timeframe}_train{train_days}_test{test_days}_{timestamp}"
+        
+        # Create Optuna study
+        study = optuna.create_study(direction="maximize", study_name=study_name)
+        
+        # Modify objective function to incorporate asset-specific parameters
+        def asset_specific_objective(trial):
+            # Call the main objective function with asset-specific parameter hints
+            base_objective = objective(trial, data, train_points, test_points, 
+                                      step_points, symbol, timeframe, n_splits)
+            
+            # If we have asset-specific parameters, give a bonus to trials that use them
+            if asset_specific_params and hasattr(trial, 'params'):
+                bonus = 0.0
+                for param, value in asset_specific_params.items():
+                    if param in trial.params and trial.params[param] == value:
+                        # Small bonus for following asset-specific recommendations
+                        bonus += 0.01
+                return base_objective + bonus
+            
+            return base_objective
+        
+        # Run optimization
+        study.optimize(asset_specific_objective, n_trials=n_trials, timeout=timeout)
+        
+        # Get best parameters and value
+        best_params = study.best_params
+        best_value = study.best_value
+        
+        # Incorporate asset-specific parameters into best_params for reporting
+        for param, value in asset_specific_params.items():
+            if param not in best_params:
+                best_params[param] = value
+        
+        # Log best results
+        logger.info(f"Optimization completed with best value: {best_value}")
+        logger.info(f"Best parameters: {best_params}")
+        
+        # Save visualizations
+        save_study_visualizations(study, study_name)
+        
+        # Build result dictionary
+        result = {
+            "status": "success",
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "train_days": train_days,
+            "test_days": test_days,
+            "study_name": study_name,
+            "best_value": best_value,
+            "best_params": best_params,
+            "n_trials": n_trials,
+            "completed_trials": len(study.trials),
+            "timestamp": datetime.datetime.now().isoformat(),
+            "asset_specific_params": asset_specific_params
+        }
+        
+        # Save results
+        save_results(result, study_name)
+        
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error during optimization: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"status": "failed", "error": str(e)}
+
+
 def run_optimization(symbol, timeframe, train_days, test_days, n_trials=100, n_splits=3, timeout=3600):
     """
     Run Optuna optimization for a specific configuration.
@@ -342,7 +579,7 @@ def run_optimization(symbol, timeframe, train_days, test_days, n_trials=100, n_s
         timeframe: Timeframe
         train_days: Training window size in days
         test_days: Testing window size in days
-        n_trials: Number of trials to run
+        n_trials: Number of trials
         n_splits: Number of WFO splits
         timeout: Timeout in seconds
         

@@ -2,6 +2,79 @@
 
 This log tracks significant changes, improvements, and lessons learned during the development and optimization of the WFO runner and associated trading strategies.
 
+## Session 2025-04-28: Batch Optimizer Integration Fix
+
+### Issues Fixed
+
+- Fixed the `run_optuna_optimization` import error in batch optimizer by implementing a proper function with asset-specific parameter support
+- Corrected parameter passing between batch optimizer and the optimization functions
+- Fixed parameter names in function calls to match actual function signatures
+- Improved WFO parameter handling and testing mode toggle reliability
+- Added support for asset-specific signal parameters in optimization runs
+
+### Known Issues
+
+- The objective function still has a tuple indexing issue where it tries to access the WFO results with string keys
+- Pydantic V1-style `@validator` decorators need to be migrated to V2-style `@field_validator` for future compatibility
+- Visualization errors during optimization process indicate potential data format issues
+
+### Next Steps
+
+1. Fix tuple indexing in objective function to properly extract metrics from WFO results
+2. Run complete optimization with multiple assets to verify asset-specific parameters work correctly
+3. Update Pydantic validators to V2 style to eliminate deprecation warnings
+4. Use validation metrics to analyze optimization results and tune parameter selection
+5. Add error handling to handle invalid or incomplete WFO results
+
+## Session 2023-04-28: Asset-Specific Signal Optimization and Validation Metrics
+
+### Goal
+
+Implement asset-specific signal strictness and volatility profiling for the Edge Multi-Factor strategy, enabling per-asset configuration, robust batch optimization, and enhanced validation metrics.
+
+### Changes Made
+
+1. **Asset Volatility Profiling System**
+   - Created a new `asset_profiles.py` module to analyze and classify cryptocurrencies by volatility characteristics
+   - Implemented the `VolatilityProfile` enum (LOW, MEDIUM, HIGH, EXTREME) for asset classification
+   - Added the `AssetConfig` Pydantic model to store asset-specific parameters
+   - Developed functions to analyze historical data and determine appropriate signal parameters
+
+2. **Adaptive Signal Configuration**
+   - Implemented dynamic signal parameter recommendations based on volatility profiles
+   - Created storage/retrieval system for asset-specific configurations
+   - Added preconfigured profiles for common cryptocurrencies (BTC, ETH, SOL, etc.)
+
+3. **Batch Optimization Integration**
+   - Updated `batch_optuna_optimizer.py` to leverage asset-specific configurations
+   - Added CLI parameters to control asset profiling features
+   - Ensured optimization trials use appropriate signal parameters based on asset volatility
+
+4. **Enhanced Validation Metrics**
+   - Created new `validation_metrics.py` module with advanced evaluation metrics
+   - Implemented signal quality assessment beyond basic profit metrics
+   - Added parameter stability analysis to evaluate consistency across optimizations
+   - Developed statistical significance testing for strategy variants
+   - Created regime-based robustness evaluation
+
+5. **Comprehensive Testing**
+   - Added unit tests for asset profiles functionality
+   - Added unit tests for validation metrics
+
+### Benefits
+
+- More appropriate signal generation based on each cryptocurrency's unique volatility characteristics
+- Improved optimization results through asset-specific parameter tuning
+- Better signal quality evaluation with metrics focused on consistency and robustness
+- Statistical validation of parameter stability across different market regimes
+
+### Next Steps
+
+1. Run large-scale batch optimization using the new asset-specific configuration system
+2. Conduct comparative analysis of performance across different assets and timeframes
+3. Refine volatility thresholds based on optimization results
+4. Implement automated periodic re-profiling of assets to adapt to changing market conditions
+
 ## Session: 2025-04-28 (Part 11: WFO Evaluation Integration with Balanced Signals)
 
 **Goal:** Integrate the balanced signal generation approach into the WFO evaluation pipeline for seamless optimization
