@@ -12,7 +12,7 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - [ ] Create asset-specific signal configurations based on volatility profiles.
 - [ ] Implement improved validation metrics to better evaluate signal quality.
 
-## Current Priorities (as of 2025-04-29)
+## Current Priorities (as of 2025-04-30)
 
 1. **Regime-Aware Trading & Visualization:**
    * [x] Enhance signals_integration.py to adapt trading parameters based on market regime
@@ -20,10 +20,13 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [x] Implement parameter modification logic for trending vs. ranging markets
    * [x] Add visual comparison tools to validate regime-aware parameter adaptation
    * [x] Create summary statistics to quantify signal differences by regime
-   * [ ] Implement position sizing that adapts to detected market regime
-   * [ ] Add unit tests for regime-aware signal generation
+   * [x] Implement position sizing that adapts to detected market regime
+   * [x] Add unit tests for regime-aware position sizing
+   * [x] Integrate position sizing into backtest and WFO runners
    * [ ] Run optimization with regime-aware settings to quantify performance improvements
    * [ ] Create real-data backtests comparing regime-aware vs. standard approaches
+   * [ ] Implement adaptive stop-loss using regime information
+   * [ ] Create dynamic trailing stops that adjust based on volatility and regime
 
 2. **Leverage Robust Architecture:**
    * [x] Create comprehensive utilities module with data validation and error handling
@@ -54,6 +57,9 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [x] Fix performance metrics calculation for vectorbtpro compatibility
    * [x] Verify trade count, win rate, and return metrics are reported correctly
    * [x] Run real-data tests with 1-hour timeframe for BTC-USD
+   * [x] Implement fallback signal generation for guaranteed trade execution
+   * [x] Ensure robust indicator calculation with proper logging
+   * [x] Fix parameter propagation through the evaluation pipeline
    * [ ] Run comparative tests with original Edge strategy implementation
    * [ ] Perform multi-asset testing across BTC, ETH, SOL, and other major assets
    * [ ] Create documentation on performance characteristics compared to original
@@ -68,6 +74,12 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [x] Fix parameter propagation to ensure all required attributes are present in temp config objects
    * [x] Complete end-to-end integration testing with synthetic data
    * [x] Verify full pipeline operation with actual market data
+   * [x] Fix preliminary regime analysis to properly calculate indicators first
+   * [x] Add ULTRA_RELAXED signal mode for guaranteed trade generation in WFO
+   * [x] Implement fallback mechanisms for no-trade scenarios
+   * [x] Fix duplicate ADX and directional indicator calculations
+   * [x] Add robust error handling and logging throughout WFO pipeline
+   * [x] Integrate advanced position sizing into WFO evaluation process
 
 2. **Regime-Aware Parameter Optimization:**
    * [ ] Complete the regime profiling system
@@ -215,6 +227,33 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - How can we fix the portfolio parameter warning without compromising strategy performance?
 - Would a hybrid approach combining regime-specific parameters and ensemble methods yield even better results?
 
+## Next Implementation Priorities (as of 2025-04-29 Late Night)
+
+1. **Position Sizing Integration**
+   * [x] Implement advanced position sizing module with risk-based approach
+   * [x] Add regime-aware position sizing multipliers
+   * [x] Create ATR-based volatility adjustment for position sizing
+   * [x] Integrate zone confidence into position sizing calculations
+   * [x] Add Kelly Criterion option for mathematical optimization
+   * [x] Create comprehensive test suite for position sizing module
+   * [ ] Integrate position sizing into backtest runner
+   * [ ] Integrate position sizing into WFO evaluation module
+   * [ ] Test position sizing impact on risk-adjusted returns
+   * [ ] Visualize position size differences across market regimes
+
+2. **Risk Management Module**
+   * [ ] Create dynamic drawdown protection with adjustable thresholds
+   * [ ] Implement regime-aware stop-loss calculation
+   * [ ] Add trailing stop functionality with ATR-based distances
+   * [ ] Implement correlation-based exposure limits for multi-asset portfolios
+   * [ ] Add maximum drawdown circuit breakers
+
+3. **Portfolio Optimization**
+   * [ ] Implement asset allocation based on regime-specific performance
+   * [ ] Create correlation-aware position sizing
+   * [ ] Add volatility targeting for portfolio-level risk management
+   * [ ] Implement dynamic rebalancing based on regime shifts
+
 ## Longer-Term Goals
 
 *   **Implement Strategy Refactoring Plan:** Continue following the steps outlined in `docs/strategy_refactoring_plan.md` to modularize the strategy code (indicators, signals, regime, config, etc.).
@@ -244,7 +283,8 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
   - Implement system monitoring and error handling
   - Build portfolio allocation layer
   - Add real-time regime detection for live trading ✅ (implemented enhanced regime detection)
-  - Implement regime-specific position sizing and risk management
+  - Implement regime-specific position sizing ✅ (implemented integrated position sizing module)
+  - Add comprehensive risk management system with drawdown protection
 
 - **Advanced vectorbtpro Integration**
   - **Purged Walk-Forward Cross-Validation:** Implement WFO with purging/embargoing (`Splitter.from_purged_kfold`) for improved robustness.

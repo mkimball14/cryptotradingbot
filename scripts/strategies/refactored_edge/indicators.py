@@ -109,6 +109,17 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         indicators_df['atr_stops'] = talib.ATR(high, low, close, timeperiod=config.atr_window)
         indicators_df['atr'] = indicators_df['atr_stops'].copy()  # Add atr column for regime detection
         
+        # Add ADX and Directional Indicators for regime detection (critical for advanced regime detection)
+        adx_window = getattr(config, 'adx_window', 14)  # Default to 14 if not specified
+        indicators_df['adx'] = talib.ADX(high, low, close, timeperiod=adx_window)
+        indicators_df['plus_di'] = talib.PLUS_DI(high, low, close, timeperiod=adx_window)
+        indicators_df['minus_di'] = talib.MINUS_DI(high, low, close, timeperiod=adx_window)
+        
+        # Log indicator values for debugging
+        logger.debug(f"ADX calculation successful: range [{indicators_df['adx'].min():.1f} - {indicators_df['adx'].max():.1f}]")
+        logger.debug(f"PLUS_DI calculation successful: range [{indicators_df['plus_di'].min():.1f} - {indicators_df['plus_di'].max():.1f}]")
+        logger.debug(f"MINUS_DI calculation successful: range [{indicators_df['minus_di'].min():.1f} - {indicators_df['minus_di'].max():.1f}]")
+        
         # Get atr_window_sizing with proper fallback handling using getattr
         atr_window_sizing = getattr(config, 'atr_window_sizing', config.atr_window)
         if atr_window_sizing != config.atr_window:
@@ -117,12 +128,6 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
             logger.debug(f"Using atr_window_sizing={atr_window_sizing} (same as atr_window)")
             
         indicators_df['atr_sizing'] = talib.ATR(high, low, close, timeperiod=atr_window_sizing)
-        
-        # Add ADX calculation for market regime detection
-        indicators_df['adx'] = talib.ADX(high, low, close, timeperiod=config.adx_window if hasattr(config, 'adx_window') else 14)
-        # Also add +DI and -DI for additional directional indicators if needed
-        indicators_df['plus_di'] = talib.PLUS_DI(high, low, close, timeperiod=config.adx_window if hasattr(config, 'adx_window') else 14)
-        indicators_df['minus_di'] = talib.MINUS_DI(high, low, close, timeperiod=config.adx_window if hasattr(config, 'adx_window') else 14)
 
     except Exception as e:
         logger.error(f"Error calculating standard indicators: {e}", exc_info=True)
