@@ -48,13 +48,13 @@ Create unit tests for individual modules (indicators, signals, utils). Run exist
 ### Details:
 
 
-## 6. Update WFO Runner Script [pending]
+## 6. Update WFO Runner Script [done]
 ### Dependencies: 13.2, 13.3, 13.4, 13.5
 ### Description: Refactor scripts/strategies/refactored_edge/wfo_runner.py to import and use the new modular components (config, indicators, signals, utils).
 ### Details:
 
 
-## 7. Update/Create Backtest Runner [pending]
+## 7. Update/Create Backtest Runner [done]
 ### Dependencies: 13.2, 13.3, 13.4, 13.5
 ### Description: Update the existing backtest_runner.py or create a new one specifically for the refactored strategy, ensuring it uses the new modules.
 ### Details:
@@ -66,7 +66,7 @@ Create unit tests for individual modules (indicators, signals, utils). Run exist
 ### Details:
 
 
-## 9. Verify Refactored Strategy Equivalence [pending]
+## 9. Verify Refactored Strategy Equivalence [in-progress]
 ### Dependencies: 13.6, 13.7, 13.8
 ### Description: Run the updated backtest_runner.py and wfo_runner.py. Compare performance metrics and trade outputs against the original strategy baseline to ensure functional equivalence after refactoring.
 ### Details:

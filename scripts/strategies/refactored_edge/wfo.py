@@ -395,13 +395,22 @@ def run_wfo(symbol=SYMBOL, timeframe=TIMEFRAME, start_date=START_DATE, end_date=
         
         # --- 4e. Save Results for this Split ---
         # Compile the results for this split
+        # Handle the case where best_params might be None (no valid parameter combinations found)
+        params_str = "No valid parameters found"
+        if best_params is not None:
+            try:
+                params_str = str({k: v for k, v in best_params.items() if not k.startswith('_')})
+            except (AttributeError, TypeError) as e:
+                print(f"Error formatting best_params: {e}")
+                params_str = str(best_params)
+        
         split_results = {
             'split': split_num + 1,
             'train_start': train_start_date if 'train_start_date' in locals() else None,
             'train_end': train_end_date if 'train_end_date' in locals() else None,
             'test_start': test_start_date if 'test_start_date' in locals() else None,
             'test_end': test_end_date if 'test_end_date' in locals() else None,
-            'best_params': str({k: v for k, v in best_params.items() if not k.startswith('_')}),
+            'best_params': params_str,
             'train_return': train_return,
             'train_sharpe': train_sharpe,
             'train_max_drawdown': train_max_drawdown,

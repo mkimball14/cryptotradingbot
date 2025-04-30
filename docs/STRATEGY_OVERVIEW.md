@@ -40,15 +40,19 @@ Signal generation follows a multi-layered approach:
 
 The strategy employs multi-layered risk controls:
 
-1. Dynamic position sizing based on:
+1. **Advanced Position Sizing** based on multiple factors:
    - Account risk percentage (default: 1-2%)
    - Volatility adjustment (ATR-based)
-   - Market regime consideration
+   - Market regime consideration (larger in trending, smaller in ranging)
+   - Zone confidence integration (better entries get larger sizes)
+   - Optional Kelly Criterion optimization for long-term expected value
+   - Risk-based calculation using stop-loss distance
 
-2. Stop-loss mechanisms:
+2. **Comprehensive Stop-Loss System**:
    - Fixed percentage stops
-   - ATR-based stops
+   - ATR-based stops (dynamically calculated)
    - Opposing zone triggers
+   - Regime-specific trail distances
 
 ### 1.4 System Architecture
 
@@ -139,6 +143,7 @@ scripts/strategies/refactored_edge/
 ├── test_signals.py          # Relaxed signal generation logic
 ├── balanced_signals.py      # Balanced signal generation framework
 ├── signals_integration.py   # Unified interface for all signal modes
+├── position_sizing.py       # Advanced position sizing with regime awareness
 ├── wfo.py                   # WFO orchestration and data management
 ├── wfo_evaluation.py        # Strategy performance evaluation
 ├── config.py                # Parameter configuration and defaults
@@ -288,9 +293,28 @@ Throughout development, several challenges were addressed:
 
 ## 6. Future Directions
 
-### 6.1 Planned Enhancements
+### 6.1 Recent Enhancements & Planned Features
 
-Several improvements are planned for future versions:
+#### Recently Implemented (v0.5.7):
+
+1. **Comprehensive Strategy Evaluation Framework**:
+   - Modular framework for rigorous comparison of standard vs. regime-aware parameter adaptation
+   - Statistical validation with significance testing, effect size calculation, and parameter stability analysis
+   - Interactive Plotly visualizations for performance comparison, regime breakdown, and parameter stability
+   - HTML report generation with executive summary, detailed metrics, and visualization links
+   - Fixed EdgeConfig Pydantic model to support parameter combinations for WFO compatibility
+
+#### Recently Implemented (v0.5.6):
+
+1. **Advanced Position Sizing Framework**:
+   - Comprehensive position sizing module with multiple integration points
+   - Dynamic risk-based sizing that adapts to market conditions
+   - Regime-aware sizing multipliers (larger in trending, smaller in ranging markets)
+   - ATR-based volatility adjustment to reduce risk in choppy markets
+   - Zone confidence integration to increase size when entry quality is high
+   - Optional Kelly Criterion integration for mathematical position optimization
+
+#### Planned for Future Versions:
 
 1. **Asset-Specific Configuration**:
    - Custom signal strictness levels per asset
@@ -334,6 +358,7 @@ Ongoing research focuses on several key questions:
 | `signals_integration.py` | Unified signal interface | `generate_signals()` |
 | `config.py` | Parameter management | `EdgeConfig class`, `OPTIMIZATION_PARAMETER_GRID` |
 | `zones.py` | Supply/Demand zone detection | `identify_zones()`, `price_in_zone()` |
+| `position_sizing.py` | Advanced position sizing | `calculate_integrated_position_size()`, `calculate_risk_based_size()`, `get_regime_position_multiplier()` |
 
 ### 7.2 Optimization Framework
 

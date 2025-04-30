@@ -346,8 +346,9 @@ def objective(trial, data, train_points, test_points, step_points, symbol, timef
             config_dict = {
                 # RSI parameters
                 'rsi_window': trial.suggest_int('rsi_window', 7, 21),
-                'rsi_entry_threshold': trial.suggest_int('rsi_entry_threshold', 20, 40),
-                'rsi_exit_threshold': trial.suggest_int('rsi_exit_threshold', 60, 80),
+                # Refined RSI threshold ranges based on analysis of successful trades
+                'rsi_entry_threshold': trial.suggest_int('rsi_entry_threshold', 30, 40),  # Focused on optimal 30-40 range
+                'rsi_exit_threshold': trial.suggest_int('rsi_exit_threshold', 60, 70),  # Focused on optimal 60-70 range,
                 
                 # Bollinger Bands parameters
                 'bb_window': trial.suggest_int('bb_window', 10, 30),

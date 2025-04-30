@@ -9,21 +9,163 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - [x] Investigate and resolve why training metrics (`train_return`, `train_sharpe`, `train_max_drawdown`) are missing from `wfo_results.csv`.
 - [x] Continue automation loop: after fixing metrics, proceed with diagnostics and further enhancements as part of the self-improving workflow.
 - [x] Implement balanced signal generation approach with configurable strictness levels.
+- [x] Fix WFO debugging issues and ensure successful trade generation (added ULTRA_RELAXED mode).
+- [x] Fix duplicate ADX indicator calculations causing conflicts in indicators.py.
+- [x] Enhance regime detection process with proper error handling and fallbacks.
+- [x] Fix the detect_market_regimes function issue in the regime module.
+- [x] Create a more formal implementation for ATR and regime data in position sizing.
+- [x] Test with less strict signal generation criteria as default.
+- [x] Reduce WFO window sizes to match available data.
+- [x] Test with broader parameter ranges for entry/exit criteria.
+- [x] Fix EdgeConfig model to support param_combinations attribute for comprehensive evaluation.
+
+### Comprehensive Evaluation Framework Enhancements (Immediate Priority)
+
+#### Phase 1: Quick Framework Validation
+- [ ] Add parameter limiting feature (`--max-params` flag) to comprehensive_evaluation.py
+- [ ] Implement parameter sampling logic when combinations exceed the limit
+- [ ] Run limited local test with constrained parameters and date range
+- [ ] Verify reports, visualizations, and statistics are generated correctly
+- [ ] Confirm both standard and regime-aware evaluations complete successfully
+- [ ] Check HTML report formatting and content completeness
+
+#### Phase 2: Framework Robustness Enhancements
+- [ ] Implement checkpointing mechanism after each WFO split
+- [ ] Create resume capability to continue from last checkpoint
+- [ ] Save interim results to disk at regular intervals
+- [ ] Add periodic garbage collection for memory management
+- [ ] Implement memory monitoring to adjust parameter sampling dynamically
+- [ ] Create resource-aware execution mode with adaptive behavior
+- [ ] Implement sequential parameter optimization per split
+- [ ] Add parameter grid pruning based on early results
+
+#### Phase 3: Full Strategy Evaluation
+- [ ] Run comprehensive evaluation with full date range and optimized settings
+- [ ] Compare regime-aware vs. standard approach performance
+- [ ] Generate final report and visualizations
+- [ ] Implement strategy improvements based on evaluation insights
+
+- [ ] Investigate why standard signal generation creates no signals across all test periods.
+- [ ] Expand parameter grid testing with focus on RSI thresholds (30-40 for entries, 60-70 for exits).
+- [ ] Test regime adaptation with datasets showing clear trending and ranging periods.
+- [ ] Fine-tune dynamic position sizing with different risk percentages and ATR multipliers.
 - [ ] Create asset-specific signal configurations based on volatility profiles.
 - [ ] Implement improved validation metrics to better evaluate signal quality.
 
-## Current Priorities (as of 2025-04-29)
+## Strategy Performance Debug Results (2025-04-30)
 
-1. **Regime-Aware Trading & Visualization:**
+### 🔍 Critical Issues Identified
+
+1. **Signal Generation Problems:**
+   * Normal parameter settings generate insufficient or no signals across most data segments
+   * Strategy consistently falls back to ULTRA_RELAXED mode, which generates arbitrary signals
+   * Signal quality is poor with win rates of 29-52% across different segments
+   * Signal generation is heavily biased toward long signals (172 long vs 0 short)
+   * Type mismatches between float64 arrays and boolean values causing errors in signal logic
+
+2. **Missing/Incorrect Indicator Calculations:**
+   * `add_adx` function was missing from indicators.py
+   * ADX calculation errors causing regime detection failures
+   * ATR data missing for position sizing calculations
+   * Regime data missing or incorrect, causing defaults to be used
+
+3. **Strategy Performance Metrics:**
+   * Negative mean returns (-18.9%) in testing
+   * Very poor Sharpe ratio (-8.30)
+   * High max drawdown (21.1%)
+   * Anti-overfitting analysis shows poor robustness, stability, and consistency
+   * WFO runs now successfully complete but still show poor performance metrics
+
+### ✅ Fixes Implemented
+
+1. **Added the missing `add_adx` function** with robust error handling and NaN value handling
+2. **Enhanced signal generation logic** with improved entry/exit conditions and automatic progression through strictness levels (BALANCED → RELAXED → ULTRA_RELAXED)
+3. **Improved position sizing fallbacks** for missing ATR/regime data
+4. **Added more sophisticated short signal generation** to ULTRA_RELAXED mode
+5. **Fixed type mismatch errors in signal generation:**
+   * Replaced direct OR (`|`) operations with pandas `.combine(lambda x, y: x or y)` for type compatibility
+   * Added explicit boolean conversion for all signal generation conditions
+   * Protected ratio calculations against division by zero with `.replace(0, 0.0001)`
+   * Fixed logger configuration and imports in wfo_evaluation.py
+
+### 📈 Next Strategy Performance Improvement Steps
+
+1. **Signal Quality Enhancements:** ✅ (Partially Implemented)
+   * ✅ Implemented volatility-adjusted thresholds that adapt to changing market conditions
+   * ✅ Added enhanced exit logic with trailing stops, take-profit mechanisms, and time-based exits
+   * ✅ Added momentum reversal detection for better entry timing
+   * ✅ Enhanced regime-specific parameter adaptation with scaling based on regime strength
+   * Still needed: Further tuning of signal thresholds and better short signal generation
+
+2. **Exit Strategy Improvements:** ✅ (Implemented)
+   * ✅ Added trailing stops based on ATR and volatility
+   * ✅ Implemented take-profit logic with dynamic levels based on volatility
+   * ✅ Added time-based exits for stagnant trades (low volatility periods)
+   * ✅ Enhanced risk management with momentum acceleration detection
+   * Still needed: Parameter tuning for exit thresholds
+
+3. **Expanded Parameter Grid Testing:** ✅ (Implemented)
+   * ✅ Fixed VectorBTpro parameter interface for compatible grid generation
+   * ✅ Implemented configurable grid sizes (small, medium, large) with appropriate sampling
+   * ✅ Added robust parallelization for faster grid search using ProcessPoolEngine/ThreadPoolEngine
+   * ✅ Implemented caching mechanisms to reduce redundant calculations
+   * Still needed: Run separate parameter optimization for trending vs ranging regimes
+
+4. **Position Sizing Improvements:**
+   * Implement adaptive risk based on regime and signal strength
+   * Add drawdown-based risk reduction logic
+   * Test various ATR multipliers for stop placement
+   * Integrate Kelly Criterion with win rate estimation from historical performance
+
+## Current Priorities (as of 2025-04-30)
+
+1. **Enhanced Market Regime Detection & Adaptation:** ✅ (Implemented)
    * [x] Enhance signals_integration.py to adapt trading parameters based on market regime
    * [x] Create interactive regime-aware signal visualization tools using Plotly
    * [x] Implement parameter modification logic for trending vs. ranging markets
    * [x] Add visual comparison tools to validate regime-aware parameter adaptation
    * [x] Create summary statistics to quantify signal differences by regime
-   * [ ] Implement position sizing that adapts to detected market regime
-   * [ ] Add unit tests for regime-aware signal generation
+   * [x] Implement position sizing that adapts to detected market regime
+   * [x] Add unit tests for regime-aware position sizing
+   * [x] Integrate position sizing into backtest and WFO runners
+
+2. **VectorBTpro & Performance Optimization:** ✅ (Implemented)
+   * [x] Fix compatibility issues with VectorBTpro 2025.3.1 APIs
+   * [x] Implement proper parallelization using ProcessPoolEngine/ThreadPoolEngine
+   * [x] Add caching mechanisms for expensive operations
+   * [x] Create configurable performance settings (parallel mode, caching, chunking)
+   * [x] Ensure backward compatibility with robust fallbacks
+   
+3. **Advanced TA-Lib Integration:** ✅ (Implemented)
+   * [x] Create enhanced_indicators.py module with advanced TA-Lib pattern recognition
+   * [x] Implement multi-factor regime detection (VHF, Choppiness Index, ADX, patterns)
+   * [x] Add adaptive parameter mapping based on regime strength
+   * [x] Create transition detection for early adaptation to changing markets
+   * [x] Connect enhanced indicators to the signal generation pipeline
+
+## Next High-Priority Tasks (as of 2025-04-30)
+
+1. **Comprehensive Performance Evaluation:**
+   * [ ] Run full grid search with enhanced parameter grid and new regime detection
+   * [ ] Compare results of standard vs. regime-aware parameter adaptation
+   * [ ] Generate comprehensive performance reports with statistical validation
+   * [ ] Create visual comparisons of different strategy configurations
+
+2. **Signal Quality Enhancement:**
+   * [ ] Fine-tune pattern recognition thresholds for better entry/exit timing
+   * [ ] Create ensemble approach combining multiple pattern signals
+   * [ ] Implement time-series analysis for cyclical market behavior
+   * [ ] Test asymmetric parameters for long vs short signals
+
+3. **Cross-Asset Testing & Optimization:**
+   * [ ] Apply enhanced regime detection across multiple asset classes
+   * [ ] Create asset-specific parameter sets based on volatility profiles
+   * [ ] Test portfolio-level optimization with regime-aware allocation
+   * [ ] Implement market correlation analysis for risk management
    * [ ] Run optimization with regime-aware settings to quantify performance improvements
    * [ ] Create real-data backtests comparing regime-aware vs. standard approaches
+   * [ ] Implement adaptive stop-loss using regime information
+   * [ ] Create dynamic trailing stops that adjust based on volatility and regime
 
 2. **Leverage Robust Architecture:**
    * [x] Create comprehensive utilities module with data validation and error handling
@@ -54,6 +196,9 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [x] Fix performance metrics calculation for vectorbtpro compatibility
    * [x] Verify trade count, win rate, and return metrics are reported correctly
    * [x] Run real-data tests with 1-hour timeframe for BTC-USD
+   * [x] Implement fallback signal generation for guaranteed trade execution
+   * [x] Ensure robust indicator calculation with proper logging
+   * [x] Fix parameter propagation through the evaluation pipeline
    * [ ] Run comparative tests with original Edge strategy implementation
    * [ ] Perform multi-asset testing across BTC, ETH, SOL, and other major assets
    * [ ] Create documentation on performance characteristics compared to original
@@ -68,6 +213,12 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [x] Fix parameter propagation to ensure all required attributes are present in temp config objects
    * [x] Complete end-to-end integration testing with synthetic data
    * [x] Verify full pipeline operation with actual market data
+   * [x] Fix preliminary regime analysis to properly calculate indicators first
+   * [x] Add ULTRA_RELAXED signal mode for guaranteed trade generation in WFO
+   * [x] Implement fallback mechanisms for no-trade scenarios
+   * [x] Fix duplicate ADX and directional indicator calculations
+   * [x] Add robust error handling and logging throughout WFO pipeline
+   * [x] Integrate advanced position sizing into WFO evaluation process
 
 2. **Regime-Aware Parameter Optimization:**
    * [ ] Complete the regime profiling system
@@ -215,6 +366,33 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - How can we fix the portfolio parameter warning without compromising strategy performance?
 - Would a hybrid approach combining regime-specific parameters and ensemble methods yield even better results?
 
+## Next Implementation Priorities (as of 2025-04-29 Late Night)
+
+1. **Position Sizing Integration**
+   * [x] Implement advanced position sizing module with risk-based approach
+   * [x] Add regime-aware position sizing multipliers
+   * [x] Create ATR-based volatility adjustment for position sizing
+   * [x] Integrate zone confidence into position sizing calculations
+   * [x] Add Kelly Criterion option for mathematical optimization
+   * [x] Create comprehensive test suite for position sizing module
+   * [ ] Integrate position sizing into backtest runner
+   * [ ] Integrate position sizing into WFO evaluation module
+   * [ ] Test position sizing impact on risk-adjusted returns
+   * [ ] Visualize position size differences across market regimes
+
+2. **Risk Management Module**
+   * [ ] Create dynamic drawdown protection with adjustable thresholds
+   * [ ] Implement regime-aware stop-loss calculation
+   * [ ] Add trailing stop functionality with ATR-based distances
+   * [ ] Implement correlation-based exposure limits for multi-asset portfolios
+   * [ ] Add maximum drawdown circuit breakers
+
+3. **Portfolio Optimization**
+   * [ ] Implement asset allocation based on regime-specific performance
+   * [ ] Create correlation-aware position sizing
+   * [ ] Add volatility targeting for portfolio-level risk management
+   * [ ] Implement dynamic rebalancing based on regime shifts
+
 ## Longer-Term Goals
 
 *   **Implement Strategy Refactoring Plan:** Continue following the steps outlined in `docs/strategy_refactoring_plan.md` to modularize the strategy code (indicators, signals, regime, config, etc.).
@@ -244,7 +422,8 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
   - Implement system monitoring and error handling
   - Build portfolio allocation layer
   - Add real-time regime detection for live trading ✅ (implemented enhanced regime detection)
-  - Implement regime-specific position sizing and risk management
+  - Implement regime-specific position sizing ✅ (implemented integrated position sizing module)
+  - Add comprehensive risk management system with drawdown protection
 
 - **Advanced vectorbtpro Integration**
   - **Purged Walk-Forward Cross-Validation:** Implement WFO with purging/embargoing (`Splitter.from_purged_kfold`) for improved robustness.

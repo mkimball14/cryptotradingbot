@@ -227,4 +227,104 @@ def simplify_regimes(enhanced_regimes: pd.Series) -> pd.Series:
     return enhanced_regimes.map(lambda x: regime_mapping.get(x, x))
 
 
+def detect_market_regimes(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Analyzes market data and detects market regimes (trending vs ranging) for the entire dataset.
+    
+    This is a higher-level function that calculates necessary indicators if they don't exist
+    in the input data and returns a dataframe with regime classifications.
+    
+    Args:
+        data (pd.DataFrame): DataFrame containing OHLCV price data. Should include columns:
+                           'open', 'high', 'low', 'close', 'volume'
+    
+    Returns:
+        pd.DataFrame: DataFrame with the original data plus additional columns for regime information.
+                     Includes 'regime' and potentially 'regime_details' columns.
+    """
+    try:
+        # Ensure we have the required indicators to determine regimes
+        if 'adx' not in data.columns:
+            # Import the indicators module to calculate missing indicators
+            from scripts.strategies.refactored_edge import indicators
+            
+            # Calculate ADX and DI indicators if they don't exist
+            adx_window = 14  # Default ADX window
+            if 'adx' not in data.columns or 'plus_di' not in data.columns or 'minus_di' not in data.columns:
+                adx_data = indicators.add_adx(data, adx_window)
+                data['adx'] = adx_data['adx']
+                data['plus_di'] = adx_data['plus_di']
+                data['minus_di'] = adx_data['minus_di']
+                
+            # Calculate ATR if it doesn't exist
+            atr_window = 14  # Default ATR window
+            if 'atr' not in data.columns:
+                atr_data = indicators.add_atr(data, atr_window)
+                data['atr'] = atr_data['atr']
+        
+        # Determine market regimes using the advanced method
+        regimes = determine_market_regime_advanced(
+            adx=data['adx'],
+            plus_di=data['plus_di'],
+            minus_di=data['minus_di'],
+            atr=data['atr'],
+            close=data['close'],
+            high=data['high'],
+            low=data['low'],
+            volume=data.get('volume', None),  # Volume is optional
+            use_enhanced_classification=True
+        )
+        
+        # Add the regimes to the data
+        data['regime'] = regimes
+        
+        # Add simplified regimes (trending/ranging) for backward compatibility
+        data['regime_simple'] = simplify_regimes(regimes)
+        
+        # Calculate percentage of time in each regime type
+        regime_counts = data['regime_simple'].value_counts(normalize=True) * 100
+        regime_percents = {regime: f"{percent:.2f}%" for regime, percent in regime_counts.items()}
+        
+        # Add metadata about the regime distribution
+        data.attrs['regime_percentages'] = regime_percents
+        data.attrs['predominant_regime'] = regime_counts.idxmax()
+        
+        return data
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error detecting market regimes: {e}")
+        logger.info("Falling back to basic regime detection with ADX only")
+        
+        # Fallback to basic regime detection
+        try:
+            # Calculate ADX if it doesn't exist
+            if 'adx' not in data.columns:
+                from scripts.strategies.refactored_edge import indicators
+                adx_data = indicators.add_adx(data)
+                data['adx'] = adx_data['adx']
+            
+            # Use the simple regime detection method
+            data['regime'] = determine_market_regime(data['adx'])
+            data['regime_simple'] = data['regime']  # They're the same in this case
+            
+            # Calculate percentage of time in each regime type
+            regime_counts = data['regime'].value_counts(normalize=True) * 100
+            regime_percents = {regime: f"{percent:.2f}%" for regime, percent in regime_counts.items()}
+            
+            # Add metadata about the regime distribution
+            data.attrs['regime_percentages'] = regime_percents
+            data.attrs['predominant_regime'] = regime_counts.idxmax()
+            
+            return data
+        except Exception as nested_e:
+            logger.error(f"Fallback regime detection also failed: {nested_e}")
+            # Create default regime data
+            data['regime'] = pd.Series(MarketRegimeType.UNKNOWN, index=data.index)
+            data['regime_simple'] = pd.Series(MarketRegimeType.RANGING, index=data.index)  # Default to ranging when uncertain
+            data.attrs['regime_percentages'] = {MarketRegimeType.UNKNOWN: "100.00%"}
+            data.attrs['predominant_regime'] = MarketRegimeType.RANGING
+            return data
+
 print("Market regime functions loaded.")

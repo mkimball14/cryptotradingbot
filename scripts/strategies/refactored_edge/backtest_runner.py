@@ -44,6 +44,7 @@ from scripts.strategies.refactored_edge.utils import validate_dataframe, with_er
 from scripts.strategies.refactored_edge.asset_profiles import get_asset_specific_config
 from scripts.strategies.refactored_edge.wfo_utils import ensure_output_dir
 from scripts.strategies.refactored_edge.validation_metrics import calculate_performance_metrics
+from scripts.strategies.refactored_edge.position_sizing import calculate_integrated_position_size, get_regime_position_multiplier
 # ==============================================================================
 # Function Definitions
 # ==============================================================================
@@ -222,12 +223,14 @@ def generate_regime_aware_signals(data: pd.DataFrame, config: EdgeConfig) -> Tup
 def run_backtest(
     symbol: str = 'BTC-USD', 
     timeframe: str = '1h',
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: str = '2023-01-01',
+    end_date: str = '2023-04-01',
     initial_capital: float = 10000.0,
     fees: float = 0.001,  # 0.1% trading fee
     use_regime_filter: bool = True,
     signal_strictness: SignalStrictness = SignalStrictness.BALANCED,
+    use_dynamic_sizing: bool = True,  # Use the position sizing module
+    risk_percentage: float = 0.01,    # 1% risk per trade
     output_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -236,12 +239,14 @@ def run_backtest(
     Args:
         symbol: Trading symbol (e.g., 'BTC-USD')
         timeframe: Data granularity (e.g., '1h', '4h', '1d')
-        start_date: Start date in format 'YYYY-MM-DD' (default: 1 year ago)
-        end_date: End date in format 'YYYY-MM-DD' (default: today)
+        start_date: Start date in format 'YYYY-MM-DD'
+        end_date: End date in format 'YYYY-MM-DD'
         initial_capital: Initial capital for backtesting
         fees: Trading fees as a decimal (e.g., 0.001 = 0.1%)
         use_regime_filter: Whether to enable regime-aware signal adaptation
         signal_strictness: Strictness level for signal generation
+        use_dynamic_sizing: Whether to use dynamic position sizing (True/False)
+        risk_percentage: Risk percentage per trade (0.01 = 1%)
         output_dir: Directory to save backtest results (created if not existing)
         
     Returns:
@@ -332,21 +337,92 @@ def run_backtest(
         # 5. Get position sizing - fractional positions to use fixed percentage of capital per trade
         size = 0.95  # Use 95% of available capital per trade
         
-        # Create portfolio with proper signal tracking
-        portfolio = vbt.Portfolio.from_signals(
-            close=data['close'],
-            entries=entry_signals_adjusted,
-            exits=exit_signals_adjusted,
-            size=size,
-            freq=timeframe,   # Use provided timeframe directly
-            init_cash=initial_capital,
-            fees=fees,
-            sl_stop=sl_stop,  # Add Stop Loss if configured
-            tp_stop=tp_stop,  # Add Take Profit if configured
-            log=True,         # Enable logging for debugging
-            call_seq='auto'   # Let vectorbtpro determine optimal call sequence
-        )
-        
+        # Apply dynamic position sizing based on market regime and risk parameters
+        try:
+            # Initialize position sizes array with default values
+            close_series = data['close']
+            size_array = np.ones(len(close_series)) * 0.1  # Default size
+            equity = initial_capital
+            
+            # Use position sizing module when enabled
+            if use_dynamic_sizing:
+                logger.info("Using dynamic position sizing based on regime and risk parameters")
+                
+                # Get relevant data for position sizing
+                atr_data = data['atr'] if 'atr' in data.columns else None
+                regime_data = data['regime'] if 'regime' in data.columns else None
+                
+                logger.info(f"Position sizing data: ATR available: {'atr' in data.columns}, Regime available: {'regime' in data.columns}")
+                
+                # Iterate through entry signals to set position sizes
+                entry_indices = np.where(entry_signals)[0]
+                
+                for idx in entry_indices:
+                    # Skip if we're at the last bar (no price data available)
+                    if idx >= len(close_series) - 1:
+                        continue
+                    
+                    # Get current regime and ATR
+                    current_regime = regime_data.iloc[idx] if regime_data is not None else MarketRegimeType.RANGING
+                    current_atr = atr_data.iloc[idx] if atr_data is not None else close_series.iloc[idx] * 0.02
+                    
+                    # Calculate position size
+                    entry_price = close_series.iloc[idx]
+                    # Use ATR for stop distance if no explicit stop provided
+                    stop_distance = current_atr * 1.5
+                    stop_price = entry_price - stop_distance
+                    
+                    # Get zone confidence from supply/demand zones if available
+                    zone_confidence = 0.5
+                    if 'price_in_demand_zone' in data.columns and entry_signals.iloc[idx]:
+                        # If in demand zone during long entry, increase confidence
+                        zone_confidence = 0.8 if data['price_in_demand_zone'].iloc[idx] else 0.5
+                    elif 'price_in_supply_zone' in data.columns and exit_signals.iloc[idx]:
+                        # If in supply zone during exit, increase confidence
+                        zone_confidence = 0.8 if data['price_in_supply_zone'].iloc[idx] else 0.5
+                    
+                    # Calculate position size using the integrated approach
+                    position_size = calculate_integrated_position_size(
+                        equity=equity,
+                        entry_price=entry_price,
+                        atr=current_atr,
+                        market_regime=current_regime,
+                        risk_percentage=risk_percentage,
+                        stop_loss_price=stop_price,
+                        zone_confidence=zone_confidence
+                    )
+                    
+                    # Update the position size for this entry
+                    size_array[idx] = position_size
+                    
+                    # Log position sizing details for significant trades
+                    if idx % 5 == 0:  # Log every 5th trade to avoid excessive output
+                        logger.info(f"Trade #{idx}: Regime={current_regime}, Size={position_size:.4f}, "
+                                  f"ATR={current_atr:.2f}, Zone confidence={zone_confidence:.2f}")
+            
+            # Create the portfolio with dynamic sizing
+            portfolio = vbt.Portfolio.from_signals(
+                close=close_series,
+                entries=entry_signals_adjusted,
+                exits=exit_signals_adjusted,
+                size=size_array if use_dynamic_sizing else 1.0,  # Use dynamic sizing or fixed size
+                price=close_series,
+                init_cash=initial_capital,
+                fees=fees,
+                freq='1h'  # Assuming 1-hour data
+            )
+            logger.info(f"Portfolio created with {len(portfolio.trade_records) if hasattr(portfolio, 'trade_records') else 'unknown'} trades")
+            if use_dynamic_sizing:
+                logger.info(f"Using dynamic position sizing with {len(entry_indices)} entries")
+        except Exception as e:
+            logger.error(f"Error creating portfolio: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': f"Portfolio creation failed: {str(e)}"
+            }
+
         # Check if portfolio has trades
         if hasattr(portfolio, 'trades') and hasattr(portfolio.trades, 'records'):
             trade_count = len(portfolio.trades.records)
@@ -498,6 +574,10 @@ if __name__ == "__main__":
     parser.add_argument('--use_regime_filter', type=lambda x: x.lower() == 'true', default=True, 
                         help='Whether to use regime filter (True/False)')
     parser.add_argument('--initial_capital', type=float, default=10000.0, help='Initial capital for backtest')
+    parser.add_argument('--use_dynamic_sizing', type=lambda x: x.lower() == 'true', default=True,
+                        help='Whether to use dynamic position sizing (True/False)')
+    parser.add_argument('--risk_percentage', type=float, default=0.01,
+                        help='Risk percentage per trade (0.01 = 1%)')
     
     args = parser.parse_args()
     
@@ -518,7 +598,9 @@ if __name__ == "__main__":
         end_date=args.end_date,
         initial_capital=args.initial_capital,
         use_regime_filter=args.use_regime_filter,
-        signal_strictness=SignalStrictness.BALANCED
+        signal_strictness=SignalStrictness.BALANCED,
+        use_dynamic_sizing=args.use_dynamic_sizing,
+        risk_percentage=args.risk_percentage
     )
     
     if results['success']:

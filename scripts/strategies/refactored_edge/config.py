@@ -1,7 +1,7 @@
 import pandas as pd # Added for type hinting in get_param_combinations
 import vectorbtpro as vbt # Added to resolve NameError
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 # Import SignalStrictness from balanced_signals
 from scripts.strategies.refactored_edge.balanced_signals import SignalStrictness
@@ -83,9 +83,10 @@ class EdgeConfig(BaseModel):
     # --- Fees and Slippage ---
     commission_pct: float = Field(default=COMMISSION_PCT, description="Commission percentage per trade.") 
     slippage_pct: float = Field(default=SLIPPAGE_PCT, description="Slippage percentage per trade.") 
-
-    # --- Meta Parameters ---
     initial_capital: float = Field(default=INITIAL_CAPITAL, description="Initial capital for backtesting.")
+    
+    # Storage for parameter combinations (added for WFO compatibility)
+    param_combinations: Optional[List[Dict[str, Any]]] = None
 
     # --- Validators (Optional but Recommended) ---
     @field_validator('rsi_window', 'bb_window', 'trend_ma_window', 'atr_window', 'atr_window_sizing', 'pivot_lookback', 'min_zone_width_candles', 'min_zone_strength', 'zone_extend_candles', mode='after')
@@ -106,55 +107,132 @@ class EdgeConfig(BaseModel):
             raise ValueError(f"Value must be positive")
         return value
         
-    def get_param_combinations(self):
+    def get_param_combinations(self, grid_size: str = 'medium', is_quick_test: bool = False):
         """Return a list of parameter combinations for optimization.
         
         This provides access to the parameter grid for WFO optimization.
-        For testing, we'll use a simplified grid with all required parameters.
+        Supports different grid sizes for balancing optimization quality with runtime.
         
+        Args:
+            grid_size: Size of parameter grid ('small', 'medium', 'large')
+            is_quick_test: If True, returns a minimal grid for testing
+            
         Returns:
-            list: List of parameter dictionaries for testing
+            list: List of parameter dictionaries for optimization
         """
-        # For testing, create a simplified parameter grid with all required fields
-        test_params = [
-            {
-                # Required indicator parameters
-                'rsi_window': 14,
-                'bb_window': 20,
-                'bb_std_dev': 2.0,
-                'ma_window': 50,  # Also known as trend_window
-                'atr_window': 14,
-                
-                # Signal parameters
-                'rsi_entry_threshold': 30,
-                'rsi_exit_threshold': 70,
-                
-                # Regime parameters
-                'adx_window': 14,
-                'adx_threshold': 25.0,
-                'use_regime_filter': self.use_regime_adaptation,
-                'use_enhanced_regimes': self.use_enhanced_regimes
-            },
-            {
-                # Required indicator parameters
-                'rsi_window': 14,
-                'bb_window': 20,
-                'bb_std_dev': 2.0,
-                'ma_window': 50,
-                'atr_window': 14,
-                
-                # Signal parameters
-                'rsi_entry_threshold': 40,
-                'rsi_exit_threshold': 60,
-                
-                # Regime parameters
-                'adx_window': 14,
-                'adx_threshold': 25.0,
-                'use_regime_filter': self.use_regime_adaptation,
-                'use_enhanced_regimes': self.use_enhanced_regimes
+        import pandas as pd
+        import vectorbtpro as vbt
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # For quick testing, return a minimal set of 2 combinations
+        if is_quick_test:
+            logger.info("Using minimal test parameter grid (2 combinations)")
+            return [
+                {
+                    # Required indicator parameters
+                    'rsi_window': 14,
+                    'bb_window': 20,
+                    'bb_std_dev': 2.0,
+                    'ma_window': 50,
+                    'atr_window': 14,
+                    'rsi_entry_threshold': 30,
+                    'rsi_exit_threshold': 70,
+                    'adx_window': 14,
+                    'adx_threshold': 25.0,
+                    'use_regime_filter': self.use_regime_adaptation,
+                    'use_enhanced_regimes': self.use_enhanced_regimes
+                },
+                {
+                    'rsi_window': 14,
+                    'bb_window': 20,
+                    'bb_std_dev': 2.0,
+                    'ma_window': 50,
+                    'atr_window': 14,
+                    'rsi_entry_threshold': 40,
+                    'rsi_exit_threshold': 60,
+                    'adx_window': 14,
+                    'adx_threshold': 25.0,
+                    'use_regime_filter': self.use_regime_adaptation,
+                    'use_enhanced_regimes': self.use_enhanced_regimes
+                }
+            ]
+            
+        # Define grid sizes based on parameter selection
+        if grid_size == 'small':
+            logger.info("Using small parameter grid (limited combinations)")
+            grid = {
+                # Core parameters with limited options
+                'rsi_window': [14],
+                'bb_window': [20],
+                'bb_std_dev': [2.0],
+                'ma_window': [50, 100],
+                'atr_window': [14],
+                'rsi_entry_threshold': [30, 35, 40],
+                'rsi_exit_threshold': [60, 65, 70],
+                'adx_window': [14],
+                'adx_threshold': [25.0],
+                'use_regime_filter': [self.use_regime_adaptation],
+                'use_enhanced_regimes': [self.use_enhanced_regimes],
+                # Signal generation parameters
+                'signal_strictness': [SignalStrictness.BALANCED, SignalStrictness.RELAXED],
+                'trend_threshold_pct': [0.01],
+                'zone_influence': [0.5],
+                'min_hold_period': [2]
             }
-        ]
-        return test_params
+            
+        elif grid_size == 'large':
+            logger.info("Using large parameter grid (comprehensive optimization)")
+            # Use full OPTIMIZATION_PARAMETER_GRID
+            grid = OPTIMIZATION_PARAMETER_GRID
+            
+        else:  # 'medium' (default)
+            logger.info("Using medium parameter grid (balanced optimization)")
+            grid = {
+                # Core parameters with moderate options
+                'rsi_window': [14],
+                'bb_window': [20],
+                'bb_std_dev': [2.0, 2.5],
+                'ma_window': [21, 50, 100],
+                'atr_window': [14],
+                # Signal parameters with more options
+                'rsi_entry_threshold': [25, 30, 35, 40, 45],
+                'rsi_exit_threshold': [55, 60, 65, 70, 75],
+                'adx_window': [14],
+                'adx_threshold': [20.0, 25.0, 30.0],
+                'use_regime_filter': [True, False],
+                'use_enhanced_regimes': [True, False],
+                # Signal generation parameters
+                'signal_strictness': [SignalStrictness.BALANCED, SignalStrictness.RELAXED, SignalStrictness.ULTRA_RELAXED],
+                'trend_threshold_pct': [0.005, 0.01, 0.015],
+                'zone_influence': [0.3, 0.5, 0.7],
+                'min_hold_period': [1, 2, 3]
+            }
+        
+        # Generate parameter combinations using vectorbtpro functionality
+        try:
+            # Create list of parameter combinations using a more compatible approach
+            import itertools
+            param_keys = list(grid.keys())
+            param_values = list(grid.values())
+            all_combinations = list(itertools.product(*param_values))
+            combinations = []
+            
+            # Convert to list of dictionaries
+            for combo in all_combinations:
+                param_dict = {}
+                for i, key in enumerate(param_keys):
+                    param_dict[key] = combo[i]
+                combinations.append(param_dict)
+                
+            logger.info(f"Generated {len(combinations)} parameter combinations for optimization")
+            return combinations
+        except Exception as e:
+            logger.error(f"Error generating parameter combinations: {str(e)}")
+            # Fallback to minimal test parameters if there's an error
+            logger.warning("Falling back to minimal test parameter grid")
+            return self.get_param_combinations(is_quick_test=True)
 
     @model_validator(mode='after')
     def check_rsi_entry_exit_logic(self):
@@ -195,41 +273,82 @@ OPTIMIZATION_PARAMETER_GRID = {
     'granularity_str': ['1h'],     # Keep timeframe fixed
     'atr_window': [14],            # Standard ATR window
     'bb_window': [20],             # Standard Bollinger Band window
-    'bb_std_dev': [2.0],           # Standard BB deviation - fixed to reduce combinations
+    'bb_std_dev': [2.0, 2.5],      # Standard BB deviation with a slightly wider option
     'rsi_window': [14],            # Standard RSI window
     
-    # --- Core Parameters (only the most influential) ---
-    # RSI thresholds reduced to just two options each
-    'rsi_lower_threshold': [30, 40],  # Just two values - low oversold and moderate oversold
-    'rsi_upper_threshold': [60, 70],  # Just two values - moderate overbought and strong overbought
+    # --- Core Parameters (expanded to ensure more trades are generated) ---
+    # RSI thresholds with broader ranges to ensure signal generation across conditions
+    'rsi_lower_threshold': [25, 28, 30, 33, 35, 38, 40, 42, 45],  # Broadened range from 25-45 for more entry opportunities
+    'rsi_upper_threshold': [55, 58, 60, 62, 65, 68, 70, 72, 75],  # Broadened range from 55-75 for more exit opportunities
     
     # Trend identification window - keeping this variable as it's important
-    'ma_window': [50, 100],        # Keeping both options as they represent different trend timeframes
+    'ma_window': [21, 50, 100, 200],   # Added shorter and longer-term trend options
     
-    # --- Risk Management Parameters (fixed) ---
-    'sl_pct': [0.02],              # Fixed 2% stop loss
-    'risk_reward_ratio': [2.0],    # Fixed 2:1 reward/risk ratio
+    # --- Risk Management Parameters (expanded) ---
+    'sl_pct': [0.015, 0.02, 0.025],  # More options for stop loss percentage
+    'risk_reward_ratio': [1.5, 2.0, 2.5],  # More options for R:R ratio
     
     # --- S/D Zone Parameters ---
-    'use_zones': [True, False],    # Test both with and without S/D zones to compare their impact
-                                   # This is a key aspect of our strategy evaluation
+    'use_zones': [True, False],    # Test both with and without S/D zones
+    
+    # --- Position Sizing Parameters ---
+    'use_dynamic_sizing': [True, False],  # Test both with and without dynamic position sizing
+    'risk_percentage': [0.005, 0.01, 0.015],  # Risk percentage options (0.5%, 1%, 1.5%)
     
     # --- Regime Parameters ---
-    'use_regime_adaptation': [True, False],  # Test both with and without regime-specific parameter adaptation
+    'use_regime_adaptation': [True, False],  # Test both with and without regime adaptation
     
     # --- Signal Generation Parameters ---
-    'signal_strictness': [SignalStrictness.STRICT, SignalStrictness.BALANCED, SignalStrictness.RELAXED],
-    'trend_threshold_pct': [0.01],  # Default threshold percentage
-    'zone_influence': [0.3, 0.7],   # Test both lower and higher zone influence
-    'min_hold_period': [2],         # Default minimum hold period
+    'signal_strictness': [SignalStrictness.BALANCED, SignalStrictness.RELAXED, SignalStrictness.ULTRA_RELAXED],  # Focus on less strict modes
+    'trend_threshold_pct': [0.005, 0.01, 0.015, 0.02],  # More options from less strict to more strict
+    'zone_influence': [0.3, 0.5, 0.7, 0.9],   # Broader range for zone influence testing
+    'min_hold_period': [0, 1, 2, 3],         # Include option for no minimum hold and longer holds
 }
 
 # --- Helper to get parameter combinations ---
 def get_param_combinations() -> List[Dict]:
-    """Generates all parameter combinations from the grid."""
+    """Generates all parameter combinations from the grid.
+    
+    Uses vectorbtpro.utils.params module for parameter combination generation.
+    """
     import vectorbtpro as vbt
-    param_product = vbt.Parameter(OPTIMIZATION_PARAMETER_GRID).product()
-    return list(param_product)
+    from itertools import product
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # Use vectorbtpro's params module for robust parameter grid generation
+    try:
+        # Method 1: Using vectorbtpro.utils.params.combine_params
+        # First convert each parameter list to a Param object
+        param_dct = {}
+        for k, v in OPTIMIZATION_PARAMETER_GRID.items():
+            param_dct[k] = vbt.utils.params.Param(v)
+        
+        # Use combine_params to generate parameter combinations
+        param_tuples, param_idx = vbt.utils.params.combine_params(param_dct)
+        
+        # Convert the result to a list of parameter dictionaries
+        combinations = []
+        for i in range(len(param_tuples[0])):
+            param_dict = {}
+            for j, k in enumerate(param_dct.keys()):
+                param_dict[k] = param_tuples[j][i]  # Note the reversed indices compared to previous version
+            combinations.append(param_dict)
+        
+        logger.info(f"Generated {len(combinations)} parameter combinations using VectorBTpro params module")
+        return combinations
+    except Exception as e:
+        # Fallback method using itertools if vectorbtpro method fails
+        logger.warning(f"Falling back to itertools for parameter generation: {str(e)}")
+        
+        param_keys = list(OPTIMIZATION_PARAMETER_GRID.keys())
+        param_values = list(OPTIMIZATION_PARAMETER_GRID.values())
+        all_combinations = list(product(*param_values))
+        
+        combinations = [dict(zip(param_keys, combo)) for combo in all_combinations]
+        logger.info(f"Generated {len(combinations)} parameter combinations using itertools")
+        return combinations
 
 
 # Example Usage
