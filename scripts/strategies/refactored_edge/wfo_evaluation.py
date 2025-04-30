@@ -41,28 +41,97 @@ def create_portfolio(close, long_entries, long_exits, short_entries, short_exits
     commission = params.get('commission_pct', 0.0015)  # Default 0.15%
     slippage = params.get('slippage_pct', 0.0005)  # Default 0.05%
     
+    # Add a final exit signal to ensure all positions are closed at the end
+    # This helps avoid NaN returns and ensures proper final trade accounting
+    if len(close) > 0:
+        # Check if there are any active signals first to avoid modifying Series without signals
+        if long_entries.any() or short_entries.any():
+            # Create a copy to avoid modifying the original Series
+            long_exits = long_exits.copy()
+            short_exits = short_exits.copy()
+            
+            # Add exit signals at the last row to ensure all positions are closed
+            long_exits.iloc[-1] = True
+            short_exits.iloc[-1] = True
+            
+            print(f"Added final exit signals to ensure all positions are closed")
+    
+    # Resolve signal conflicts to ensure proper trade execution
+    if len(close) > 0:
+        # Check for simultaneous entry and exit signals for the same direction
+        long_conflict_mask = long_entries & long_exits
+        short_conflict_mask = short_entries & short_exits
+        
+        if long_conflict_mask.any() or short_conflict_mask.any():
+            print(f"Resolving {long_conflict_mask.sum()} long conflicts and {short_conflict_mask.sum()} short conflicts")
+            
+            # Resolve conflicts by prioritizing exits
+            if long_conflict_mask.any():
+                long_entries = long_entries & ~long_conflict_mask
+            
+            if short_conflict_mask.any():
+                short_entries = short_entries & ~short_conflict_mask
+    
+    # Count entry and exit signals for debugging
+    print(f"Signals: Long entries: {long_entries.sum()}, Long exits: {long_exits.sum()}, "
+          f"Short entries: {short_entries.sum()}, Short exits: {short_exits.sum()}")
+            
     # Only include valid parameters for vectorbtpro's Portfolio.from_signals
     # This avoids warnings about unexpected parameters like sl_pct
     pf_kwargs = {
         'size': TRADE_SIZE,
         'freq': '1h',  # Assuming 1-hour timeframe
         'fees': commission,
-        'slippage': slippage
+        'slippage': slippage,
+        # Ensure close positions at the end even without explicit signals
+        'close_at_end': True,  
+        # Add trade size constraints
+        'size_granularity': 0.001  # Allow fractional trade sizes with 3 decimal precision
     }
     
     # Note on ATR-based stops:
     # Instead of passing sl_pct, sl_atr_multiplier, etc. directly to Portfolio.from_signals
     # (which causes parameter warnings), we implement custom exit logic in the signal generation.
     
-    return vbt.Portfolio.from_signals(
-        close=close,
-        entries=long_entries,
-        exits=long_exits,
-        short_entries=short_entries,
-        short_exits=short_exits,
-        init_cash=INIT_CAPITAL,
-        **pf_kwargs
-    )
+    try:
+        portfolio = vbt.Portfolio.from_signals(
+            close=close,
+            entries=long_entries,
+            exits=long_exits,
+            short_entries=short_entries,
+            short_exits=short_exits,
+            init_cash=INIT_CAPITAL,
+            **pf_kwargs
+        )
+        
+        # Check if portfolio was created successfully
+        if portfolio is None:
+            print("ERROR: Portfolio creation failed, returned None")
+            return None
+            
+        # Verify that trades are present
+        trade_count = 0
+        try:
+            if hasattr(portfolio, 'trades'):
+                if hasattr(portfolio.trades, 'count') and callable(portfolio.trades.count):
+                    trade_count = portfolio.trades.count()
+                elif hasattr(portfolio.trades, 'records') and hasattr(portfolio.trades.records, '__len__'):
+                    trade_count = len(portfolio.trades.records)
+                elif hasattr(portfolio.trades, '__len__'):
+                    trade_count = len(portfolio.trades)
+            
+            print(f"Portfolio created successfully with {trade_count} trades")
+            
+        except Exception as e:
+            print(f"Warning: Error checking trade count: {e}")
+        
+        return portfolio
+        
+    except Exception as e:
+        print(f"ERROR: Failed to create portfolio: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def evaluate_with_params(data, params):
@@ -156,8 +225,27 @@ def evaluate_with_params(data, params):
             params=params
         )
         
-        # 4. Calculate Performance stats
-        if pf.trades.count() == 0:
+        # 4. Calculate Performance stats - with robust vectorbtpro compatibility handling
+        # First check if trades exist using safe access patterns
+        trade_count = 0
+        try:
+            # Different versions of vectorbtpro handle trades differently
+            if hasattr(pf, 'trades'):
+                if hasattr(pf.trades, 'count') and callable(pf.trades.count):
+                    trade_count = pf.trades.count()
+                elif hasattr(pf.trades, 'records') and hasattr(pf.trades.records, '__len__'):
+                    trade_count = len(pf.trades.records)
+                elif hasattr(pf.trades, '__len__'):
+                    trade_count = len(pf.trades)
+            else:
+                print("Portfolio has no 'trades' attribute, checking alternative metrics")
+                # Try other ways to determine if trades were executed
+                trade_count = 0
+        except Exception as e:
+            print(f"Error counting trades: {e}")
+            trade_count = 0
+        
+        if trade_count == 0:
             print(f"DEBUG: No trades generated with these parameters")
             return pf, {
                 'return': 0.0,
@@ -167,20 +255,76 @@ def evaluate_with_params(data, params):
                 'win_rate': 0.0
             }
         
-        # Get vectorbt stats
-        vbt_stats = pf.stats()
-        
-        # Convert to our simplified format
-        stats = {
-            'return': vbt_stats['Total Return [%]'] / 100.0,
-            'sharpe': vbt_stats.get('Sharpe Ratio', 0.0),
-            'max_drawdown': vbt_stats['Max Drawdown [%]'] / 100.0,
-            'trades': pf.trades.count(),
-            'win_rate': vbt_stats['Win Rate [%]'] / 100.0
-        }
-        
-        # Debug print performance
-        print(f"DEBUG: Return={stats['return']:.4f}, Sharpe={stats['sharpe']:.4f}, MaxDD={stats['max_drawdown']:.4f}, Trades={stats['trades']}, WinRate={stats['win_rate']:.4f}")
+        # Get vectorbt stats with error handling for different API patterns
+        try:
+            # Try different ways to access portfolio stats based on vectorbtpro version
+            vbt_stats = {}
+            if hasattr(pf, 'stats'):
+                if callable(pf.stats):
+                    try:
+                        vbt_stats = pf.stats()
+                        print(f"Successfully accessed portfolio.stats() method")
+                    except Exception as stats_err:
+                        print(f"Error calling portfolio.stats(): {stats_err}")
+                        # Try accessing as attribute
+                        vbt_stats = getattr(pf, 'stats', {})
+                        if callable(vbt_stats):
+                            vbt_stats = {}
+                else:
+                    # Stats is an attribute
+                    vbt_stats = pf.stats
+                    print(f"Accessed portfolio.stats attribute directly")
+            else:
+                print("Portfolio has no 'stats' attribute or method, using empty stats")
+            
+            # Safely extract key metrics with proper error handling
+            # Convert to our simplified format with robust fallbacks
+            stats = {
+                'return': float(vbt_stats.get('Total Return [%]', 0.0)) / 100.0,
+                'sharpe': float(vbt_stats.get('Sharpe Ratio', 0.0)),
+                'max_drawdown': float(vbt_stats.get('Max Drawdown [%]', 0.0)) / 100.0,
+                'trades': trade_count,
+                'win_rate': float(vbt_stats.get('Win Rate [%]', 0.0)) / 100.0
+            }
+            
+            # Try to extract additional metrics that might be available
+            # Safely access returns using different vectorbtpro API patterns
+            try:
+                if hasattr(pf, 'returns'):
+                    if callable(pf.returns):
+                        try:
+                            returns = pf.returns()
+                            if isinstance(returns, pd.Series) and not returns.empty:
+                                stats['mean_return'] = float(returns.mean())
+                                stats['return_volatility'] = float(returns.std())
+                        except Exception as returns_err:
+                            print(f"Error accessing portfolio returns: {returns_err}")
+                    else:
+                        # Returns is an attribute in this version
+                        returns = pf.returns
+                        if isinstance(returns, pd.Series) and not returns.empty:
+                            stats['mean_return'] = float(returns.mean())
+                            stats['return_volatility'] = float(returns.std())
+            except Exception as e:
+                print(f"Could not calculate additional return metrics: {e}")
+            
+            # Debug print performance with safe access to metrics
+            print(f"DEBUG: Return={stats.get('return', 0.0):.4f}, Sharpe={stats.get('sharpe', 0.0):.4f}, " 
+                  f"MaxDD={stats.get('max_drawdown', 0.0):.4f}, Trades={stats.get('trades', 0)}, " 
+                  f"WinRate={stats.get('win_rate', 0.0):.4f}")
+            
+        except Exception as e:
+            print(f"Error calculating performance metrics: {e}")
+            import traceback
+            traceback.print_exc()
+            # Provide default metrics
+            stats = {
+                'return': 0.0,
+                'sharpe': 0.0,
+                'max_drawdown': 0.0,
+                'trades': trade_count,  # Use the previously determined trade count
+                'win_rate': 0.0
+            }
         
         return pf, stats
     
