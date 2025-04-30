@@ -295,6 +295,15 @@ Throughout development, several challenges were addressed:
 
 ### 6.1 Recent Enhancements & Planned Features
 
+#### Recently Implemented (v0.5.7):
+
+1. **Comprehensive Strategy Evaluation Framework**:
+   - Modular framework for rigorous comparison of standard vs. regime-aware parameter adaptation
+   - Statistical validation with significance testing, effect size calculation, and parameter stability analysis
+   - Interactive Plotly visualizations for performance comparison, regime breakdown, and parameter stability
+   - HTML report generation with executive summary, detailed metrics, and visualization links
+   - Fixed EdgeConfig Pydantic model to support parameter combinations for WFO compatibility
+
 #### Recently Implemented (v0.5.6):
 
 1. **Advanced Position Sizing Framework**:
