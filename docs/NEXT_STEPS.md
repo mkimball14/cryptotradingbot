@@ -48,7 +48,17 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * [ ] Create visualization dashboard comparing asset-specific parameters
    * [ ] Document asset-specific optimal parameters in STRATEGY_OVERVIEW.md
 
-2. **Complete WFO Integration Test:**
+3. **Backtest Runner Verification:**
+   * [x] Debug backtest runner to ensure signals result in actual trades
+   * [x] Fix portfolio creation logic to ensure trades execute properly
+   * [x] Fix performance metrics calculation for vectorbtpro compatibility
+   * [x] Verify trade count, win rate, and return metrics are reported correctly
+   * [x] Run real-data tests with 1-hour timeframe for BTC-USD
+   * [ ] Run comparative tests with original Edge strategy implementation
+   * [ ] Perform multi-asset testing across BTC, ETH, SOL, and other major assets
+   * [ ] Create documentation on performance characteristics compared to original
+
+4. **WFO Integration Testing:**
    * [x] Fix optimization test failures by standardizing regime information key to 'predominant_regime'
    * [x] Fix portfolio parameter warnings by creating portfolio creation helper function
    * [x] Create infrastructure for integration testing with small synthetic datasets

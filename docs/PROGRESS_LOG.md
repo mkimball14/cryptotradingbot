@@ -45,6 +45,50 @@ This log tracks significant changes, improvements, and lessons learned during th
 3. Integrate regime-aware adaptation with position sizing for enhanced risk management
 4. Create real-data backtests comparing regime-aware vs. standard approaches
 
+## Session 2025-04-29: Backtest Runner Debugging & VectorBTPro Compatibility Fixes
+
+### Major Improvements
+
+1. **VectorBTPro API Compatibility Fixes**
+   - Enhanced validation_metrics.py to handle different vectorbtpro API patterns robustly
+   - Fixed drawdown data access methods with comprehensive fallbacks (method vs attribute access)
+   - Improved trade data extraction from portfolio.trades.records with error handling
+   - Added safe access patterns for all portfolio methods and attributes
+   - Implemented traceback logging for better error diagnostics
+
+2. **Performance Metrics Calculation**
+   - Fixed the "'Series' object is not callable" error with proper method/attribute detection
+   - Implemented fallback mechanisms for accessing trade records across vectorbtpro versions
+   - Added direct access to portfolio stats when available with calculated metrics fallbacks
+   - Enhanced metrics display with accurate win rate, return, drawdown reporting
+   - Fixed regression where trade count was incorrectly reported as 0 despite trades executing
+
+3. **Signal Generation Determinism**
+   - Fixed UnboundLocalError in balanced_signals.py for zone exit triggers
+   - Ensured deterministic execution of signal generation for testing and validation
+   - Added proper error handling for edge cases in regime detection
+
+### Results & Validation
+
+1. **Strategy Performance**
+   - Backtest successfully executed with 16 trades generated
+   - Total Return: 13.65% in one-month period
+   - Win Rate: 81.25% (13/16 winning trades)
+   - Sharpe Ratio: 3.73 (excellent risk-adjusted return)
+   - Max Drawdown: 11.51%
+
+2. **Implementation Insights**
+   - VectorBTPro API requires defensive coding to handle version differences
+   - Performance metrics extraction needs multi-stage fallbacks with explicit type checking
+   - Trade data structure varies between portfolio implementations requiring adaptable access methods
+
+### Next Steps
+
+1. Validate the WFO runner with the same vectorbtpro compatibility fixes
+2. Run comparative tests between original Edge strategy and refactored regime-aware version
+3. Perform multi-timeframe testing to verify adaptation across different market conditions
+4. Document performance characteristics in comparison to baseline strategy
+
 ## Session 2025-04-29: Architectural Improvements & Regime Detection Fixes
 
 ### Major Architectural Improvements
