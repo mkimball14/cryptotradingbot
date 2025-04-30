@@ -5,9 +5,16 @@ This module contains functions for evaluating trading strategies with specific p
 generating signals, constructing portfolios, and calculating performance metrics.
 """
 import traceback
-import pandas as pd
 import numpy as np
+import pandas as pd
 import vectorbtpro as vbt
+from typing import Dict, Any, Tuple, List, Optional, Union
+import os
+import logging
+from datetime import datetime
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Local imports
 from scripts.strategies.refactored_edge import indicators, signals, test_signals, balanced_signals
@@ -477,8 +484,11 @@ def evaluate_with_params(data, params):
         return pf, stats
     
     except Exception as e:
+        import traceback
         traceback.print_exc()
         print(f"Error in evaluate_with_params: {str(e)}")
+        logger.error(f"Evaluation error: {str(e)}")
+        # Return a failed result to ensure the optimization can continue
         return None, {
             'return': 0.0,
             'sharpe': -np.inf,

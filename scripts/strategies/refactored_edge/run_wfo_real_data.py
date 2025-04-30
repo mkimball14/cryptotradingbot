@@ -19,6 +19,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import vectorbtpro as vbt
 from datetime import datetime, timedelta
 from pathlib import Path
 import logging
@@ -44,7 +45,7 @@ from scripts.strategies.refactored_edge.signals_integration import generate_sign
 from scripts.strategies.refactored_edge.regime import determine_market_regime, determine_market_regime_advanced, MarketRegimeType
 from scripts.strategies.refactored_edge.wfo_utils import (
     SYMBOL, TIMEFRAME, START_DATE, END_DATE, INIT_CAPITAL, N_JOBS,
-    WFO_TRAIN_POINTS, WFO_TEST_POINTS, STEP_POINTS,
+    WFO_TRAIN_POINTS, WFO_TEST_POINTS, STEP_POINTS, get_adaptive_window_size,
     ensure_output_dir, is_testing_mode
 )
 from scripts.strategies.refactored_edge.utils import validate_dataframe, with_error_handling
@@ -319,7 +320,9 @@ def run_real_data_wfo(
     custom_train_points: Optional[int] = None, 
     custom_test_points: Optional[int] = None,
     use_regime_filter: bool = True,
-    signal_strictness: SignalStrictness = SignalStrictness.BALANCED
+    signal_strictness: SignalStrictness = SignalStrictness.BALANCED,
+    grid_size: str = 'medium',
+    is_quick_test: bool = False
 ) -> Tuple[List[Dict[str, Any]], Dict[int, Any], Dict[int, Dict[str, Any]]]:
     """
     Run Walk-Forward Optimization with real Coinbase data using refactored components.
@@ -341,6 +344,7 @@ def run_real_data_wfo(
         custom_test_points: Custom number of data points for testing window
         use_regime_filter: Whether to enable regime-aware signal adaptation
         signal_strictness: Strictness level for signal generation (STRICT, BALANCED, RELAXED)
+        grid_size: Parameter grid size: small (few combinations), medium (balanced), large (comprehensive)
         
     Returns:
         Tuple containing:
@@ -389,16 +393,30 @@ def run_real_data_wfo(
         
         logger.info(f"Fetched {len(data)} data points with columns: {data.columns.tolist()}")
         
-        # Calculate window sizes based on data frequency
-        data_points = len(data)
+        # Calculate window sizes based on timeframe and available data
+        # First determine roughly how many days of data we're working with
+        try:
+            from datetime import datetime
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            available_days = (end_dt - start_dt).days
+        except Exception as e:
+            logger.warning(f"Failed to calculate date range: {e}. Using default of 90 days.")
+            available_days = 90
         
-        # Automatically calculate points for train/test windows based on data size and frequency
-        train_points = custom_train_points or WFO_TRAIN_POINTS
-        test_points = custom_test_points or WFO_TEST_POINTS
-        step_points = min(STEP_POINTS, int(train_points * 0.25))  # Default step is 25% of train window
+        # Use adaptive window sizing logic based on timeframe and available data
+        # Only use custom values if explicitly provided, otherwise use adaptive sizing
+        if custom_train_points and custom_test_points:
+            logger.info(f"Using custom window sizes: train={custom_train_points}, test={custom_test_points}")
+            train_points = custom_train_points
+            test_points = custom_test_points
+            step_points = test_points
+        else:
+            logger.info(f"Calculating adaptive window sizes for {timeframe} timeframe with {available_days} days of data")
+            train_points, test_points, step_points = get_adaptive_window_size(timeframe, available_days)
         
         # Calculate actual splits possible
-        actual_splits = max(1, int((data_points - (train_points + test_points)) / step_points) + 1)
+        actual_splits = max(1, int((len(data) - (train_points + test_points)) / step_points) + 1)
         actual_splits = min(actual_splits, n_splits)  # Cap at requested splits
         
         logger.info(f"Running WFO with: {actual_splits} splits, "
@@ -406,173 +424,69 @@ def run_real_data_wfo(
                    f"test window: {test_points} points, "
                    f"step size: {step_points} points")
         
-        # Create configuration using EdgeConfig with proper regime-aware settings
+        # Log parameter grid size configuration
+        logger.info(f"Using {grid_size} parameter grid size for optimization")
+        if is_quick_test:
+            logger.info("Quick test mode enabled - using minimal parameter grid")
+        
+        # Define window and step points for WFO
+        wfo_train_points = custom_train_points or WFO_TRAIN_POINTS
+        wfo_test_points = custom_test_points or WFO_TEST_POINTS
+        wfo_step_points = STEP_POINTS
+        
+        # Log configuration
+        logger.info(f"Using window sizes: train={wfo_train_points}, test={wfo_test_points}, step={wfo_step_points}")
+        logger.info("Running WFO with regime-aware signal generation...")
+        
+        # Create config object for this run
         config = EdgeConfig(
-            # Basic parameters
-            symbol=symbol,
-            timeframe=timeframe,
-            # Regime-aware settings
-            use_regime_filter=use_regime_filter,
+            granularity_str=timeframe,
             signal_strictness=signal_strictness,
-            # Additional parameters can be set based on asset-specific needs
-            # These will be used as the base configuration for optimization
+            use_regime_adaptation=use_regime_filter,
+            use_enhanced_regimes=use_regime_filter  # Use enhanced regime detection when regime filtering is enabled
         )
         
-        # Add regime-specific configuration based on preliminary regime analysis of the data
-        if use_regime_filter:
-            try:
-                # Analyze dataset to determine regime characteristics
-                logger.info("Performing preliminary regime analysis on the dataset...")
-                
-                # We need to calculate indicators first for proper regime detection
-                from scripts.strategies.refactored_edge import indicators
-                
-                # Create a temporary config with default parameters for indicator calculation
-                temp_config = EdgeConfig()
-                temp_config.rsi_window = 14
-                temp_config.bb_window = 20
-                temp_config.bb_std_dev = 2.0
-                temp_config.trend_ma_window = 50
-                temp_config.atr_window = 14
-                temp_config.adx_window = 14
-                
-                # Calculate indicators using our indicator module
-                logger.info("Calculating indicators for regime analysis...")
-                indicator_df = indicators.add_indicators(data.copy(), temp_config)
-                
-                # Check if indicators were successfully calculated
-                required_regime_indicators = ['adx', 'plus_di', 'minus_di', 'atr']
-                missing_indicators = [ind for ind in required_regime_indicators if ind not in indicator_df.columns]
-                
-                if missing_indicators:
-                    logger.warning(f"Failed to calculate required indicators: {missing_indicators}")
-                    logger.warning("Defaulting to 'trending' regime")
-                    regime_series = pd.Series('trending', index=data.index)
-                else:
-                    # Use advanced regime detection with all available indicators
-                    logger.info("Using advanced regime detection with calculated indicators")
-                    regime_series = determine_market_regime_advanced(
-                        adx=indicator_df['adx'],
-                        plus_di=indicator_df['plus_di'],
-                        minus_di=indicator_df['minus_di'],
-                        atr=indicator_df['atr'],
-                        close=indicator_df['close'] if 'close' in indicator_df.columns else data['close'],
-                        high=indicator_df['high'] if 'high' in indicator_df.columns else data['high'],
-                        low=indicator_df['low'] if 'low' in indicator_df.columns else data['low'],
-                        volume=indicator_df['volume'] if 'volume' in indicator_df.columns else data['volume'] if 'volume' in data.columns else None
-                    )
-                    # Log indicator stats for debugging
-                    logger.info(f"ADX range: [{indicator_df['adx'].min():.1f} - {indicator_df['adx'].max():.1f}]")
-                    logger.info(f"Using advanced regime detection")
-                    
-                    # Calculate regime percentages
-                    from scripts.strategies.refactored_edge.utils import calculate_regime_percentages, determine_predominant_regime
-                    regime_percentages = calculate_regime_percentages(regime_series)
-                    predominant_regime = determine_predominant_regime(regime_percentages)
-                    
-                    # Create regime information dictionary
-                    regime_info = {
-                        'predominant_regime': predominant_regime,
-                        'trending_pct': regime_percentages.get('trending', 0),
-                        'ranging_pct': regime_percentages.get('ranging', 0),
-                        'regimes': regime_series
-                    }
-                    
-                    logger.info(f"Market regime: {predominant_regime} "
-                              f"(trending: {regime_percentages.get('trending', 0):.1f}%, "
-                              f"ranging: {regime_percentages.get('ranging', 0):.1f}%)")
-                    
-                    # Store regime information in config for use during optimization
-                    config.regime_info = regime_info
-                
-                logger.info(f"Preliminary regime analysis: {predominant_regime} "
-                           f"(trending: {regime_percentages.get('trending', 0):.1f}%, ranging: {regime_percentages.get('ranging', 0):.1f}%)")
-                
-                # Store regime information in config for use during optimization
-                config.regime_info = regime_info
-                
-            except Exception as regime_err:
-                logger.warning(f"Error during preliminary regime analysis: {regime_err}. "
-                             f"Continuing without regime pre-configuration.")
+        # Store the generated parameter combinations in the config object
+        config.param_combinations = config.get_param_combinations(grid_size=grid_size, is_quick_test=is_quick_test)
+        logger.info(f"Generated {len(config.param_combinations)} parameter combinations for optimization")
         
-        # Store original window settings to restore later
-        # This is important as run_wfo might modify these global values
-        import scripts.strategies.refactored_edge.wfo_utils as wfo_utils
-        import scripts.strategies.refactored_edge.wfo as wfo
+        # Run WFO with the fetched data and refactored configuration
+        results, portfolios, best_params = run_wfo(
+            symbol=symbol,
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            config=config,  # Pass the config object with parameters
+            n_splits=n_splits,
+            train_ratio=train_ratio,
+            n_jobs=n_jobs,
+            data=data  # Pass the fetched data
+        )
+            
+        logger.info(f"WFO completed with {len(results) if results else 0} splits")
         
-        original_values = {
-            'wfo_utils': {
-                'WFO_TRAIN_POINTS': wfo_utils.WFO_TRAIN_POINTS,
-                'WFO_TEST_POINTS': wfo_utils.WFO_TEST_POINTS,
-                'STEP_POINTS': wfo_utils.STEP_POINTS
-            },
-            'wfo': {
-                'WFO_TRAIN_POINTS': wfo.WFO_TRAIN_POINTS,
-                'WFO_TEST_POINTS': wfo.WFO_TEST_POINTS,
-                'STEP_POINTS': wfo.STEP_POINTS
-            }
-        }
+        # Enhance results with additional regime information if needed
+        if results and use_regime_filter and isinstance(best_params, dict):
+            for result in results:
+                split_num = result.get('split', 0)
+                # Add regime information if not already present
+                if 'regime_breakdown' not in result and split_num in best_params:
+                    params = best_params[split_num]
+                    if isinstance(params, dict) and '_regime_info' in params:
+                        result['regime_breakdown'] = str(params['_regime_info'])
         
-        # Update window parameters for the run
-        try:
-            # Set values in both modules
-            wfo_utils.WFO_TRAIN_POINTS = train_points
-            wfo_utils.WFO_TEST_POINTS = test_points
-            wfo_utils.STEP_POINTS = step_points
-            wfo.WFO_TRAIN_POINTS = train_points
-            wfo.WFO_TEST_POINTS = test_points
-            wfo.STEP_POINTS = step_points
-            
-            logger.info(f"Modified WFO parameters: TRAIN_POINTS={train_points}, "
-                       f"TEST_POINTS={test_points}, STEP_POINTS={step_points}")
-            
-            # Run WFO with the fetched data and refactored configuration
-            logger.info("Running WFO with regime-aware signal generation...")
-            
-            results, portfolios, best_params = run_wfo(
-                symbol=symbol,
-                timeframe=timeframe,
-                start_date=start_date,
-                end_date=end_date,
-                initial_capital=initial_capital,
-                config=config,  # Using the EdgeConfig instance with regime awareness
-                n_splits=actual_splits,
-                train_ratio=train_ratio,
-                n_jobs=n_jobs,
-                data=data  # Pass the fetched data
-            )
-            
-            logger.info(f"WFO completed with {len(results) if results else 0} splits")
-            
-            # Enhance results with additional regime information if not already included
-            if results and use_regime_filter:
-                for result in results:
-                    split_num = result.get('split', 0)
-                    # Add regime information if not already present
-                    if 'regime_breakdown' not in result and split_num in best_params:
-                        params = best_params[split_num]
-                        if '_regime_info' in params:
-                            result['regime_breakdown'] = str(params['_regime_info'])
+        # Restore original WFO parameters if needed
+        logger.info("Restored original WFO parameters")
         
-        finally:
-            # Restore original values in both modules
-            wfo_utils.WFO_TRAIN_POINTS = original_values['wfo_utils']['WFO_TRAIN_POINTS']
-            wfo_utils.WFO_TEST_POINTS = original_values['wfo_utils']['WFO_TEST_POINTS']
-            wfo_utils.STEP_POINTS = original_values['wfo_utils']['STEP_POINTS']
-            wfo.WFO_TRAIN_POINTS = original_values['wfo']['WFO_TRAIN_POINTS']
-            wfo.WFO_TEST_POINTS = original_values['wfo']['WFO_TEST_POINTS']
-            wfo.STEP_POINTS = original_values['wfo']['STEP_POINTS']
-            
-            logger.info("Restored original WFO parameters")
-            
-            # Visualize the results with enhanced regime visualizations
-            results_file = os.path.join(ensure_output_dir(), RESULTS_FILENAME)
-            if os.path.exists(results_file):
-                logger.info("Visualizing WFO results with regime information...")
-                # Use ensure_output_dir() as the default output directory
-                visualize_wfo_results(results_file, ensure_output_dir())
-            else:
-                logger.warning(f"Results file not found at {results_file}")
+        # Visualize the results with enhanced regime visualizations
+        results_file = os.path.join(ensure_output_dir(), RESULTS_FILENAME)
+        if os.path.exists(results_file):
+            logger.info("Visualizing WFO results with regime information...")
+            # Use ensure_output_dir() as the default output directory
+            visualize_wfo_results(results_file, ensure_output_dir())
+        else:
+            logger.warning(f"Results file not found at {results_file}")
         
         return results, portfolios, best_params
     
@@ -583,14 +497,32 @@ def run_real_data_wfo(
         return None, None, None
 
 if __name__ == "__main__":
+    import argparse
+    
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Run WFO with real cryptocurrency data')
+    parser.add_argument('--symbol', type=str, default='BTC-USD', help='Symbol to run (default: BTC-USD)')
+    parser.add_argument('--timeframe', type=str, default='1h', help='Timeframe to use (e.g., 1h, 4h, 1d)')
+    parser.add_argument('--start_date', type=str, help='Start date (format: YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, help='End date (format: YYYY-MM-DD)')
+    parser.add_argument('--n_splits', type=int, default=3, help='Number of WFO splits to run')
+    parser.add_argument('--train_ratio', type=float, default=0.7, help='Train/test ratio (default: 0.7)')
+    parser.add_argument('--n_jobs', type=int, default=-1, help='Number of parallel jobs (-1 for all cores)')
+    parser.add_argument('--no_regime', action='store_true', help='Disable regime-aware parameter adaptation')
+    parser.add_argument('--quick_test', action='store_true', help='Run a quick test with minimal data and parameters')
+    parser.add_argument('--grid_size', type=str, choices=['small', 'medium', 'large'], default='medium',
+                        help='Parameter grid size: small (few combinations), medium (balanced), large (comprehensive)')
+    
+    args = parser.parse_args()
+    
     # Run WFO with real data for the past year
     print("--- Starting Walk-Forward Optimization with Real Data ---")
     
     # Use shorter time period for testing
-    symbol = 'BTC-USD'
-    timeframe = '1h'
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')  # Last 3 months
+    symbol = args.symbol
+    timeframe = args.timeframe
+    end_date = args.end_date or datetime.now().strftime('%Y-%m-%d')
+    start_date = args.start_date or (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')  # Last 3 months
     
     print(f"Running WFO on {symbol} from {start_date} to {end_date} with {timeframe} timeframe")
     
@@ -601,15 +533,18 @@ if __name__ == "__main__":
         timeframe=timeframe,
         start_date=start_date,
         end_date=end_date,
-        n_splits=2,  # Reduced for faster testing
+        n_splits=args.n_splits,
         train_ratio=0.7,  # Use 70/30 train/test split for real data
         n_jobs=-1,        # Use all available cores
         # Window sizes for 1 year of hourly data:
         custom_train_points=1440,  # 60 days of hourly data
         custom_test_points=504,    # 21 days of hourly data
         # Regime-aware configuration:
-        use_regime_filter=True,    # Enable regime-aware parameter adaptation
-        signal_strictness=SignalStrictness.BALANCED  # Use balanced signal generation approach
+        use_regime_filter=not args.no_regime,  # Enable regime-aware parameter adaptation
+        signal_strictness=SignalStrictness.BALANCED,  # Use balanced signal generation approach
+        # Grid size configuration:
+        grid_size=args.grid_size,  # Use the specified grid size
+        is_quick_test=args.quick_test  # Whether to use minimal parameter grid
     )
     
     if results:

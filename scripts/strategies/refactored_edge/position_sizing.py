@@ -492,6 +492,257 @@ def calculate_integrated_position_size(
     
     return final_size
 
+# =========================================================================
+# Data Preparation and Validation Functions
+# =========================================================================
+
+def ensure_position_sizing_data(data: pd.DataFrame, require_regime: bool = True) -> pd.DataFrame:
+    """
+    Ensures that all necessary data for position sizing is available, calculating it if missing.
+    
+    This function checks for and adds:
+    1. ATR data for volatility-based sizing
+    2. Regime classifications for regime-aware sizing
+    
+    Args:
+        data (pd.DataFrame): Price data with OHLCV columns
+        require_regime (bool): Whether to require regime data (vs. using a default)
+        
+    Returns:
+        pd.DataFrame: The input dataframe with additional columns for ATR and regimes if they were missing
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Make a copy to avoid modifying the original if needed
+    data_copy = data.copy()
+    
+    # Ensure data_copy has the necessary columns
+    required_columns = ['open', 'high', 'low', 'close']
+    missing_columns = [col for col in required_columns if col not in data_copy.columns]
+    if missing_columns:
+        logger.warning(f"Missing required columns: {missing_columns}. Position sizing may be inaccurate.")
+        # Add missing columns with fallback values
+        for col in missing_columns:
+            if col == 'open':
+                data_copy['open'] = data_copy.get('close', 1.0)
+            elif col == 'high':
+                data_copy['high'] = data_copy.get('close', 1.0) * 1.01  # Default 1% higher
+            elif col == 'low':
+                data_copy['low'] = data_copy.get('close', 1.0) * 0.99   # Default 1% lower
+            elif col == 'close':
+                data_copy['close'] = 1.0  # Default fallback value
+    
+    # 1. Check and add ATR if missing
+    if 'atr' not in data_copy.columns:
+        logger.warning("ATR data missing for position sizing. Using percentage-based estimation.")
+        try:
+            # Import indicators module for ATR calculation
+            from scripts.strategies.refactored_edge import indicators
+            atr_window = DEFAULT_ATR_LOOKBACK
+            
+            # Calculate ATR
+            atr_data = indicators.add_atr(data_copy, atr_window)
+            data_copy['atr'] = atr_data['atr']
+            logger.info(f"ATR successfully calculated with window={atr_window}")
+        except Exception as e:
+            logger.warning(f"Failed to calculate ATR: {e}. Using percentage-based estimation.")
+            # Fallback: Estimate ATR as a percentage of price
+            price = data_copy['close']
+            # Simplified volatility calculation that doesn't require rolling window
+            # to avoid the days variable error
+            estimated_volatility = 0.01  # Default 1% volatility
+            try:
+                # Try a simple volatility calculation that's more robust
+                price_change = price.pct_change().abs()
+                # Fill NA values to avoid issues
+                price_change = price_change.fillna(0.01)
+                # Use mean without rolling to avoid potential issues
+                estimated_volatility = price_change.mean() 
+                if pd.isna(estimated_volatility) or estimated_volatility == 0:
+                    estimated_volatility = 0.01
+            except Exception:
+                logger.warning("Simplified volatility calculation failed. Using default 1% volatility.")
+            
+            data_copy['atr'] = price * estimated_volatility
+            logger.info(f"Using estimated ATR based on price volatility: {estimated_volatility:.2%}")
+    
+    # 2. Check and add regime data if missing
+    regime_columns = ['regime', 'regime_simple']
+    missing_regime = not any(col in data_copy.columns for col in regime_columns)
+    missing_attrs = (not hasattr(data_copy, 'attrs') or 
+                    'predominant_regime' not in data_copy.attrs)
+    
+    if missing_regime or missing_attrs:
+        if require_regime:
+            logger.warning("Regime data missing for position sizing. Using default regime (RANGING).")
+            try:
+                # Import regime module for regime detection
+                from scripts.strategies.refactored_edge import regime
+                
+                # Calculate regimes
+                data_copy = regime.detect_market_regimes(data_copy)
+                logger.info("Market regimes successfully detected.")
+            except Exception as e:
+                logger.warning(f"Failed to detect regimes: {e}. Using default regime (RANGING).")
+                # Fallback: Use default RANGING regime
+                data_copy['regime'] = pd.Series('ranging', index=data_copy.index)
+                data_copy['regime_simple'] = pd.Series('ranging', index=data_copy.index)
+                
+                # Ensure attrs exists and has the predominant_regime
+                if not hasattr(data_copy, 'attrs'):
+                    data_copy.attrs = {}
+                data_copy.attrs['predominant_regime'] = 'ranging'
+                data_copy.attrs['regime_percentages'] = {'ranging': '100.00%'}
+        else:
+            # Just add default regime data without warning
+            data_copy['regime'] = pd.Series('ranging', index=data_copy.index)
+            data_copy['regime_simple'] = pd.Series('ranging', index=data_copy.index)
+            
+            # Ensure attrs exists and has the predominant_regime
+            if not hasattr(data_copy, 'attrs'):
+                data_copy.attrs = {}
+            data_copy.attrs['predominant_regime'] = 'ranging'
+            data_copy.attrs['regime_percentages'] = {'ranging': '100.00%'}
+    
+    return data_copy
+
+
+def calculate_integrated_position_size(
+    equity: float,
+    entry_price: float,
+    atr: float,
+    market_regime: str,
+    risk_percentage: float = 0.01,  # 1% risk per trade
+    stop_loss_price: Optional[float] = None,
+    stop_atr_multiple: float = 2.0,
+    atr_multiplier: float = DEFAULT_ATR_MULTIPLIER,
+    min_size: float = 0.0,
+    max_size: float = float('inf'),
+    regime_multipliers: Optional[Dict[str, float]] = None,
+    zone_confidence: float = 0.0,
+    kelly_enabled: bool = False,
+    win_rate: float = 0.5,
+    win_loss_ratio: float = 1.0,
+    max_kelly_percentage: float = 0.5
+) -> float:
+    """
+    Calculate position size using an integrated approach combining multiple methods.
+    
+    This comprehensive function integrates:
+    1. Risk-based sizing with stop loss
+    2. Volatility adjustment using ATR
+    3. Regime-aware sizing
+    4. Zone confidence adjustment
+    5. Optional Kelly Criterion
+    
+    Args:
+        equity: Total account equity/capital
+        entry_price: Entry price of the asset
+        atr: Average True Range value for volatility assessment
+        market_regime: Current market regime (trending, ranging, etc.)
+        risk_percentage: Percentage of equity to risk per trade (0.01 = 1%)
+        stop_loss_price: Explicit stop loss price (if None, calculated from ATR)
+        stop_atr_multiple: ATR multiplier for stop loss calculation
+        atr_multiplier: Multiplier for ATR-based volatility adjustment
+        min_size: Minimum position size constraint
+        max_size: Maximum position size constraint
+        regime_multipliers: Optional custom regime multipliers
+        zone_confidence: Confidence in supply/demand zones (0.0-1.0)
+        kelly_enabled: Whether to apply Kelly Criterion adjustment
+        win_rate: Historical win rate (for Kelly calculation)
+        win_loss_ratio: Ratio of average win to average loss (for Kelly)
+        max_kelly_percentage: Maximum percentage of Kelly to use
+        
+    Returns:
+        Optimal position size in units of the asset
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Validate inputs
+    if equity <= 0:
+        logger.warning("Invalid equity value. Using minimum default.")
+        equity = 100.0  # Minimum equity assumption
+    
+    if entry_price <= 0:
+        logger.warning("Invalid entry price. Using fallback value.")
+        entry_price = 1.0  # Fallback to prevent division by zero
+    
+    if atr <= 0:
+        logger.warning("Invalid ATR value. Using price-based estimation.")
+        atr = entry_price * 0.01  # Default to 1% volatility
+        
+    # Validate market regime
+    valid_regimes = [e.value for e in MarketRegimeType]
+    if market_regime not in valid_regimes:
+        logger.warning(f"Invalid market regime '{market_regime}'. Using RANGING.")
+        market_regime = MarketRegimeType.RANGING
+    
+    # 1. Calculate risk amount in currency units
+    risk_amount = equity * risk_percentage
+    
+    # 2. Determine stop loss price if not explicitly provided
+    if stop_loss_price is None:
+        # Use ATR-based stop loss (long position assumed)
+        stop_loss_price = entry_price - (atr * stop_atr_multiple)
+    
+    # 3. Calculate base position size using risk-based approach
+    base_size = calculate_risk_based_size(
+        entry_price=entry_price,
+        stop_loss_price=stop_loss_price,
+        risk_amount=risk_amount,
+        min_size=min_size / 10,  # Using much lower min_size for base calculation
+        max_size=max_size * 2    # Using higher max_size to avoid premature capping
+    )
+    
+    # 4. Apply volatility adjustment
+    volatility_pct = atr / entry_price
+    # Add safety check to ensure reasonable volatility percentage
+    volatility_pct = max(volatility_pct, 0.001)  # Minimum 0.1% volatility
+    
+    volatility_factor = 1.0 / (volatility_pct * atr_multiplier)
+    # Cap volatility factor to avoid extreme values
+    volatility_factor = min(volatility_factor, 5.0)  
+    
+    volatility_adjusted_size = min(base_size, base_size * volatility_factor)
+    
+    # 5. Apply regime-specific adjustment
+    if regime_multipliers is None:
+        # Create a stronger differentiation between regimes for testing purposes
+        if not isinstance(regime_multipliers, dict):
+            regime_multipliers = REGIME_POSITION_MULTIPLIERS
+    
+    regime_multiplier = get_regime_position_multiplier(market_regime, regime_multipliers)
+    
+    # 6. Adjust for zone confidence if in ranging market
+    if 'rang' in market_regime.lower():
+        # Higher zone confidence increases the multiplier (less reduction)
+        zone_confidence = max(0.0, min(zone_confidence, 1.0))  # Clamp to [0,1]
+        confidence_adjustment = zone_confidence * (1.0 - regime_multiplier)
+        regime_multiplier += confidence_adjustment
+    
+    regime_adjusted_size = volatility_adjusted_size * regime_multiplier
+    
+    # 7. Apply Kelly Criterion if enabled
+    if kelly_enabled and win_rate > 0 and win_loss_ratio > 0:
+        kelly_fraction = calculate_kelly_fraction(win_rate, win_loss_ratio)
+        # Apply maximum Kelly percentage as a safety measure
+        capped_kelly = min(kelly_fraction * max_kelly_percentage, 1.0)  # Ensure no more than 100%
+        # Scale position size by Kelly percentage
+        kelly_adjusted_size = regime_adjusted_size * capped_kelly
+    else:
+        kelly_adjusted_size = regime_adjusted_size
+    
+    # 8. Apply min/max constraints
+    final_size = max(min_size, min(kelly_adjusted_size, max_size))
+    
+    # Log position sizing details at debug level
+    logger.debug(f"Position sizing details: base={base_size:.6f}, volatility_adj={volatility_adjusted_size:.6f}, "  
+                f"regime_adj={regime_adjusted_size:.6f}, final={final_size:.6f}")
+    
+    return final_size
+
 
 if __name__ == "__main__":
     print("Position sizing module loaded.")

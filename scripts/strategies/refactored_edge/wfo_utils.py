@@ -69,10 +69,67 @@ INIT_CAPITAL = 10000
 FEES_PCT = 0.001  # Example fee
 N_JOBS = -1  # Number of cores for parallel processing (-1 uses all available)
 
-# WFO Configuration
-WFO_TRAIN_POINTS = 34560  # Approx 360 days of 15-min data
-WFO_TEST_POINTS = 8640    # Approx 90 days of 15-min data
+# WFO Configuration - Default values per timeframe (more reasonable defaults)
+# Dictionary mapping timeframes to recommended (train_points, test_points) tuples
+WFO_WINDOW_SIZES = {
+    # Format: 'timeframe': (train_points, test_points)
+    '1m':  (10080, 2880),  # ~7 days train, ~2 days test (for 1-minute bars)
+    '5m':  (8064, 2016),   # ~28 days train, ~7 days test
+    '15m': (5760, 1440),   # ~60 days train, ~15 days test
+    '30m': (2880, 720),    # ~60 days train, ~15 days test
+    '1h':  (1440, 360),    # ~60 days train, ~15 days test
+    '2h':  (720, 180),     # ~60 days train, ~15 days test
+    '4h':  (360, 90),      # ~60 days train, ~15 days test
+    '1d':  (90, 30),       # ~90 days train, ~30 days test
+}
+
+# Default to 1h values if specific timeframe not found
+WFO_TRAIN_POINTS = 1440   # Default: 60 days of hourly data
+WFO_TEST_POINTS = 360     # Default: 15 days of hourly data
 STEP_POINTS = WFO_TEST_POINTS  # Step forward by test length for non-overlapping test sets
+
+def get_adaptive_window_size(timeframe: str = '1h', available_days: int = 120):
+    """
+    Calculate appropriate window sizes based on timeframe and available data.
+    
+    Args:
+        timeframe: Data granularity (e.g., '1h', '4h', '1d')
+        available_days: Number of days of data available
+        
+    Returns:
+        tuple: (train_points, test_points, step_points)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get recommended window sizes for this timeframe
+    train_points, test_points = WFO_WINDOW_SIZES.get(timeframe, (WFO_TRAIN_POINTS, WFO_TEST_POINTS))
+    
+    # Calculate approximate points in available data
+    points_per_day = {
+        '1m': 1440, '5m': 288, '15m': 96, '30m': 48,
+        '1h': 24, '2h': 12, '4h': 6, '6h': 4, '1d': 1
+    }
+    daily_points = points_per_day.get(timeframe, 24)  # Default to hourly if unknown
+    total_available_points = available_days * daily_points
+    
+    # Ensure window sizes don't exceed available data
+    if train_points + test_points > total_available_points:
+        # Need to scale down
+        scale_factor = 0.9 * total_available_points / (train_points + test_points)
+        
+        train_points = int(train_points * scale_factor)
+        test_points = int(test_points * scale_factor)
+        
+        logger.warning(f"Adjusted window sizes to match available data: train={train_points}, test={test_points}")
+        logger.warning(f"Available points: {total_available_points}, Required: {train_points + test_points}")
+    
+    # Make sure test window is at least 10% of train window for statistical validity
+    if test_points < train_points * 0.1:
+        test_points = int(train_points * 0.1)
+        logger.warning(f"Increased test window to maintain statistical validity: {test_points}")
+    
+    return train_points, test_points, test_points  # Using test_points as step_points
 
 # Results Configuration
 OUTPUT_DIR = "data/results"  # Directory to save results

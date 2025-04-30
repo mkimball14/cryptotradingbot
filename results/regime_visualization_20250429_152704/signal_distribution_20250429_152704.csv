@@ -1,0 +1,5 @@
+Segment,Regime,Standard Entries,Trending-Opt Entries,Ranging-Opt Entries,Standard Exits,Trending-Opt Exits,Ranging-Opt Exits
+Ranging Segment 1,ranging,7,7,14,0,0,0
+Trending Up Segment,trending,0,0,0,0,0,0
+Ranging Segment 2,ranging,7,1,10,0,0,0
+Trending Down Segment,trending,23,9,42,0,0,0

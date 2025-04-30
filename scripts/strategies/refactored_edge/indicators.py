@@ -70,6 +70,73 @@ def validate_ohlc_columns(df: pd.DataFrame):
     return column_format, column_map
 
 
+def add_adx(ohlc_data: pd.DataFrame, window: int = 14, column_map: dict = None) -> pd.DataFrame:
+    """
+    Calculate Average Directional Index (ADX) and Directional Indicators (DI).
+    
+    Args:
+        ohlc_data: DataFrame with OHLC data
+        window: Period for ADX calculation (default: 14)
+        column_map: Dictionary mapping standardized column names to actual column names
+        
+    Returns:
+        DataFrame with ADX, +DI, and -DI indicators
+    """
+    try:
+        if column_map is None:
+            # Try to detect column format
+            try:
+                _, column_map = validate_ohlc_columns(ohlc_data)
+            except ValueError as e:
+                logger.error(f"OHLC column validation failed in add_adx: {e}")
+                # Fallback to lowercase columns
+                column_map = {
+                    'Open': 'open', 
+                    'High': 'high', 
+                    'Low': 'low', 
+                    'Close': 'close'
+                }
+        
+        # Use the column map to get the correct column names
+        high = ohlc_data[column_map['High']].copy()
+        low = ohlc_data[column_map['Low']].copy()
+        close = ohlc_data[column_map['Close']].copy()
+        
+        # Create result DataFrame
+        result = pd.DataFrame(index=ohlc_data.index)
+        
+        # Calculate ADX and directional indicators using talib
+        result['adx'] = talib.ADX(high, low, close, timeperiod=window)
+        result['plus_di'] = talib.PLUS_DI(high, low, close, timeperiod=window)
+        result['minus_di'] = talib.MINUS_DI(high, low, close, timeperiod=window)
+        
+        # Fill NaN values that occur at the beginning due to the window
+        result = result.fillna(method='bfill')
+        
+        # Final check for any remaining NaN values
+        if result.isnull().any().any():
+            # If still have NaNs after bfill, use forward fill
+            result = result.fillna(method='ffill')
+            # If still have NaNs (beginning of data), fill with default values
+            result = result.fillna({
+                'adx': 25.0,        # Default to threshold between trending/ranging
+                'plus_di': 20.0,    # Default middle value
+                'minus_di': 20.0    # Default middle value
+            })
+        
+        logger.debug(f"ADX calculation successful with window={window}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error calculating ADX: {e}", exc_info=True)
+        # Return empty DataFrame with default values
+        result = pd.DataFrame(index=ohlc_data.index)
+        result['adx'] = 25.0        # Default to threshold between trending/ranging
+        result['plus_di'] = 20.0    # Default middle value
+        result['minus_di'] = 20.0   # Default middle value
+        return result
+
+
 def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
     """Add technical indicators to OHLC data based on the provided configuration.
     
@@ -111,9 +178,10 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         
         # Add ADX and Directional Indicators for regime detection (critical for advanced regime detection)
         adx_window = getattr(config, 'adx_window', 14)  # Default to 14 if not specified
-        indicators_df['adx'] = talib.ADX(high, low, close, timeperiod=adx_window)
-        indicators_df['plus_di'] = talib.PLUS_DI(high, low, close, timeperiod=adx_window)
-        indicators_df['minus_di'] = talib.MINUS_DI(high, low, close, timeperiod=adx_window)
+        adx_result = add_adx(ohlc_data, adx_window, column_map=column_map)
+        indicators_df['adx'] = adx_result['adx']
+        indicators_df['plus_di'] = adx_result['plus_di']
+        indicators_df['minus_di'] = adx_result['minus_di']
         
         # Log indicator values for debugging
         logger.debug(f"ADX calculation successful: range [{indicators_df['adx'].min():.1f} - {indicators_df['adx'].max():.1f}]")
