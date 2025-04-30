@@ -21,7 +21,9 @@ A comprehensive cryptocurrency trading bot featuring advanced Walk-Forward Optim
 
 ### Risk Management
 
-- **Multi-Layered Position Sizing**: Dynamic sizing based on account risk percentage, volatility, and market regime
+- **Advanced Position Sizing Module**: Comprehensive sizing framework combining risk percentage, volatility (ATR), market regime, zone confidence, and optional Kelly criterion
+- **Regime-Aware Position Adjustments**: Automatically modifies position size based on detected market regime (larger in trending, smaller in ranging)
+- **Risk-Based Calculation**: Determines optimal size based on account equity and stop-loss distance
 - **Comprehensive Stop-Loss System**: Fixed percentage, ATR-based, and zone-based exit mechanisms
 - **Global Risk Controls**: Maximum concurrent positions, drawdown circuit breakers, and correlation-based exposure limits
 
@@ -67,17 +69,29 @@ The project implements a sophisticated Walk-Forward Optimization framework to en
 
 ## Version History
 
-### v0.5.5 (Current Development - April 2025)
+### v0.5.6 (Current - April 2025)
+- **Advanced Position Sizing Implementation**:
+  - Developed comprehensive position sizing module with multiple calculation methods
+  - Implemented regime-aware position sizing with market condition adaptation
+  - Created ATR-based volatility adjustment to reduce size in choppy markets
+  - Added zone confidence integration to improve position sizing for high-quality entries
+  - Integrated optional Kelly Criterion for mathematical position optimization
+  - Created extensive unit testing for all position sizing components
+  - Integrated position sizing into backtest runner and WFO evaluation modules
+
+### v0.5.5 (April 2025)
 - **Architectural Robustness Improvements**:
   - Created comprehensive utils.py module with robust data validation and error handling
   - Fixed circular dependencies throughout the codebase using dynamic imports
-  - Implemented error handling decorators for consistent exception management
-  - Enhanced regime detection with correct percentage calculations and fallbacks
-  - Fixed unbound local variable errors in optimization workflow
-- **Signal Generation Improvements**:
-  - Implemented configurable signal strictness levels (STRICT, BALANCED, RELAXED)
-  - Enhanced Supply/Demand zone proximity filters for better entry/exit timing
-  - Created regime-specific parameter optimization framework
+  - Resolved regime detection issues with proper percentage calculations
+  - Added safe attribute/method access patterns for vectorbtpro compatibility
+  - Implemented consistent error handling with detailed logging
+- **Enhanced Signal Generation**:
+  - Developed balanced signal framework with configurable strictness levels (STRICT, BALANCED, RELAXED)
+  - Implemented regime-aware parameter adaptation
+  - Added visual comparison tools for signal validation
+  - Fixed signal determinism issues for reproducible testing
+  - Created summary statistics to quantify signal differences by regime
 
 ### v0.5.0
 - Enhanced Walk-Forward Optimization with parameter stability analysis and robustness checks
@@ -223,16 +237,16 @@ Responsible for acquiring and managing market data:
     -   **Storage**: Persists data in the configured database (SQLite default) using SQLAlchemy or similar ORM. Includes indexing for efficient querying.
     -   **Multi-Timeframe**: Manages data for various intervals (15m, 1H, 4H, etc.), potentially resampling lower timeframes.
     -   **Maintenance**: Includes logic for detecting and filling data gaps, managing data freshness.
-
+s, S/D Zones, Trend, and Volatility components.
+    -   Uses configurable parameters optimized via WFO.
+    -   Includes signal generation logic based on confluence rules.
+-   **Exploratory Strategy Framework**: Allows testing new ideas in isolation.
+-   **Signal Generation**: Logic to produce buy/sell/hold signals base
 ### 3. Strategy Implementation Module
 Contains the trading logic:
 
 -   **Edge Multi-Factor Strategy**: The core strategy implementation.
-    -   Combines signals from RSI, Bollinger Bands, S/D Zones, Trend, and Volatility components.
-    -   Uses configurable parameters optimized via WFO.
-    -   Includes signal generation logic based on confluence rules.
--   **Exploratory Strategy Framework**: Allows testing new ideas in isolation.
--   **Signal Generation**: Logic to produce buy/sell/hold signals based on strategy rules.
+    -   Combines signals from RSI, Bollinger Bandd on strategy rules.
 -   **Parameter Management**: Handles loading and applying strategy parameters.
 
 ### 4. Supply/Demand Zone Detection
@@ -254,11 +268,16 @@ Optimizes and validates strategy parameters:
 -   **Resumable Processing**: Saves state to allow long optimizations to be paused and resumed.
 
 ### 6. Risk Management System
-Enforces risk controls:
+Enforces comprehensive risk controls:
 
--   **Position Sizing**: Calculates trade size based on account balance, risk percentage per trade (e.g., 1%), and stop-loss distance.
--   **Dynamic Adjustments**: Modifies position size based on signal confidence or market volatility.
--   **Stop-Loss Calculation**: Determines stop-loss levels using methods like ATR multiples or fixed pips/points relative to entry or zone boundaries.
+-   **Advanced Position Sizing**: Integrated position sizing module with multiple calculation approaches:
+    -   **Risk-Based Sizing**: Calculates optimal position size based on account equity risk percentage and stop-loss distance
+    -   **Regime-Aware Multipliers**: Adapts position size to market conditions (larger in trending, smaller in ranging)
+    -   **Volatility Adjustment**: Uses ATR to reduce position size in volatile conditions
+    -   **Zone Confidence Integration**: Increases position size for entries with higher zone confidence
+    -   **Kelly Criterion (Optional)**: Mathematical optimization based on win rate and win/loss ratio
+-   **Dynamic Stop-Loss Calculation**: Determines optimal stop levels using ATR multiples, zone boundaries, or fixed percentages
+-   **Adaptive Exit Logic**: Modifies exit criteria based on detected market regime
 -   **Take-Profit Targeting**: Sets profit targets based on risk-reward ratios or key technical levels (e.g., opposing S/D zones).
 -   **Circuit Breakers**: Implements rules to temporarily halt trading based on conditions like consecutive losses, daily drawdown limits, or extreme volatility spikes.
 -   **Account Monitoring**: Tracks overall account exposure and drawdown.
@@ -624,6 +643,31 @@ Based on the `tasks.json` file, the project has the following status:
 -   **Task Files**: Remember that `task-master generate` overwrites files in `tasks/`. Keep primary edits in `tasks.json`.
 -   **Complexity**: Use `analyze-complexity` and `expand` to break down large tasks *before* starting implementation to improve planning.
 -   **Status Updates**: Keep task statuses (`set-status`) updated frequently to reflect actual progress accurately.
+
+## Position Sizing Implementation
+
+The position sizing module (`position_sizing.py`) offers these key features:
+
+1. **Risk-Based Position Sizing**: `calculate_risk_based_size()`
+   - Calculates optimal position size based on risk amount and stop distance
+   - Enforces minimum and maximum size constraints
+   - Includes validation and error handling for robust calculation
+
+2. **Regime-Specific Position Multipliers**: `get_regime_position_multiplier()`
+   - Automatically adjusts position size based on market regime
+   - Default multipliers: 1.0 for trending, 0.75 for ranging markets
+   - Supports custom multiplier configuration for fine-tuned control
+
+3. **Integrated Position Sizing**: `calculate_integrated_position_size()`
+   - Combines all sizing approaches into a comprehensive calculation
+   - Integrates regime awareness, ATR volatility, and zone confidence
+   - Optional Kelly Criterion integration for mathematical optimization
+   - Detailed parameter validation and error handling
+
+4. **Backtest & WFO Integration**:
+   - Seamlessly integrated into the backtest runner and WFO evaluation modules
+   - Dynamic position sizing in backtests with detailed logging
+   - Supports both fixed size and dynamic sizing modes
 
 ## Strategy Development Workflow
 

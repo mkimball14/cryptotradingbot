@@ -195,27 +195,30 @@ OPTIMIZATION_PARAMETER_GRID = {
     'granularity_str': ['1h'],     # Keep timeframe fixed
     'atr_window': [14],            # Standard ATR window
     'bb_window': [20],             # Standard Bollinger Band window
-    'bb_std_dev': [2.0],           # Standard BB deviation - fixed to reduce combinations
+    'bb_std_dev': [2.0, 2.5],      # Standard BB deviation with a slightly wider option
     'rsi_window': [14],            # Standard RSI window
     
-    # --- Core Parameters (only the most influential) ---
-    # RSI thresholds reduced to just two options each
-    'rsi_lower_threshold': [30, 40],  # Just two values - low oversold and moderate oversold
-    'rsi_upper_threshold': [60, 70],  # Just two values - moderate overbought and strong overbought
+    # --- Core Parameters (expanded to ensure some trades are generated) ---
+    # RSI thresholds with more lenient options to ensure signal generation
+    'rsi_lower_threshold': [20, 30, 40],  # Expanded range from very oversold to moderate oversold
+    'rsi_upper_threshold': [60, 70, 80],  # Expanded range from moderate to extreme overbought
     
     # Trend identification window - keeping this variable as it's important
-    'ma_window': [50, 100],        # Keeping both options as they represent different trend timeframes
+    'ma_window': [50, 100, 200],   # Added longer-term trend option
     
-    # --- Risk Management Parameters (fixed) ---
-    'sl_pct': [0.02],              # Fixed 2% stop loss
-    'risk_reward_ratio': [2.0],    # Fixed 2:1 reward/risk ratio
+    # --- Risk Management Parameters (expanded) ---
+    'sl_pct': [0.015, 0.02, 0.025],  # More options for stop loss percentage
+    'risk_reward_ratio': [1.5, 2.0, 2.5],  # More options for R:R ratio
     
     # --- S/D Zone Parameters ---
-    'use_zones': [True, False],    # Test both with and without S/D zones to compare their impact
-                                   # This is a key aspect of our strategy evaluation
+    'use_zones': [True, False],    # Test both with and without S/D zones
+    
+    # --- Position Sizing Parameters ---
+    'use_dynamic_sizing': [True, False],  # Test both with and without dynamic position sizing
+    'risk_percentage': [0.005, 0.01, 0.015],  # Risk percentage options (0.5%, 1%, 1.5%)
     
     # --- Regime Parameters ---
-    'use_regime_adaptation': [True, False],  # Test both with and without regime-specific parameter adaptation
+    'use_regime_adaptation': [True, False],  # Test both with and without regime adaptation
     
     # --- Signal Generation Parameters ---
     'signal_strictness': [SignalStrictness.STRICT, SignalStrictness.BALANCED, SignalStrictness.RELAXED],
