@@ -9,6 +9,7 @@ different market conditions.
 """
 
 import logging
+import traceback
 from typing import Dict, List, Tuple, Optional, Any, Union, Set
 import numpy as np
 import pandas as pd
@@ -476,6 +477,322 @@ def statistical_significance_test(
         results['effect_size_interpretation'] = 'calculation_failed'
     
     return results
+
+
+def calculate_performance_metrics(portfolio) -> Dict[str, Any]:
+    """
+    Calculate various performance metrics for a vectorbtpro Portfolio object.
+    
+    Args:
+        portfolio: vectorbtpro Portfolio object from a backtest
+        
+    Returns:
+        Dictionary of performance metrics
+    """
+    metrics = {}
+    
+    try:
+        # Get basic stats from the portfolio object - with safeguards for different vectorbtpro versions
+        try:
+            if hasattr(portfolio, 'stats'):
+                if callable(portfolio.stats):
+                    try:
+                        # Try calling stats as a method
+                        stats = portfolio.stats()
+                        logger.info(f"Called portfolio.stats() method successfully, got {len(stats) if stats else 0} metrics")
+                    except Exception as e:
+                        logger.warning(f"Error calling portfolio.stats(): {e}")
+                        # Fallback to accessing stats directly
+                        stats = getattr(portfolio, 'stats', {})
+                        if callable(stats):
+                            stats = {}
+                else:
+                    # stats is an attribute, not a method
+                    stats = portfolio.stats
+                    logger.info(f"Got portfolio.stats attribute with {len(stats) if hasattr(stats, '__len__') else 'unknown'} metrics")
+            else:
+                # No stats attribute/method, use empty dict
+                logger.warning("Portfolio object has no 'stats' attribute or method")
+                stats = {}
+                
+        except Exception as e:
+            logger.warning(f"Exception accessing portfolio stats: {str(e)}")
+            stats = {}
+            
+        # Safely extract key metrics with proper error handling
+        try:
+            metrics['total_return'] = float(stats.get('Total Return [%]', 0.0))
+            metrics['sharpe_ratio'] = float(stats.get('Sharpe Ratio', 0.0))
+            metrics['sortino_ratio'] = float(stats.get('Sortino Ratio', 0.0))
+            metrics['calmar_ratio'] = float(stats.get('Calmar Ratio', 0.0))
+            metrics['max_drawdown'] = float(stats.get('Max Drawdown [%]', 0.0))
+            metrics['annual_return'] = float(stats.get('Annual Return [%]', 0.0))
+            metrics['annual_volatility'] = float(stats.get('Annual Volatility [%]', 0.0))
+        except Exception as e:
+            logger.warning(f"Error extracting stats values: {e}")
+            # Set defaults for missing metrics
+            metrics['total_return'] = 0.0
+            metrics['sharpe_ratio'] = 0.0
+            metrics['sortino_ratio'] = 0.0
+            metrics['calmar_ratio'] = 0.0
+            metrics['max_drawdown'] = 0.0
+            metrics['annual_return'] = 0.0
+            metrics['annual_volatility'] = 0.0
+        metrics['expectancy'] = float(stats.get('Expectancy [%]', 0.0))
+        metrics['total_trades'] = int(stats.get('Total Trades', 0))
+        metrics['win_rate'] = float(stats.get('Win Rate [%]', 0.0))
+        metrics['profit_factor'] = float(stats.get('Profit Factor', 1.0))
+        
+        # Safely access returns data
+        try:
+            # Try different ways to access returns data based on vectorbtpro version
+            rets = None
+            if hasattr(portfolio, 'returns'):
+                if callable(portfolio.returns):
+                    try:
+                        rets = portfolio.returns()
+                        logger.info(f"Successfully called portfolio.returns() method")
+                    except Exception as e:
+                        logger.warning(f"Error calling portfolio.returns(): {e}")
+                        # Try to access the returns attribute directly
+                        rets = getattr(portfolio, 'returns', pd.Series())
+                        if callable(rets):
+                            rets = pd.Series()
+                else:
+                    # Returns is an attribute
+                    rets = portfolio.returns
+                    logger.info(f"Accessed portfolio.returns attribute directly")
+            else:
+                # Look for returns in stats
+                logger.warning("Portfolio has no returns method or attribute, checking other sources")
+                # Try to extract returns from the stats if possible
+                rets = pd.Series()
+                
+            # Calculate return metrics if we have valid returns data
+            if isinstance(rets, pd.Series) and not rets.empty:
+                logger.info(f"Processing returns Series with {len(rets)} values")
+                # Mean return and volatility
+                metrics['mean_return'] = float(rets.mean())
+                metrics['return_volatility'] = float(rets.std())
+                
+                # Return stream characteristics
+                positive_rets = rets[rets > 0]
+                negative_rets = rets[rets < 0]
+                metrics['positive_day_ratio'] = len(positive_rets) / len(rets) if len(rets) > 0 else 0
+                metrics['avg_positive_return'] = float(positive_rets.mean()) if len(positive_rets) > 0 else 0
+                metrics['avg_negative_return'] = float(negative_rets.mean()) if len(negative_rets) > 0 else 0
+                
+                # Return to risk ratio
+                if metrics['return_volatility'] > 0:
+                    metrics['return_to_risk'] = metrics['mean_return'] / metrics['return_volatility']
+                else:
+                    metrics['return_to_risk'] = 0.0
+            else:
+                logger.warning("No valid returns data available for analysis")
+                # Set default metrics
+                metrics['mean_return'] = 0.0
+                metrics['return_volatility'] = 0.0
+                metrics['positive_day_ratio'] = 0.0
+                metrics['avg_positive_return'] = 0.0
+                metrics['avg_negative_return'] = 0.0
+                metrics['return_to_risk'] = 0.0
+        except Exception as e:
+            logger.warning(f"Error processing returns data: {e}")
+            logger.warning(traceback.format_exc())
+            # Set default metrics
+            metrics['mean_return'] = 0.0
+            metrics['return_volatility'] = 0.0
+            metrics['positive_day_ratio'] = 0.0
+            metrics['avg_positive_return'] = 0.0
+            metrics['avg_negative_return'] = 0.0
+            metrics['return_to_risk'] = 0.0
+            
+        # Additional metrics from returns data
+        if 'mean_return' in metrics and metrics['mean_return'] != 0.0 and 'return_volatility' in metrics and metrics['return_volatility'] > 0:
+            # We already have valid returns data processed above
+            metrics['volatility'] = float(metrics['return_volatility'] * np.sqrt(252))  # Annualized vol using already computed value
+            
+            # Calculate downside deviation if we have mean return and volatility
+            if 'annual_return' in metrics:
+                # Use pre-calculated stats if possible
+                metrics['information_ratio'] = metrics.get('information_ratio', 0.0)  # Keep existing or set to 0
+            else:
+                metrics['information_ratio'] = 0.0
+        else:
+            # No valid returns data, use defaults
+            metrics['volatility'] = 0.0
+            metrics['information_ratio'] = 0.0
+        
+        # Underwater and drawdown calculations
+        if metrics['max_drawdown'] > 0:
+            try:
+                # Safely check how to access drawdown data
+                underwater = None
+                try:
+                    if hasattr(portfolio, 'drawdowns'):
+                        # Try accessing through drawdowns accessor
+                        drawdowns = portfolio.drawdowns
+                        if hasattr(drawdowns, 'get_drawdown_series') and callable(drawdowns.get_drawdown_series):
+                            underwater = drawdowns.get_drawdown_series()
+                            logger.info("Got drawdown series from portfolio.drawdowns.get_drawdown_series()")
+                        else:
+                            # Try other attribute access patterns
+                            underwater = getattr(drawdowns, 'drawdown', None)
+                            logger.info("Got drawdown series from portfolio.drawdowns.drawdown attribute")
+                    elif hasattr(portfolio, 'drawdown'):
+                        if callable(portfolio.drawdown):
+                            try:
+                                underwater = portfolio.drawdown()
+                                logger.info("Got drawdown series from portfolio.drawdown() method")
+                            except Exception as e:
+                                logger.warning(f"Error calling portfolio.drawdown(): {e}")
+                                underwater = None
+                        else:
+                            underwater = portfolio.drawdown
+                            logger.info("Got drawdown series from portfolio.drawdown attribute")
+                    else:
+                        # Try getting from stats
+                        stats_obj = getattr(portfolio, 'stats', None)
+                        if stats_obj is not None:
+                            if callable(stats_obj):
+                                stats_dict = stats_obj()
+                                underwater = stats_dict.get('drawdown', None)
+                            else:
+                                underwater = stats_obj.get('drawdown', None)
+                except Exception as e:
+                    logger.warning(f"Error accessing drawdown data: {e}")
+                    underwater = None
+                
+                # Process underwater periods if we got valid data
+                if isinstance(underwater, pd.Series) and not underwater.empty:
+                    logger.info(f"Processing drawdown Series with {len(underwater)} values")
+                    # Find underwater periods (drawdown > 5%)
+                    mask = underwater < -0.05
+                    if mask.any():  # Only process if we have any qualifying drawdowns
+                        underwater_periods = mask.astype(int).diff().fillna(0).abs().cumsum()
+                        period_lengths = underwater_periods[mask].value_counts()
+                        metrics['underwater_periods'] = len(period_lengths)
+                        metrics['max_underwater_duration'] = period_lengths.max() if len(period_lengths) > 0 else 0
+                    else:
+                        metrics['underwater_periods'] = 0
+                        metrics['max_underwater_duration'] = 0
+                else:
+                    logger.warning("No valid drawdown data available")
+                    metrics['underwater_periods'] = 0
+                    metrics['max_underwater_duration'] = 0
+            except Exception as e:
+                logger.warning(f"Error calculating underwater periods: {e}")
+                logger.warning(f"Traceback: {traceback.format_exc()}")
+                metrics['underwater_periods'] = 0
+                metrics['max_underwater_duration'] = 0
+                
+        # Risk-adjusted metrics
+        if metrics['volatility'] > 0:
+            metrics['return_to_risk'] = metrics['total_return'] / metrics['volatility'] 
+        else:
+            metrics['return_to_risk'] = 0.0
+            
+        # Evaluate winning and losing trades
+        # Get base metrics from portfolio stats
+        metrics['total_trades'] = int(stats.get('Total Trades', 0))
+        metrics['win_rate'] = float(stats.get('Win Rate [%]', 0.0))
+        
+        # Access detailed trade data based on vectorbtpro version
+        wins = pd.DataFrame()
+        losses = pd.DataFrame()
+        
+        try:
+            if hasattr(portfolio, 'trades'):
+                if hasattr(portfolio.trades, 'records') and len(portfolio.trades.records) > 0:
+                    # Access structured records array
+                    trades_records = portfolio.trades.records
+                    # Use total trades from records if available
+                    metrics['total_trades'] = len(trades_records)
+                    
+                    # Check if trades has a get_returned method to calculate win/loss stats
+                    if hasattr(portfolio.trades, 'get_returns') and callable(portfolio.trades.get_returns):
+                        returns = portfolio.trades.get_returns()
+                        if isinstance(returns, pd.Series) and not returns.empty:
+                            wins_mask = returns > 0
+                            if wins_mask.any():
+                                wins_returns = returns[wins_mask]
+                                metrics['avg_win'] = float(wins_returns.mean())
+                                metrics['max_win'] = float(wins_returns.max())
+                                metrics['win_rate'] = (len(wins_returns) / len(returns)) * 100
+                            
+                            losses_mask = returns <= 0
+                            if losses_mask.any():
+                                losses_returns = returns[losses_mask]
+                                metrics['avg_loss'] = float(losses_returns.mean())
+                                metrics['max_loss'] = float(losses_returns.min())
+                                
+                        # Skip the rest of the processing by setting flags
+                        wins = pd.DataFrame([1])  # Non-empty dataframe to skip further processing
+                        losses = pd.DataFrame([1])
+                        # We have processed the returns already
+                    
+                    # Convert records to DataFrame if needed
+                    if not isinstance(trades_records, pd.DataFrame):
+                        # Try to convert records array to dataframe
+                        try:
+                            trade_data = pd.DataFrame(trades_records)
+                        except Exception as e:
+                            logger.warning(f"Error converting trade records to DataFrame: {e}")
+                            trade_data = pd.DataFrame()
+                    else:
+                        trade_data = trades_records
+                    
+                    # Process trade data if we have returns information
+                    if not trade_data.empty and 'return' in trade_data.columns:
+                        wins = trade_data[trade_data['return'] > 0]
+                        losses = trade_data[trade_data['return'] <= 0]
+                    elif not trade_data.empty and 'pnl' in trade_data.columns:
+                        # Try using PnL if return isn't available
+                        wins = trade_data[trade_data['pnl'] > 0]
+                        losses = trade_data[trade_data['pnl'] <= 0]
+                        
+            # If we couldn't get trade data from the portfolio, use the stats
+            if wins.empty and losses.empty:
+                # Set reasonable defaults based on portfolio stats
+                logger.warning("Using stats-based metrics as detailed trade data unavailable")
+        except Exception as e:
+            logger.warning(f"Error processing trade data: {e}")
+            # Keep using the stats-based metrics
+            
+            if len(wins) > 0:
+                metrics['avg_win'] = float(wins['return'].mean())
+                metrics['max_win'] = float(wins['return'].max())
+            else:
+                metrics['avg_win'] = 0.0
+                metrics['max_win'] = 0.0
+                
+            if len(losses) > 0:
+                metrics['avg_loss'] = float(losses['return'].mean())
+                metrics['max_loss'] = float(losses['return'].min())  # Min return = max loss
+            else:
+                metrics['avg_loss'] = 0.0
+                metrics['max_loss'] = 0.0
+                
+            # Risk of ruin estimate (simplified)
+            if metrics['win_rate'] > 0 and metrics['avg_win'] > 0 and abs(metrics['avg_loss']) > 0:
+                rr_factor = metrics['win_rate'] / (1 - metrics['win_rate']) * (metrics['avg_win'] / abs(metrics['avg_loss']))
+                metrics['risk_of_ruin_factor'] = float(rr_factor)
+            else:
+                metrics['risk_of_ruin_factor'] = 0.0
+                
+    except Exception as e:
+        logger.error(f"Error calculating performance metrics: {str(e)}")
+        # Return basic empty metrics if calculation fails
+        metrics = {
+            'total_return': 0.0,
+            'sharpe_ratio': 0.0,
+            'max_drawdown': 0.0,
+            'win_rate': 0.0,
+            'total_trades': 0,
+            'error': str(e)
+        }
+        
+    return metrics
 
 
 if __name__ == "__main__":

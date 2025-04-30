@@ -119,30 +119,60 @@ def generate_balanced_signals(
         # Create zone signals with adjustable strength
         # At zone_influence=1, behaves like strict mode
         # At zone_influence=0, zones have no effect 
+        # --- Deterministic modification for testing ---
+        # If influence >= 0.5, be less strict (closer to OR logic with primary condition)
+        # If influence < 0.5, be more strict (closer to AND logic with primary condition)
         
         # For long entries, we need a demand zone (buying)
-        if zone_influence >= 1.0:
-            # Strict: must be in the zone
+        if zone_influence >= 0.5: # Less strict (OR logic倾向)
+            # Condition is met if EITHER primary condition is met OR price is in demand zone
+            # (We'll combine this later using OR logic)
+            zone_long_entry_condition = price_in_demand_zone 
+        else: # More strict (AND logic倾向)
+            # Condition requires price to be in demand zone
+            # (We'll combine this later using AND logic implicitly)
             zone_long_entry_condition = price_in_demand_zone
-        elif zone_influence <= 0.0:
-            # Ignore zones completely
-            zone_long_entry_condition = pd.Series(True, index=close.index)
-        else:
-            # Create probabilistic zone entry based on influence factor
-            # If in a zone, always True; if not, use influence factor
-            zone_long_entry_condition = price_in_demand_zone | np.random.random(len(close)) > zone_influence
-            
+
         # For short entries, we need a supply zone (selling)
-        if zone_influence >= 1.0:
+        if zone_influence >= 0.5: # Less strict (OR logic倾向)
             zone_short_entry_condition = price_in_supply_zone
-        elif zone_influence <= 0.0:
-            zone_short_entry_condition = pd.Series(True, index=close.index)
-        else:
-            zone_short_entry_condition = price_in_supply_zone | np.random.random(len(close)) > zone_influence
+        else: # More strict (AND logic倾向)
+            zone_short_entry_condition = price_in_supply_zone
             
-        # For exits, we use the opposite zones
-        zone_long_exit_trigger = price_in_supply_zone & (np.random.random(len(close)) < zone_influence)
-        zone_short_exit_trigger = price_in_demand_zone & (np.random.random(len(close)) < zone_influence)
+        # --- Define Exit Zone Triggers (Deterministic) ---
+        # Long exits triggered by supply zones
+        if zone_influence >= 0.5: # Less strict (OR logic)
+            zone_long_exit_trigger = price_in_supply_zone
+        else: # More strict (AND logic)
+            zone_long_exit_trigger = price_in_supply_zone
+
+        # Short exits triggered by demand zones
+        if zone_influence >= 0.5: # Less strict (OR logic)
+            zone_short_exit_trigger = price_in_demand_zone
+        else: # More strict (AND logic)
+            zone_short_exit_trigger = price_in_demand_zone
+        # --- End Exit Zone Trigger Definition ---
+            
+        # Primary Entry Conditions (Combine basic indicator conditions)
+        primary_long_condition = rsi_oversold & price_below_bb 
+        primary_short_condition = rsi_overbought & price_above_bb
+
+        # Combine Primary conditions with Zone conditions based on influence
+        if use_zones:
+            if zone_influence >= 0.5: # Less Strict: Primary OR Zone
+                long_entry_trigger = (primary_long_condition | zone_long_entry_condition) & trend_filter_long
+                short_entry_trigger = (primary_short_condition | zone_short_entry_condition) & trend_filter_short
+            else: # More Strict: Primary AND Zone
+                long_entry_trigger = primary_long_condition & zone_long_entry_condition & trend_filter_long
+                short_entry_trigger = primary_short_condition & zone_short_entry_condition & trend_filter_short
+        else:
+            # Zones not used
+            long_entry_trigger = primary_long_condition & trend_filter_long
+            short_entry_trigger = primary_short_condition & trend_filter_short
+
+        # Generate Initial Entries
+        initial_long_entries = pd.Series(long_entry_trigger, index=close.index)
+        initial_short_entries = pd.Series(short_entry_trigger, index=close.index)
     else:
         # If zones aren't used, these conditions are always met/not met
         zone_long_entry_condition = pd.Series(True, index=close.index)
@@ -150,45 +180,52 @@ def generate_balanced_signals(
         zone_short_entry_condition = pd.Series(True, index=close.index)
         zone_short_exit_trigger = pd.Series(False, index=close.index)
 
-    # BALANCED ENTRY CONDITIONS:
-    # Require RSI signal AND (price OR trend) - more trades than strict but better quality than relaxed
-    long_entries = (
-        rsi_oversold & (price_below_bb | trend_filter_long) & zone_long_entry_condition
-    )
-    
-    short_entries = (
-        rsi_overbought & (price_above_bb | trend_filter_short) & zone_short_entry_condition
-    )
-    
+        # Primary Entry Conditions (Combine basic indicator conditions)
+        primary_long_condition = rsi_oversold & price_below_bb 
+        primary_short_condition = rsi_overbought & price_above_bb
+
+        # Combine Primary conditions with Zone conditions based on influence
+        long_entry_trigger = primary_long_condition & trend_filter_long
+        short_entry_trigger = primary_short_condition & trend_filter_short
+
+        # Generate Initial Entries
+        initial_long_entries = pd.Series(long_entry_trigger, index=close.index)
+        initial_short_entries = pd.Series(short_entry_trigger, index=close.index)
+
     # BALANCED EXIT CONDITIONS:
     # Require either RSI OR price (more exits than strict) but with some filtering
     # Difference from relaxed: not purely OR conditions, adds some filtering
-    long_exits = (
-        (rsi_overbought & close > trend_ma) |  # RSI overbought when above trend
-        (price_above_bb & rsi > 50) |          # Above upper band with RSI above neutral
-        zone_long_exit_trigger                  # Zone exit with influence factor
-    )
-    
-    short_exits = (
-        (rsi_oversold & close < trend_ma) |    # RSI oversold when below trend
-        (price_below_bb & rsi < 50) |          # Below lower band with RSI below neutral
-        zone_short_exit_trigger                 # Zone exit with influence factor
-    )
-
+    primary_long_exit = (rsi_overbought & close > trend_ma) | (price_above_bb & rsi > 50)
+    primary_short_exit = (rsi_oversold & close < trend_ma) | (price_below_bb & rsi < 50)
+            
+    if use_zones:
+        if zone_influence >= 0.5: # Less Strict: Primary OR Zone
+            long_exits = primary_long_exit | zone_long_exit_trigger
+            short_exits = primary_short_exit | zone_short_exit_trigger
+        else: # More Strict: Primary AND Zone
+            # Note: Strict exit requires *both* primary signal AND zone signal. This might be too restrictive.
+            # Consider if exits should always be less strict or configurable separately.
+            # For now, implementing strictly based on the pattern.
+            long_exits = primary_long_exit & zone_long_exit_trigger
+            short_exits = primary_short_exit & zone_short_exit_trigger
+    else:
+        long_exits = primary_long_exit
+        short_exits = primary_short_exit
+            
     # Ensure exits override entries on same bar
-    long_entries = long_entries & ~long_exits
-    short_entries = short_entries & ~short_exits
+    initial_long_entries = initial_long_entries & ~long_exits
+    initial_short_entries = initial_short_entries & ~short_exits
 
     # Fill NaN values
-    long_entries = long_entries.fillna(False)
+    initial_long_entries = initial_long_entries.fillna(False)
     long_exits = long_exits.fillna(False)
-    short_entries = short_entries.fillna(False)
+    initial_short_entries = initial_short_entries.fillna(False)
     short_exits = short_exits.fillna(False)
 
     # Apply minimum holding period (configurable but shorter than strict)
     if min_hold_period > 0:
         # For long positions
-        long_entries_idx = long_entries[long_entries].index
+        long_entries_idx = initial_long_entries[initial_long_entries].index
         for idx in long_entries_idx:
             loc_idx = long_exits.index.get_loc(idx)
             end_idx = min(loc_idx + min_hold_period, len(long_exits))
@@ -196,7 +233,7 @@ def generate_balanced_signals(
                 long_exits.iloc[loc_idx:end_idx] = False
                 
         # For short positions
-        short_entries_idx = short_entries[short_entries].index
+        short_entries_idx = initial_short_entries[initial_short_entries].index
         for idx in short_entries_idx:
             loc_idx = short_exits.index.get_loc(idx)
             end_idx = min(loc_idx + min_hold_period, len(short_exits))
@@ -204,7 +241,7 @@ def generate_balanced_signals(
                 short_exits.iloc[loc_idx:end_idx] = False
     
     # Log signal counts for debugging
-    logger.debug(f"Generated {long_entries.sum()} long entries and {short_entries.sum()} short entries "
+    logger.debug(f"Generated {initial_long_entries.sum()} long entries and {initial_short_entries.sum()} short entries "
                 f"with {strictness} mode")
     
-    return long_entries, long_exits, short_entries, short_exits
+    return initial_long_entries, long_exits, initial_short_entries, short_exits
