@@ -11,6 +11,9 @@ import vectorbtpro as vbt
 from typing import Dict, Any, Tuple, List, Optional, Union
 import os
 import logging
+import time
+import hashlib
+import json
 from datetime import datetime
 
 # Configure logging
@@ -23,6 +26,84 @@ from scripts.strategies.refactored_edge.signals_integration import generate_sign
 from scripts.strategies.refactored_edge.wfo_utils import INIT_CAPITAL, is_testing_mode, get_ohlc_columns
 from scripts.strategies.refactored_edge.position_sizing import calculate_integrated_position_size, get_regime_position_multiplier
 from scripts.strategies.refactored_edge.regime import MarketRegimeType
+
+# Indicator cache to avoid redundant calculations
+_indicator_cache = {}
+
+def get_cache_key(params):
+    """
+    Generate a cache key from parameters that affect indicator calculations.
+    
+    Args:
+        params (dict): Parameter dictionary
+    
+    Returns:
+        str: Cache key as a hash of param values
+    """
+    # Extract only parameters that affect indicator calculations
+    indicator_params = {
+        k: v for k, v in params.items()
+        if k in [
+            'rsi_window', 'bb_window', 'bb_std_dev', 'ma_window', 
+            'atr_window', 'adx_window', 'sma_short', 'sma_medium', 'sma_long'
+        ]
+    }
+    
+    # Convert to a deterministic string representation and hash it
+    params_str = json.dumps(indicator_params, sort_keys=True)
+    return hashlib.md5(params_str.encode()).hexdigest()
+
+def get_cached_indicators(data, params):
+    """
+    Get indicators from cache or calculate them.
+    
+    Args:
+        data (pd.DataFrame): Input data frame
+        params (dict): Parameter dictionary
+    
+    Returns:
+        pd.DataFrame: DataFrame with calculated indicators
+    """
+    from scripts.strategies.refactored_edge.config import EdgeConfig
+    
+    cache_key = get_cache_key(params)
+    
+    if cache_key in _indicator_cache:
+        # Return cached indicators if available
+        indicators_df = _indicator_cache[cache_key]
+        logger.debug(f"Using cached indicators for cache key: {cache_key}")
+        return indicators_df
+    
+    # Calculate indicators if not in cache
+    try:
+        # Create EdgeConfig object from params
+        config = EdgeConfig(**params)
+        
+        # Use the config object with add_indicators
+        indicators_df = indicators.add_indicators(data, config)
+        
+        # Add to cache for future use
+        _indicator_cache[cache_key] = indicators_df
+        logger.debug(f"Added indicators to cache with key: {cache_key}")
+        
+        return indicators_df
+    except Exception as e:
+        logger.error(f"Error calculating indicators: {e}")
+        print(f"DEBUG (Eval): Error calculating indicators with params {params}: {e}")
+        # Try to create basic indicators without complex config
+        # This provides fallback behavior for testing
+        return data.copy()
+
+def clear_indicator_cache():
+    """
+    Clear the indicator cache to free memory.
+    Call this between WFO splits or when changing datasets.
+    """
+    global _indicator_cache
+    cache_size = len(_indicator_cache)
+    _indicator_cache = {}
+    logger.info(f"Cleared indicator cache with {cache_size} entries")
+
 
 
 def create_portfolio(close, long_entries, long_exits, short_entries, short_exits, params=None, data=None):
@@ -270,6 +351,15 @@ def evaluate_with_params(data, params):
     Returns:
         tuple: (portfolio object, performance stats dict)
     """
+    import time
+    import os
+    import threading
+    
+    eval_start_time = time.time()
+    proc_id = os.getpid()
+    thread_id = threading.get_ident()
+    print(f"[TIMING] evaluate_with_params START (PID={proc_id}, TID={thread_id})")
+    
     try:
         # First get necessary columns
         close = data.get('close', data.get('Close', None))
@@ -279,6 +369,7 @@ def evaluate_with_params(data, params):
         
         # 1. Calculate indicators
         print(f"DEBUG (Eval): Calculating indicators with params {params}")
+        indicators_start = time.time()
         
         # Create a temporary EdgeConfig with params for indicators calculation
         temp_config = type('EdgeConfig', (), {})()
@@ -294,16 +385,18 @@ def evaluate_with_params(data, params):
             # First try to get atr_window_sizing directly, fallback to atr_window, then default to 14
             atr_window_sizing = params.get('atr_window_sizing', params.get('atr_window', 14))
             setattr(temp_config, 'atr_window_sizing', atr_window_sizing)
-            print(f"DEBUG: Setting atr_window_sizing to {atr_window_sizing} for indicator calculation")
         
         # Add zone-related parameters
         if not hasattr(temp_config, 'use_zones'):
             setattr(temp_config, 'use_zones', params.get('use_zones', False))
         
-        # Generate indicators
-        indicators_df = indicators.add_indicators(data, temp_config)
+        # Calculate indicators (this is where a lot of time is spent) - now using cache
+        data_with_indicators = get_cached_indicators(data.copy(), params)
+        indicators_end = time.time()
+        print(f"[TIMING] Indicator calculation took {indicators_end - indicators_start:.3f} seconds (PID={proc_id}), cached={get_cache_key(params) in _indicator_cache}")
         
         # Extract required indicators
+        indicators_df = data_with_indicators
         rsi = indicators_df.get('rsi', None)
         bb_upper = indicators_df.get('bb_upper', None)
         bb_lower = indicators_df.get('bb_lower', None)
@@ -326,7 +419,8 @@ def evaluate_with_params(data, params):
         
         # 2. Generate Signals using the centralized signals integration module
         # This handles signal strictness levels and testing mode automatically
-        print(f"DEBUG (Eval): Generating signals using signals_integration module with params {params}")
+        signal_start = time.time()
+        print(f"[TIMING] Signal generation START (PID={proc_id})")
         
         # Import SignalStrictness here to avoid circular imports
         from scripts.strategies.refactored_edge.balanced_signals import SignalStrictness
@@ -342,6 +436,8 @@ def evaluate_with_params(data, params):
             price_in_supply_zone=price_in_supply_zone,
             params=params
         )
+        signal_end = time.time()
+        print(f"[TIMING] Signal generation took {signal_end - signal_start:.3f} seconds (PID={proc_id})")
         
         # Check if we have any entry signals, if not, retry with ULTRA_RELAXED mode for WFO
         if long_entries.sum() == 0 and short_entries.sum() == 0:
@@ -370,6 +466,8 @@ def evaluate_with_params(data, params):
             
         # 3. Create Portfolio using helper function
         # This ensures we only pass valid parameters
+        portfolio_start = time.time()
+        print(f"[TIMING] Portfolio creation START (PID={proc_id})")
         pf = create_portfolio(
             close=close,
             long_entries=long_entries,
@@ -379,9 +477,13 @@ def evaluate_with_params(data, params):
             params=params,
             data=data  # Pass the full dataset for position sizing
         )
+        portfolio_end = time.time()
+        print(f"[TIMING] Portfolio creation took {portfolio_end - portfolio_start:.3f} seconds (PID={proc_id})")
         
         # 4. Calculate Performance stats - with robust vectorbtpro compatibility handling
         # First check if trades exist using safe access patterns
+        stats_start = time.time()
+        print(f"[TIMING] Stats calculation START (PID={proc_id})")
         trade_count = 0
         try:
             # Different versions of vectorbtpro handle trades differently
@@ -393,7 +495,6 @@ def evaluate_with_params(data, params):
                 elif hasattr(pf.trades, '__len__'):
                     trade_count = len(pf.trades)
             else:
-                print("Portfolio has no 'trades' attribute, checking alternative metrics")
                 # Try other ways to determine if trades were executed
                 trade_count = 0
         except Exception as e:
@@ -463,10 +564,12 @@ def evaluate_with_params(data, params):
             except Exception as e:
                 print(f"Could not calculate additional return metrics: {e}")
             
-            # Debug print performance with safe access to metrics
+            stats_end = time.time()
+            print(f"[TIMING] Stats calculation took {stats_end - stats_start:.3f} seconds (PID={proc_id})")
+
+            # Summary metrics
             print(f"DEBUG: Return={stats.get('return', 0.0):.4f}, Sharpe={stats.get('sharpe', 0.0):.4f}, " 
-                  f"MaxDD={stats.get('max_drawdown', 0.0):.4f}, Trades={stats.get('trades', 0)}, " 
-                  f"WinRate={stats.get('win_rate', 0.0):.4f}")
+                  f"MaxDD={stats.get('max_drawdown', 0.0):.4f}, Trades={stats.get('trades', 0)}")
             
         except Exception as e:
             print(f"Error calculating performance metrics: {e}")
@@ -480,12 +583,17 @@ def evaluate_with_params(data, params):
                 'trades': trade_count,  # Use the previously determined trade count
                 'win_rate': 0.0
             }
+            stats_end = time.time()
+            print(f"[TIMING] Stats calculation failed after {stats_end - stats_start:.3f} seconds (PID={proc_id})")
         
+        eval_end_time = time.time()
+        total_time = eval_end_time - eval_start_time
+        print(f"[TIMING] evaluate_with_params END - Total time: {total_time:.3f} seconds (PID={proc_id})")
         return pf, stats
     
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        eval_end_time = time.time()
+        print(f"[TIMING] evaluate_with_params FAILED after {eval_end_time - eval_start_time:.3f} seconds (PID={proc_id})")
         print(f"Error in evaluate_with_params: {str(e)}")
         logger.error(f"Evaluation error: {str(e)}")
         # Return a failed result to ensure the optimization can continue

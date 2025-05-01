@@ -17,10 +17,59 @@ logger = logging.getLogger(__name__)
 
 class SignalStrictness(str, Enum):
     """Enum for signal strictness levels."""
-    STRICT = "strict"       # Original strict signals
-    BALANCED = "balanced"   # New balanced approach
-    RELAXED = "relaxed"     # Testing mode relaxed signals
+    STRICT = "strict"               # Original strict signals
+    BALANCED = "balanced"           # New balanced approach
+    MODERATELY_RELAXED = "moderately_relaxed"  # Intermediate level between balanced and relaxed
+    RELAXED = "relaxed"             # Testing mode relaxed signals
     ULTRA_RELAXED = "ultra_relaxed"  # Very lenient signals for WFO test runs
+
+
+def get_strictness_parameters(strictness: SignalStrictness):
+    """Get parameter adjustments based on strictness level.
+    
+    Args:
+        strictness: Signal strictness level
+        
+    Returns:
+        dict: Parameters specific to the strictness level
+    """
+    if strictness == SignalStrictness.STRICT:
+        return {
+            "trend_threshold_pct": 0.015,
+            "zone_influence": 0.3,
+            "min_hold_period": 3
+        }
+    elif strictness == SignalStrictness.BALANCED:
+        return {
+            "trend_threshold_pct": 0.0015,  # Even more relaxed than RELAXED mode (0.002)
+            "zone_influence": 0.95,        # Almost as relaxed as ULTRA_RELAXED (1.0)
+            "min_hold_period": 0           # No minimum hold period to maximize signal generation
+        }
+    elif strictness == SignalStrictness.MODERATELY_RELAXED:
+        return {
+            "trend_threshold_pct": 0.0018,  # Between BALANCED and RELAXED
+            "zone_influence": 0.92,        # Between BALANCED and RELAXED
+            "min_hold_period": 0           # No minimum hold period to maximize signal generation
+        }
+    elif strictness == SignalStrictness.RELAXED:
+        return {
+            "trend_threshold_pct": 0.002,
+            "zone_influence": 0.9,
+            "min_hold_period": 1
+        }
+    elif strictness == SignalStrictness.ULTRA_RELAXED:
+        return {
+            "trend_threshold_pct": 0.001,
+            "zone_influence": 1.0,
+            "min_hold_period": 0
+        }
+    else:
+        # Default to BALANCED if unknown
+        return {
+            "trend_threshold_pct": 0.005,
+            "zone_influence": 0.7,
+            "min_hold_period": 1
+        }
 
 
 def generate_balanced_signals(
@@ -35,10 +84,10 @@ def generate_balanced_signals(
     rsi_upper_threshold: float = 70,
     use_zones: bool = False,
     trend_strict: bool = False,  # Default to less strict trend filtering
-    min_hold_period: int = 1,    # Shorter minimum hold period for more flexibility
-    trend_threshold_pct: float = 0.015,  # Increased % distance from MA to be more forgiving
-    zone_influence: float = 0.7,  # Increased zone influence (0-1) for more signal generation
-    strictness: SignalStrictness = SignalStrictness.RELAXED  # Default to RELAXED mode for better signal generation
+    min_hold_period: int = None,  # Will be set based on strictness if None
+    trend_threshold_pct: float = None,  # Will be set based on strictness if None
+    zone_influence: float = None,  # Will be set based on strictness if None
+    strictness: SignalStrictness = SignalStrictness.BALANCED  # Default to BALANCED mode, will use relaxed if no signals found
 ) -> Tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
     """
     Generates entry and exit signals with configurable strictness for the Edge Multi-Factor strategy.
@@ -68,8 +117,19 @@ def generate_balanced_signals(
         tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
             Boolean Series for (long_entries, long_exits, short_entries, short_exits).
     """
+    # Get strictness-specific parameters, allowing explicitly passed values to override them
+    strictness_params = get_strictness_parameters(strictness)
+    
+    # Apply strictness parameters if not explicitly specified
+    if trend_threshold_pct is None:
+        trend_threshold_pct = strictness_params["trend_threshold_pct"]
+    if zone_influence is None:
+        zone_influence = strictness_params["zone_influence"]
+    if min_hold_period is None:
+        min_hold_period = strictness_params["min_hold_period"]
+    
     logger.info(f"Generating {strictness} signals with zone_influence={zone_influence}, "
-                f"min_hold_period={min_hold_period}")
+                f"min_hold_period={min_hold_period}, trend_threshold_pct={trend_threshold_pct}")
     
     # If strict or relaxed is specified, delegate to appropriate function
     if strictness == SignalStrictness.STRICT:
@@ -154,11 +214,19 @@ def generate_balanced_signals(
             relaxed_mode=True
         )
     
-    # Calculate Basic Indicator Conditions
-    rsi_oversold = rsi < rsi_lower_threshold
-    rsi_overbought = rsi > rsi_upper_threshold
-    price_below_bb = close < bb_lower
-    price_above_bb = close > bb_upper
+    # Calculate Basic Indicator Conditions with more relaxed thresholds for BALANCED and MODERATELY_RELAXED modes
+    if strictness in [SignalStrictness.BALANCED, SignalStrictness.MODERATELY_RELAXED]:
+        # Use much more relaxed conditions for these modes
+        rsi_oversold = rsi < (rsi_lower_threshold + 10)  # e.g., RSI < 40 instead of RSI < 30
+        rsi_overbought = rsi > (rsi_upper_threshold - 10)  # e.g., RSI > 60 instead of RSI > 70
+        price_below_bb = close < (bb_lower * 1.02)  # Allow price slightly above lower BB
+        price_above_bb = close > (bb_upper * 0.98)  # Allow price slightly below upper BB
+    else:
+        # Original conditions for other modes
+        rsi_oversold = rsi < rsi_lower_threshold
+        rsi_overbought = rsi > rsi_upper_threshold
+        price_below_bb = close < bb_lower
+        price_above_bb = close > bb_upper
     
     # Calculate volatility metrics for adaptive parameters
     bb_width_rel = (bb_upper - bb_lower) / close.replace(0, 0.0001)  # Relative BB width with zero protection
@@ -247,21 +315,38 @@ def generate_balanced_signals(
         # --- End Exit Zone Trigger Definition ---
             
         # Primary Entry Conditions (Combine basic indicator conditions)
-        primary_long_condition = rsi_oversold & price_below_bb 
-        primary_short_condition = rsi_overbought & price_above_bb
-        # Combine Primary conditions with Zone conditions based on influence
-        if use_zones:
-            if zone_influence >= 0.5: # Less Strict: Primary OR Zone
-                # Use pandas combine for proper boolean operations with Series
+        if strictness in [SignalStrictness.BALANCED, SignalStrictness.MODERATELY_RELAXED]:
+            # Use OR logic instead of AND for primary conditions to generate more signals
+            primary_long_condition = rsi_oversold | price_below_bb
+            primary_short_condition = rsi_overbought | price_above_bb
+            
+            # Combine Primary conditions with Zone conditions based on influence
+            if use_zones:
+                # Always use OR logic for zones in BALANCED and MODERATELY_RELAXED modes
                 long_entry_trigger = primary_long_condition.combine(zone_long_entry_condition, lambda x, y: x or y)
                 short_entry_trigger = primary_short_condition.combine(zone_short_entry_condition, lambda x, y: x or y)
-            else: # More Strict: Primary AND Zone
-                long_entry_trigger = primary_long_condition & zone_long_entry_condition & trend_filter_long
-                short_entry_trigger = primary_short_condition & zone_short_entry_condition & trend_filter_short
+            else:
+                # No trend filter for BALANCED and MODERATELY_RELAXED modes
+                long_entry_trigger = primary_long_condition
+                short_entry_trigger = primary_short_condition
         else:
-            # Zones not used
-            long_entry_trigger = primary_long_condition & trend_filter_long
-            short_entry_trigger = primary_short_condition & trend_filter_short
+            # Original AND logic for other modes
+            primary_long_condition = rsi_oversold & price_below_bb 
+            primary_short_condition = rsi_overbought & price_above_bb
+            
+            # Combine Primary conditions with Zone conditions based on influence
+            if use_zones:
+                if zone_influence >= 0.5: # Less Strict: Primary OR Zone
+                    # Use pandas combine for proper boolean operations with Series
+                    long_entry_trigger = primary_long_condition.combine(zone_long_entry_condition, lambda x, y: x or y)
+                    short_entry_trigger = primary_short_condition.combine(zone_short_entry_condition, lambda x, y: x or y)
+                else: # More Strict: Primary AND Zone
+                    long_entry_trigger = primary_long_condition & zone_long_entry_condition & trend_filter_long
+                    short_entry_trigger = primary_short_condition & zone_short_entry_condition & trend_filter_short
+            else:
+                # Zones not used
+                long_entry_trigger = primary_long_condition & trend_filter_long
+                short_entry_trigger = primary_short_condition & trend_filter_short
         # Generate Initial Entries
         initial_long_entries = pd.Series(long_entry_trigger, index=close.index)
         initial_short_entries = pd.Series(short_entry_trigger, index=close.index)
@@ -273,12 +358,22 @@ def generate_balanced_signals(
         zone_short_exit_trigger = pd.Series(False, index=close.index)
 
         # Primary Entry Conditions (Combine basic indicator conditions)
-        primary_long_condition = rsi_oversold & price_below_bb 
-        primary_short_condition = rsi_overbought & price_above_bb
-
-        # Combine Primary conditions with Zone conditions based on influence
-        long_entry_trigger = primary_long_condition & trend_filter_long
-        short_entry_trigger = primary_short_condition & trend_filter_short
+        if strictness in [SignalStrictness.BALANCED, SignalStrictness.MODERATELY_RELAXED]:
+            # Use OR logic instead of AND for primary conditions to generate more signals
+            primary_long_condition = rsi_oversold | price_below_bb
+            primary_short_condition = rsi_overbought | price_above_bb
+            
+            # Less restrictive trend filtering for BALANCED and MODERATELY_RELAXED modes
+            long_entry_trigger = primary_long_condition  # No trend filter
+            short_entry_trigger = primary_short_condition  # No trend filter
+        else:
+            # Original AND logic for other modes
+            primary_long_condition = rsi_oversold & price_below_bb 
+            primary_short_condition = rsi_overbought & price_above_bb
+            
+            # Original trend filtering
+            long_entry_trigger = primary_long_condition & trend_filter_long
+            short_entry_trigger = primary_short_condition & trend_filter_short
 
         # Generate Initial Entries
         initial_long_entries = pd.Series(long_entry_trigger, index=close.index)
