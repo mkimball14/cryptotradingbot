@@ -45,7 +45,7 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 - [ ] Generate final report and visualizations
 - [ ] Implement strategy improvements based on evaluation insights
 
-- [ ] Investigate why standard signal generation creates no signals across all test periods.
+- [x] Investigate why standard signal generation creates no signals across all test periods.
 - [ ] Expand parameter grid testing with focus on RSI thresholds (30-40 for entries, 60-70 for exits).
 - [ ] Test regime adaptation with datasets showing clear trending and ranging periods.
 - [ ] Fine-tune dynamic position sizing with different risk percentages and ATR multipliers.
@@ -56,12 +56,50 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
 
 ### 🔍 Critical Issues Identified
 
-1. **Signal Generation Problems:**
-   * Normal parameter settings generate insufficient or no signals across most data segments
-   * Strategy consistently falls back to ULTRA_RELAXED mode, which generates arbitrary signals
+1. **Signal Generation Problems:** ✅ (Resolved)
+   * ~~Normal parameter settings generate insufficient or no signals across most data segments~~ Fixed by implementing much less restrictive logic for BALANCED and MODERATELY_RELAXED modes
+   * ~~Strategy consistently falls back to ULTRA_RELAXED mode, which generates arbitrary signals~~ BALANCED and MODERATELY_RELAXED modes now generate more signals than RELAXED and ULTRA_RELAXED modes
    * Signal quality is poor with win rates of 29-52% across different segments
-   * Signal generation is heavily biased toward long signals (172 long vs 0 short)
-   * Type mismatches between float64 arrays and boolean values causing errors in signal logic
+
+### 🔄 Post-WFO Signal Improvement Plan (2025-05-01)
+
+1. **Signal Quality Enhancements:** (High Priority) ✅ (Partially Complete)
+   * [x] Refine BALANCED and MODERATELY_RELAXED strictness levels to be more selective while maintaining signal generation
+   * [x] Create and implement comprehensive test suite for strictness levels
+   * [x] Verify signal generation behavior across all strictness levels
+   * [ ] Add trending market filter to improve signal quality (critical based on WFO tests)
+   * [ ] Implement signal confidence scoring based on multiple indicator agreement
+   * [ ] Create signal quality metrics in diagnostics (win rate, risk/reward)
+   * [ ] Develop specialized parameter sets for trending vs ranging regimes
+   * [ ] Add unit tests to verify signal generation quality across all strictness levels
+
+2. **Regime Detection Improvements:** (Medium Priority) ✅ (Completed)
+   * [x] Fix enhanced regime detection to accurately identify market conditions
+   * [x] Add robust fallback mechanisms when enhanced detection fails
+   * [x] Fine-tune regime detection thresholds for better accuracy
+   * [x] Create unit tests for regime detection with different feature combinations
+   * [x] Implement comprehensive test suite to verify regime detection functionality
+
+3. **Code Maintenance:** (Medium Priority)
+   * [x] Replace `fillna(method='bfill')` with `bfill()` in indicators.py to address deprecation warning
+   * [x] Update date_range frequency parameter from '1H' to '1h' in run_signal_diagnostics.py
+   * [ ] Standardize time format handling across all modules
+   * [ ] Create comprehensive unit tests for utility functions
+   * [ ] Implement logging configuration with configurable verbosity levels
+   * [ ] Create standardized validation patterns for all configuration objects
+   * [ ] Apply consistent error handling across remaining modules
+   * [ ] Create comprehensive unit tests for indicator calculation functions
+   * [ ] Address ATR and regime data warnings in position sizing
+
+4. **Parameter Optimization Expansion:** (Critical Priority)
+   * [ ] Expand parameter search space for trending markets with focus on profitability metrics
+   * [ ] Implement WFO with larger parameter grid (small→medium→large) to find profitable setups
+   * [ ] Test market-specific parameter tuning for different crypto assets (BTC vs. ETH vs. SOL)
+   * [ ] Implement separate optimization for trending vs ranging periods
+   * [ ] Add specialized exit parameters for trending markets
+   * [ ] Test asymmetric parameters for long vs short signals
+   * [ ] Implement momentum filters to improve signal quality in trending markets
+   * [ ] Test entry delay logic to improve timing after signal generation
 
 2. **Missing/Incorrect Indicator Calculations:**
    * `add_adx` function was missing from indicators.py
@@ -69,12 +107,22 @@ This document tracks the immediate and upcoming tasks for improving the Walk-For
    * ATR data missing for position sizing calculations
    * Regime data missing or incorrect, causing defaults to be used
 
-3. **Strategy Performance Metrics:**
-   * Negative mean returns (-18.9%) in testing
-   * Very poor Sharpe ratio (-8.30)
-   * High max drawdown (21.1%)
+3. **Strategy Performance Metrics:** (Latest WFO Results)
+   * Negative mean returns (-9.65%) in testing with improved signal generation
+   * Poor Sharpe ratio (-9.51) despite signal quality improvements
+   * Moderate max drawdown (11.45%) across test periods
    * Anti-overfitting analysis shows poor robustness, stability, and consistency
-   * WFO runs now successfully complete but still show poor performance metrics
+   * Market predominantly trending (75%) during test periods
+   * WFO runs successfully execute end-to-end with improved signal generation logic
+
+4. **Exit Mechanism Improvements:** (Critical Priority)
+   * [ ] Implement ATR-based trailing stops that adapt to market volatility
+   * [ ] Add dynamic take-profit mechanisms with volatility-adjusted levels
+   * [ ] Implement time-based exits for stagnant trades with low momentum
+   * [ ] Add risk management with momentum acceleration detection
+   * [ ] Test various ATR multipliers for optimal stop placement
+   * [ ] Create regime-specific exit rules (faster exits in ranging markets)
+   * [ ] Implement profit target scaling based on volatility conditions
 
 ### ✅ Fixes Implemented
 

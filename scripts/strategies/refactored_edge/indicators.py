@@ -6,7 +6,8 @@ from pydantic import ValidationError
 import logging
 
 from .config import EdgeConfig 
-from .zones import find_pivot_zones, add_zone_signals 
+from .zones import find_pivot_zones, add_zone_signals
+from .enhanced_indicators import add_pattern_recognition, add_volatility_indicators
 
 logger = logging.getLogger(__name__)
 
@@ -111,12 +112,12 @@ def add_adx(ohlc_data: pd.DataFrame, window: int = 14, column_map: dict = None) 
         result['minus_di'] = talib.MINUS_DI(high, low, close, timeperiod=window)
         
         # Fill NaN values that occur at the beginning due to the window
-        result = result.fillna(method='bfill')
+        result = result.bfill()
         
         # Final check for any remaining NaN values
         if result.isnull().any().any():
             # If still have NaNs after bfill, use forward fill
-            result = result.fillna(method='ffill')
+            result = result.ffill()
             # If still have NaNs (beginning of data), fill with default values
             result = result.fillna({
                 'adx': 25.0,        # Default to threshold between trending/ranging
@@ -201,6 +202,39 @@ def add_indicators(ohlc_data: pd.DataFrame, config: EdgeConfig):
         logger.error(f"Error calculating standard indicators: {e}", exc_info=True)
         return None
 
+    # Check for enhanced regime detection with proper fallback handling
+    use_enhanced_regimes = getattr(config, 'use_enhanced_regimes', False)
+    logger.debug(f"Enhanced regime detection {'enabled' if use_enhanced_regimes else 'disabled'} (use_enhanced_regimes={use_enhanced_regimes})")
+    
+    # Add enhanced regime detection indicators if enabled
+    if use_enhanced_regimes:
+        try:
+            logger.debug("Adding enhanced regime detection indicators...")
+            
+            # Add pattern recognition indicators
+            pattern_min_strength = getattr(config, 'pattern_min_strength', 60)
+            pattern_df = add_pattern_recognition(ohlc_data, min_strength=pattern_min_strength)
+            
+            # Extract only the pattern columns we need for regime detection
+            pattern_columns = ['pattern_signal', 'pattern_strength', 'pattern_bullish', 'pattern_bearish']
+            for col in pattern_columns:
+                if col in pattern_df.columns:
+                    indicators_df[col] = pattern_df[col]
+            
+            # Add volatility indicators (VHF, Choppiness Index)
+            volatility_df = add_volatility_indicators(ohlc_data)
+            
+            # Extract only the volatility columns we need for regime detection
+            volatility_columns = ['vhf', 'choppiness']
+            for col in volatility_columns:
+                if col in volatility_df.columns:
+                    indicators_df[col] = volatility_df[col]
+            
+            logger.debug(f"Enhanced regime indicators added successfully. Columns: {volatility_columns + pattern_columns}")
+        except Exception as e:
+            logger.error(f"Error adding enhanced regime indicators: {e}", exc_info=True)
+            logger.warning("Proceeding without enhanced regime detection indicators")
+    
     # Check for use_zones with proper fallback handling using getattr
     use_zones = getattr(config, 'use_zones', False)
     logger.debug(f"Supply/Demand zone analysis {'enabled' if use_zones else 'disabled'} (use_zones={use_zones})")

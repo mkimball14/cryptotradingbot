@@ -2,6 +2,9 @@ import pandas as pd
 import numpy as np
 from enum import Enum
 from typing import Optional, Tuple, Dict, List, Union, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # Market Regime Detection Classes and Constants
@@ -234,15 +237,23 @@ def detect_market_regimes(data: pd.DataFrame) -> pd.DataFrame:
     This is a higher-level function that calculates necessary indicators if they don't exist
     in the input data and returns a dataframe with regime classifications.
     
+    Supports both basic regime detection using ADX and enhanced regime detection using
+    multiple indicators (VHF, Choppiness Index, ADX, pattern recognition).
+    
     Args:
         data (pd.DataFrame): DataFrame containing OHLCV price data. Should include columns:
                            'open', 'high', 'low', 'close', 'volume'
+                           For enhanced regime detection, should also include:
+                           'vhf', 'choppiness', 'pattern_strength', 'pattern_signal'
     
     Returns:
         pd.DataFrame: DataFrame with the original data plus additional columns for regime information.
-                     Includes 'regime' and potentially 'regime_details' columns.
+                     Includes 'regime', 'regime_simple', and potentially additional regime-related columns.
     """
     try:
+        # Check if the data already has enhanced regime detection columns
+        has_enhanced_regime_columns = all(col in data.columns for col in ['vhf', 'choppiness', 'pattern_strength', 'pattern_signal'])
+        
         # Ensure we have the required indicators to determine regimes
         if 'adx' not in data.columns:
             # Import the indicators module to calculate missing indicators
@@ -262,24 +273,58 @@ def detect_market_regimes(data: pd.DataFrame) -> pd.DataFrame:
                 atr_data = indicators.add_atr(data, atr_window)
                 data['atr'] = atr_data['atr']
         
-        # Determine market regimes using the advanced method
-        regimes = determine_market_regime_advanced(
-            adx=data['adx'],
-            plus_di=data['plus_di'],
-            minus_di=data['minus_di'],
-            atr=data['atr'],
-            close=data['close'],
-            high=data['high'],
-            low=data['low'],
-            volume=data.get('volume', None),  # Volume is optional
-            use_enhanced_classification=True
-        )
-        
-        # Add the regimes to the data
-        data['regime'] = regimes
-        
-        # Add simplified regimes (trending/ranging) for backward compatibility
-        data['regime_simple'] = simplify_regimes(regimes)
+        # Check if we can use enhanced regime detection
+        if has_enhanced_regime_columns:
+            # Import enhanced_indicators module for advanced regime detection
+            from scripts.strategies.refactored_edge.enhanced_indicators import detect_enhanced_regime
+            
+            logger.info("Using enhanced regime detection with multiple indicators")
+            
+            # Apply enhanced regime detection
+            enhanced_regime_data = detect_enhanced_regime(
+                data=data,
+                vhf_threshold=0.24,  # Default threshold for Vertical Horizontal Filter
+                choppy_threshold=61.8,  # Default threshold for Choppiness Index
+                adx_threshold=25.0,  # Default threshold for ADX
+                pattern_threshold=60  # Default threshold for pattern strength
+            )
+            
+            # Copy enhanced regime columns to our data
+            enhanced_regime_columns = [
+                'regime_enhanced', 'regime_enhanced_numeric', 'regime_strength',
+                'regime_transition_signal', 'regime_transition_direction'
+            ]
+            
+            for col in enhanced_regime_columns:
+                if col in enhanced_regime_data.columns:
+                    data[col] = enhanced_regime_data[col]
+            
+            # Set the standard regime column to match enhanced regime
+            data['regime'] = data['regime_enhanced']
+            data['regime_simple'] = np.where(data['regime_enhanced'] == 'TRENDING', 'trending', 'ranging')
+            
+        else:
+            # Use the standard market regime detection
+            logger.info("Using standard regime detection with ADX only")
+            
+            # Determine market regimes using the advanced method
+            regimes = determine_market_regime_advanced(
+                adx=data['adx'],
+                plus_di=data['plus_di'],
+                minus_di=data['minus_di'],
+                atr=data['atr'],
+                close=data['close'],
+                high=data['high'],
+                low=data['low'],
+                volume=data.get('volume', None),  # Volume is optional
+                use_enhanced_classification=True
+            )
+            
+            # Add the regimes to the data
+            data['regime'] = regimes
+            
+            # Add simplified regimes (trending/ranging) for backward compatibility
+            data['regime_simple'] = simplify_regimes(regimes)
         
         # Calculate percentage of time in each regime type
         regime_counts = data['regime_simple'].value_counts(normalize=True) * 100

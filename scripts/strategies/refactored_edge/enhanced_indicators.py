@@ -309,36 +309,46 @@ def adaptive_parameter_mapping(
             )
             
     elif regime == 'RANGING':
-        # In ranging markets, use mean-reversion settings
-        # 1. More relaxed entry criteria
+        # In ranging markets, use much more relaxed settings to capture mean-reversion opportunities
+        # 1. Much more relaxed entry criteria for ranging markets
         if 'rsi_entry_threshold' in adapted_params:
             adapted_params['rsi_entry_threshold'] = int(
-                min(40, adapted_params.get('rsi_entry_threshold', 30) + 5 * regime_strength)
+                min(45, adapted_params.get('rsi_entry_threshold', 30) + 10 * regime_strength)
             )
             
-        # 2. Tighter exit criteria to take profits quicker
+        # 2. Tighter exit criteria to take profits quicker in ranges
         if 'rsi_exit_threshold' in adapted_params:
             adapted_params['rsi_exit_threshold'] = int(
-                max(60, adapted_params.get('rsi_exit_threshold', 70) - 5 * regime_strength)
+                max(55, adapted_params.get('rsi_exit_threshold', 70) - 10 * regime_strength)
             )
             
-        # 3. Reduced trend following
+        # 3. Significantly reduced trend threshold for ranging markets
         if 'trend_threshold_pct' in adapted_params:
-            adapted_params['trend_threshold_pct'] = adapted_params.get('trend_threshold_pct', 0.01) * (1 - regime_strength * 0.5)
+            # Make trend threshold much smaller in ranging markets (up to 70% reduction)
+            adapted_params['trend_threshold_pct'] = adapted_params.get('trend_threshold_pct', 0.01) * (1 - regime_strength * 0.7)
+            # Ensure it's not too small
+            adapted_params['trend_threshold_pct'] = max(0.001, adapted_params['trend_threshold_pct'])
             
-        # 4. Increased zone influence in ranging markets
+        # 4. Maximized zone influence in ranging markets
         if 'zone_influence' in adapted_params:
+            # Increase zone influence significantly in ranging markets
             adapted_params['zone_influence'] = min(
-                0.9, 
-                adapted_params.get('zone_influence', 0.5) * (1 + regime_strength * 0.3)
+                0.95, 
+                adapted_params.get('zone_influence', 0.5) * (1 + regime_strength * 0.5)
             )
             
-        # 5. Shorter hold periods in ranges
+        # 5. Minimal hold periods in ranges for quicker trades
         if 'min_hold_period' in adapted_params:
             adapted_params['min_hold_period'] = max(
                 0,
-                int(adapted_params.get('min_hold_period', 2) * (1 - regime_strength * 0.5))
+                int(adapted_params.get('min_hold_period', 2) * (1 - regime_strength * 0.8))
             )
+            
+        # 6. Consider using more relaxed strictness in ranging markets
+        if 'signal_strictness' in adapted_params and regime_strength > 0.6:
+            from scripts.strategies.refactored_edge.balanced_signals import SignalStrictness
+            # Use more relaxed strictness for strong ranging markets
+            adapted_params['signal_strictness'] = SignalStrictness.MODERATELY_RELAXED
     
     # Handle transition periods (when a pattern suggests regime change is imminent)
     if transition_signal == 1:

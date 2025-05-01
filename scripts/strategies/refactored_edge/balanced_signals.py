@@ -16,22 +16,42 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 class SignalStrictness(str, Enum):
-    """Enum for signal strictness levels."""
-    STRICT = "strict"               # Original strict signals
-    BALANCED = "balanced"           # New balanced approach
-    MODERATELY_RELAXED = "moderately_relaxed"  # Intermediate level between balanced and relaxed
-    RELAXED = "relaxed"             # Testing mode relaxed signals
-    ULTRA_RELAXED = "ultra_relaxed"  # Very lenient signals for WFO test runs
+    """Enum for signal strictness levels.
+    
+    The strictness levels follow a logical progression from most selective (STRICT) to least selective (ULTRA_RELAXED).
+    Each level has specific parameter settings and signal generation logic tuned for its purpose:
+    
+    - STRICT: Most selective, uses strict conditions with AND logic, highest quality signals but fewest in number
+    - BALANCED: Moderately selective, uses mixed logic with trend alignment requirements, good balance of quality and quantity
+    - MODERATELY_RELAXED: Permissive with relaxed thresholds and OR logic, generates more signals than BALANCED
+    - RELAXED: Very permissive, further relaxes conditions for maximum signal generation during optimization
+    - ULTRA_RELAXED: Extremely permissive, minimal filtering, used primarily for testing and special cases
+    """
+    STRICT = "strict"               # Original strict signals with highest quality but fewest in number
+    BALANCED = "balanced"           # New balanced approach with good signal quality and sufficient quantity  
+    MODERATELY_RELAXED = "moderately_relaxed"  # More permissive than BALANCED, generates more signals
+    RELAXED = "relaxed"             # Very permissive, generates many signals with minimal filtering
+    ULTRA_RELAXED = "ultra_relaxed"  # Extremely permissive, used for testing and parameter searches
 
 
 def get_strictness_parameters(strictness: SignalStrictness):
-    """Get parameter adjustments based on strictness level.
+    """Get parameter presets for different strictness levels.
+    
+    The strictness levels follow a logical progression from most selective (STRICT) to most permissive (ULTRA_RELAXED):
+    - STRICT: Most selective, requires all conditions aligned, generates fewest signals but highest quality
+    - BALANCED: Moderately selective, requires trend alignment but uses OR logic for indicators
+    - MODERATELY_RELAXED: Permissive, generates many signals using pure OR logic for indicators
+    - RELAXED: Very permissive, further relaxes thresholds and conditions
+    - ULTRA_RELAXED: Most permissive, generates maximum signals with minimal filtering
+    
+    Each level has carefully tuned parameters for trend_threshold_pct, zone_influence, and min_hold_period
+    to create a logical progression of signal selectivity and quantity.
     
     Args:
-        strictness: Signal strictness level
+        strictness: The strictness level to use
         
     Returns:
-        dict: Parameters specific to the strictness level
+        Dict of parameter values for the specified strictness
     """
     if strictness == SignalStrictness.STRICT:
         return {
@@ -41,14 +61,14 @@ def get_strictness_parameters(strictness: SignalStrictness):
         }
     elif strictness == SignalStrictness.BALANCED:
         return {
-            "trend_threshold_pct": 0.0015,  # Even more relaxed than RELAXED mode (0.002)
-            "zone_influence": 0.95,        # Almost as relaxed as ULTRA_RELAXED (1.0)
-            "min_hold_period": 0           # No minimum hold period to maximize signal generation
+            "trend_threshold_pct": 0.003,   # More strict than MODERATELY_RELAXED but still less strict than RELAXED
+            "zone_influence": 0.85,        # More selective zone influence than MODERATELY_RELAXED
+            "min_hold_period": 1           # Add a minimum hold period for slightly higher quality trades
         }
     elif strictness == SignalStrictness.MODERATELY_RELAXED:
         return {
-            "trend_threshold_pct": 0.0018,  # Between BALANCED and RELAXED
-            "zone_influence": 0.92,        # Between BALANCED and RELAXED
+            "trend_threshold_pct": 0.0018,  # Very relaxed trend threshold
+            "zone_influence": 0.92,        # High zone influence for more signals
             "min_hold_period": 0           # No minimum hold period to maximize signal generation
         }
     elif strictness == SignalStrictness.RELAXED:
@@ -92,30 +112,52 @@ def generate_balanced_signals(
     """
     Generates entry and exit signals with configurable strictness for the Edge Multi-Factor strategy.
     
-    This balanced approach allows for more trades than the strict approach, but
-    with higher quality filters than the fully relaxed approach. Signal generation
-    strictness and other parameters can be adjusted to fine-tune the strategy.
+    This function implements a progressive strictness system with 5 distinct levels:
+    
+    1. STRICT: Highest quality signals, requires ALL conditions to align (RSI + BB + trend),
+       uses strict AND logic for entry criteria, generates fewest signals but highest quality
+    
+    2. BALANCED: High-quality signals with reasonable quantity, uses hybrid logic:
+       - Required trend alignment (trend_distance < 0 for longs, > 0 for shorts)
+       - OR logic between RSI and BB signals (either condition can trigger)
+       - AND logic with either trend or zone conditions
+       - Moderate thresholds (RSI at 35/65 vs 30/70 for STRICT)
+       - More selective than MODERATELY_RELAXED but still generates sufficient signals
+    
+    3. MODERATELY_RELAXED: More permissive than BALANCED:
+       - Pure OR logic between RSI and BB signals
+       - Very relaxed thresholds (RSI at 40/60)
+       - No trend filtering
+       - High zone influence (0.92)
+       - Generates many signals across different market conditions
+    
+    4. RELAXED: Very permissive with further relaxed constraints
+    
+    5. ULTRA_RELAXED: Extremely permissive, minimal filtering, maximum signals
+    
+    The function adapts signal generation logic, thresholds, and filtering based on the
+    selected strictness level, ensuring a logical progression from high quality/low quantity
+    to lower quality/high quantity as needed for different purposes (e.g., trading vs. optimization).
     
     Args:
-        close: Series of closing prices
-        rsi: Series of RSI values
-        bb_upper: Series of Bollinger Band upper values
-        bb_lower: Series of Bollinger Band lower values
-        trend_ma: Series of trend moving average values
+        close: Close price Series
+        rsi: RSI indicator Series
+        bb_upper: Upper Bollinger Band Series
+        bb_lower: Lower Bollinger Band Series
+        trend_ma: Trend moving average Series
         price_in_demand_zone: Boolean Series indicating if price is in a demand zone
         price_in_supply_zone: Boolean Series indicating if price is in a supply zone
-        rsi_lower_threshold: RSI threshold for oversold condition (default: 30)
-        rsi_upper_threshold: RSI threshold for overbought condition (default: 70)
-        use_zones: Whether to use zone filters (default: False)
-        trend_strict: Whether to strictly enforce trend filter (default: True)
-        min_hold_period: Minimum holding period in bars (default: 2)
-        trend_threshold_pct: Percentage threshold for trend determination (default: 0.01)
-        zone_influence: Strength of zone influence from 0-1 (default: 0.5)
-        strictness: Signal strictness level (strict, balanced, relaxed)
-
+        rsi_lower_threshold: RSI threshold for oversold conditions (default: 30)
+        rsi_upper_threshold: RSI threshold for overbought conditions (default: 70)
+        use_zones: Whether to use support/resistance zones for signal generation
+        trend_strict: Whether to strictly enforce trend alignment
+        min_hold_period: Minimum holding period for trades (can override with strictness)
+        trend_threshold_pct: Trend threshold percentage (can override with strictness)
+        zone_influence: How much influence zones have on signals (0-1) (can override with strictness)
+        strictness: Signal strictness level (STRICT, BALANCED, MODERATELY_RELAXED, RELAXED, ULTRA_RELAXED)
+    
     Returns:
-        tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
-            Boolean Series for (long_entries, long_exits, short_entries, short_exits).
+        Tuple of (long_entries, long_exits, short_entries, short_exits) as boolean Series
     """
     # Get strictness-specific parameters, allowing explicitly passed values to override them
     strictness_params = get_strictness_parameters(strictness)
@@ -214,13 +256,19 @@ def generate_balanced_signals(
             relaxed_mode=True
         )
     
-    # Calculate Basic Indicator Conditions with more relaxed thresholds for BALANCED and MODERATELY_RELAXED modes
-    if strictness in [SignalStrictness.BALANCED, SignalStrictness.MODERATELY_RELAXED]:
-        # Use much more relaxed conditions for these modes
+    # Calculate Basic Indicator Conditions with mode-specific thresholds
+    if strictness == SignalStrictness.MODERATELY_RELAXED:
+        # Very relaxed conditions for MODERATELY_RELAXED mode
         rsi_oversold = rsi < (rsi_lower_threshold + 10)  # e.g., RSI < 40 instead of RSI < 30
         rsi_overbought = rsi > (rsi_upper_threshold - 10)  # e.g., RSI > 60 instead of RSI > 70
         price_below_bb = close < (bb_lower * 1.02)  # Allow price slightly above lower BB
         price_above_bb = close > (bb_upper * 0.98)  # Allow price slightly below upper BB
+    elif strictness == SignalStrictness.BALANCED:
+        # More selective conditions for BALANCED mode, but still relaxed compared to STRICT
+        rsi_oversold = rsi < (rsi_lower_threshold + 5)  # e.g., RSI < 35 instead of RSI < 30
+        rsi_overbought = rsi > (rsi_upper_threshold - 5)  # e.g., RSI > 65 instead of RSI > 70
+        price_below_bb = close < (bb_lower * 1.01)  # Allow price slightly above lower BB but less than MODERATELY_RELAXED
+        price_above_bb = close > (bb_upper * 0.99)  # Allow price slightly below upper BB but less than MODERATELY_RELAXED
     else:
         # Original conditions for other modes
         rsi_oversold = rsi < rsi_lower_threshold
@@ -315,20 +363,39 @@ def generate_balanced_signals(
         # --- End Exit Zone Trigger Definition ---
             
         # Primary Entry Conditions (Combine basic indicator conditions)
-        if strictness in [SignalStrictness.BALANCED, SignalStrictness.MODERATELY_RELAXED]:
-            # Use OR logic instead of AND for primary conditions to generate more signals
+        if strictness == SignalStrictness.MODERATELY_RELAXED:
+            # MODERATELY_RELAXED uses pure OR logic to generate maximum signals
             primary_long_condition = rsi_oversold | price_below_bb
             primary_short_condition = rsi_overbought | price_above_bb
             
             # Combine Primary conditions with Zone conditions based on influence
             if use_zones:
-                # Always use OR logic for zones in BALANCED and MODERATELY_RELAXED modes
+                # Always use OR logic for zones in MODERATELY_RELAXED mode
                 long_entry_trigger = primary_long_condition.combine(zone_long_entry_condition, lambda x, y: x or y)
                 short_entry_trigger = primary_short_condition.combine(zone_short_entry_condition, lambda x, y: x or y)
             else:
-                # No trend filter for BALANCED and MODERATELY_RELAXED modes
+                # No trend filter for MODERATELY_RELAXED mode
                 long_entry_trigger = primary_long_condition
                 short_entry_trigger = primary_short_condition
+                
+        elif strictness == SignalStrictness.BALANCED:
+            # BALANCED mode uses a hybrid approach - at least one strong signal plus optional trend filter
+            # Either RSI must be in the zone OR price must be near BB AND there should be some trend alignment
+            primary_long_condition = (rsi_oversold | price_below_bb) & (trend_distance < 0)
+            primary_short_condition = (rsi_overbought | price_above_bb) & (trend_distance > 0)
+            
+            # For BALANCED, we want some zone influence but not total dependence
+            if use_zones:
+                # Mix of OR and AND logic - need primary condition AND either trend or zone
+                trend_or_zone_long = trend_filter_long.combine(zone_long_entry_condition, lambda x, y: x or y)
+                trend_or_zone_short = trend_filter_short.combine(zone_short_entry_condition, lambda x, y: x or y)
+                
+                long_entry_trigger = primary_long_condition & trend_or_zone_long
+                short_entry_trigger = primary_short_condition & trend_or_zone_short
+            else:
+                # With no zones, require some trend alignment for quality
+                long_entry_trigger = primary_long_condition & trend_filter_long
+                short_entry_trigger = primary_short_condition & trend_filter_short
         else:
             # Original AND logic for other modes
             primary_long_condition = rsi_oversold & price_below_bb 
